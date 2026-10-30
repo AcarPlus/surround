@@ -24,7 +24,7 @@ internal static class Sig
 
     public static double Db(double ratio) => 20 * Math.Log10(ratio);
 
-    /// <summary>Same mono signal on all 8 logical channels.</summary>
+    /// <summary>Same mono signal on all logical channels.</summary>
     public static float[] Logical(float[] mono)
     {
         var lg = new float[mono.Length * Channels.Count];
@@ -241,9 +241,9 @@ public class GlobalProcessorTests
         p.Update(ProcessingSettings.Build(new ProcessingConfig { Ambience = 1 }, Sig.Fs));
         const int n = Sig.Fs;
         var lg = new float[n * Channels.Count];
-        for (int f = 0; f < n; f++) { lg[f * 8 + Channels.FL] = 0.3f; lg[f * 8 + Channels.FR] = 0.1f; }
+        for (int f = 0; f < n; f++) { lg[f * Channels.Count + Channels.FL] = 0.3f; lg[f * Channels.Count + Channels.FR] = 0.1f; }
         p.Process(lg, n);
-        int last = (n - 1) * 8;
+        int last = (n - 1) * Channels.Count;
         // mid 0.2 kept, side 0.1 doubled
         Assert.Equal(0.4f, lg[last + Channels.FL], 4);
         Assert.Equal(0.0f, lg[last + Channels.FR], 4);
@@ -256,7 +256,7 @@ public class GlobalProcessorTests
         p.Update(ProcessingSettings.Build(new ProcessingConfig { Enabled = false, PreampDb = -12, BassBoostDb = 12 }, Sig.Fs));
         var x = Sig.Sine(60, 2000);
         var lg = Run(p, x);
-        for (int f = 0; f < x.Length; f++) Assert.Equal(x[f], lg[f * 8 + Channels.FL]);
+        for (int f = 0; f < x.Length; f++) Assert.Equal(x[f], lg[f * Channels.Count + Channels.FL]);
     }
 }
 
@@ -282,7 +282,7 @@ public class BassManagementTests
             int n = Sig.Fs;
             var mono = Sig.Sine(hz, n);
             var lg = new float[n * Channels.Count];
-            for (int f = 0; f < n; f++) lg[f * 8 + Channels.BL] = mono[f];
+            for (int f = 0; f < n; f++) lg[f * Channels.Count + Channels.BL] = mono[f];
             var bass = new float[n];
             bm.Process(lg, bass, n);
             var ring = new RingBuffer(n * 3, 3);
@@ -313,9 +313,9 @@ public class BassManagementTests
         var routes = new[] { new SpeakerRoute("a", 0, Row(Channels.FL), 0, false, 0) };
         var mixer = new SinkMixer(1, routes, Sig.Fs);
         int n = Sig.Fs / 2;
-        var lg = new float[n * 8];
+        var lg = new float[n * Channels.Count];
         var x = Sig.Sine(1000, n);
-        for (int f = 0; f < n; f++) lg[f * 8] = x[f];
+        for (int f = 0; f < n; f++) lg[f * Channels.Count] = x[f];
 
         double Level()
         {
@@ -339,9 +339,9 @@ public class BassManagementTests
         var routes = new[] { new SpeakerRoute("a", 0, Row(Channels.FL), 12, false, 0) };
         var mixer = new SinkMixer(1, routes, Sig.Fs, new PeakLimiter(1, Sig.Fs));
         int n = 9600;
-        var lg = new float[n * 8];
+        var lg = new float[n * Channels.Count];
         var x = Sig.Sine(200, n, 0.9f);
-        for (int f = 0; f < n; f++) lg[f * 8] = x[f];
+        for (int f = 0; f < n; f++) lg[f * Channels.Count] = x[f];
         var ring = new RingBuffer(n, 1);
         mixer.Process(lg, n, ring);
         var o = new float[n];

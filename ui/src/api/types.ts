@@ -1,7 +1,19 @@
 // Motor yapılandırmasını (C# Surround.Engine) yansıtan tipler.
 // Backend bağlandığında bu dosya tek doğruluk kaynağı olarak kalır.
 
-export type LogicalChannel = 'FL' | 'FR' | 'FC' | 'LFE' | 'BL' | 'BR' | 'SL' | 'SR'
+export type LogicalChannel =
+  | 'FL'
+  | 'FR'
+  | 'FC'
+  | 'LFE'
+  | 'BL'
+  | 'BR'
+  | 'SL'
+  | 'SR'
+  | 'TFL'
+  | 'TFR'
+  | 'TBL'
+  | 'TBR'
 
 /** Meter ve karışım listelerinde kullanılan sabit sıra. */
 export const LOGICAL_CHANNELS: readonly LogicalChannel[] = [
@@ -13,7 +25,32 @@ export const LOGICAL_CHANNELS: readonly LogicalChannel[] = [
   'BR',
   'SL',
   'SR',
+  'TFL',
+  'TFR',
+  'TBL',
+  'TBR',
 ]
+
+/** Üst şeritler (kaynaktan her zaman türetilir). */
+export const HEIGHT_CHANNELS: readonly LogicalChannel[] = ['TFL', 'TFR', 'TBL', 'TBR']
+
+export const isHeightChannel = (c: LogicalChannel): boolean => HEIGHT_CHANNELS.includes(c)
+
+/** Kullanıcıya gösterilen Türkçe kanal etiketleri. */
+export const CHANNEL_LABELS: Record<LogicalChannel, string> = {
+  FL: 'Ön sol',
+  FR: 'Ön sağ',
+  FC: 'Orta',
+  LFE: 'Sub (LFE)',
+  BL: 'Arka sol',
+  BR: 'Arka sağ',
+  SL: 'Yan sol',
+  SR: 'Yan sağ',
+  TFL: 'Üst ön sol',
+  TFR: 'Üst ön sağ',
+  TBL: 'Üst arka sol',
+  TBR: 'Üst arka sağ',
+}
 
 export type SourceMode = 'loopback' | 'capture'
 
@@ -52,6 +89,10 @@ export interface Speaker {
   highPassHz?: number
   /** Dahili sub / gerçek sub: kesilen bası ve LFE'yi alır. */
   bassReceiver?: boolean
+  /** Yalnızca arayüz: rol kimliği (bkz. lib/roles.ts, docs/duzen.md). Motor yok sayar. */
+  role?: string
+  /** Üst (tavan/yükseklik) hoparlörü; "Özel (haritadan)" rolünde üst şeritleri seçtirir. Motor yok sayar. */
+  elevated?: boolean
 }
 
 export type DeviceKind = 'local' | 'network' | 'multichannel'
@@ -145,16 +186,21 @@ export interface UpmixOptions {
   surroundDb: number
   /** LFE üret (yalnızca LFE'ye atanmış hoparlörde duyulur). */
   lfeEnabled: boolean
+  /** Üst şerit (TFL/TFR/TBL/TBR) seviyesi, dB -24..+6. */
+  heightDb: number
 }
 
 export const UPMIX_DB_MIN = -12
 export const UPMIX_DB_MAX = 6
+export const HEIGHT_DB_MIN = -24
+export const HEIGHT_DB_MAX = 6
 
 export const defaultUpmixOptions = (): UpmixOptions => ({
   mode: 'film',
   centerDb: 0,
   surroundDb: 0,
   lfeEnabled: true,
+  heightDb: -3,
 })
 
 const clampDb = (v: unknown, d: number) =>
@@ -169,6 +215,10 @@ export function normalizeUpmixOptions(u?: Partial<UpmixOptions> | null): UpmixOp
     centerDb: clampDb(u.centerDb, d.centerDb),
     surroundDb: clampDb(u.surroundDb, d.surroundDb),
     lfeEnabled: typeof u.lfeEnabled === 'boolean' ? u.lfeEnabled : d.lfeEnabled,
+    heightDb:
+      typeof u.heightDb === 'number' && Number.isFinite(u.heightDb)
+        ? Math.min(HEIGHT_DB_MAX, Math.max(HEIGHT_DB_MIN, u.heightDb))
+        : d.heightDb,
   }
 }
 
@@ -196,5 +246,5 @@ export interface Config {
   processing?: Processing
 }
 
-/** Kaynak kanal seviyeleri, dBFS (-90 .. 0). */
+/** Kaynak kanal seviyeleri, dBFS (-90 .. 0). Eski motorlarda üst şeritler eksik olabilir; okurken `?? -90` kullan. */
 export type LevelFrame = Record<LogicalChannel, number>

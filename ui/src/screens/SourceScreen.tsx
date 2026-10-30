@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api/client'
 import {
+  CHANNEL_LABELS,
+  HEIGHT_CHANNELS,
+  HEIGHT_DB_MAX,
+  HEIGHT_DB_MIN,
   LOGICAL_CHANNELS,
   UPMIX_DB_MAX,
   UPMIX_DB_MIN,
@@ -28,6 +32,16 @@ import { fmt, fmtSigned } from '../lib/format'
 import { upmixStateLabel } from '../lib/upmix'
 
 const MIN_DB = -60
+
+const FLOOR_CHANNELS = LOGICAL_CHANNELS.filter((c) => !HEIGHT_CHANNELS.includes(c))
+
+/** Hoparlörlerin satırında geçen kanallar (üst şeritlerin etkin olup olmadığını belirler). */
+function useUsedLanes(): Set<LogicalChannel> {
+  const speakers = useStore((s) => s.speakers)
+  const used = new Set<LogicalChannel>()
+  for (const sp of speakers) for (const c of LOGICAL_CHANNELS) if ((sp.source[c] ?? 0) > 0) used.add(c)
+  return used
+}
 
 const emptyFrame = (): LevelFrame =>
   Object.fromEntries(LOGICAL_CHANNELS.map((c) => [c, -90])) as LevelFrame
@@ -141,6 +155,8 @@ function UpmixStateBadge() {
 function UpmixControls() {
   const o = useStore((s) => s.upmixOptions)
   const set = useStore((s) => s.setUpmixOptions)
+  const used = useUsedLanes()
+  const heightUsed = HEIGHT_CHANNELS.some((c) => used.has(c))
   const db = (v: number) => `${v === 0 ? '0,0' : fmtSigned(v, 1).replace('.', ',')} dB`
   return (
     <div className="mt-4 space-y-4">
@@ -178,6 +194,21 @@ function UpmixControls() {
         step={0.5}
         display={db(o.surroundDb)}
         onChange={(surroundDb) => set({ surroundDb })}
+      />
+      <BigSlider
+        label="Yükseklik seviyesi"
+        hint={
+          heightUsed
+            ? 'Üst hoparlörlere (TFL/TFR/TBL/TBR) giden ortam sinyalinin seviyesi.'
+            : 'Üst hoparlör yok; odada bir hoparlöre “Üst …” rolü verince etkinleşir.'
+        }
+        value={o.heightDb}
+        min={HEIGHT_DB_MIN}
+        max={HEIGHT_DB_MAX}
+        step={0.5}
+        display={db(o.heightDb)}
+        disabled={!heightUsed}
+        onChange={(heightDb) => set({ heightDb })}
       />
       <label className="flex items-start justify-between gap-3">
         <span>
@@ -346,13 +377,15 @@ function Meters() {
   const runState = useStore((s) => s.runState)
   const [levels, setLevels] = useState<LevelFrame>(emptyFrame)
   const peaks = useRef<Record<string, { v: number; t: number }>>({})
+  const used = useUsedLanes()
 
   useEffect(() => {
     return api.onLevels((frame) => {
       const now = performance.now()
       for (const c of LOGICAL_CHANNELS) {
+        const v = frame[c] ?? -90
         const p = peaks.current[c]
-        if (!p || frame[c] >= p.v || now - p.t > 1200) peaks.current[c] = { v: frame[c], t: now }
+        if (!p || v >= p.v || now - p.t > 1200) peaks.current[c] = { v, t: now }
       }
       setLevels(frame)
     })
@@ -362,9 +395,21 @@ function Meters() {
     <div>
       <SectionTitle>Kanal seviyeleri</SectionTitle>
       <div className="flex h-[300px] items-stretch justify-between gap-2.5 rounded border border-line bg-bg/40 px-4 pb-3 pt-4">
-        {LOGICAL_CHANNELS.map((c) => (
-          <Meter key={c} ch={c} db={levels[c]} peak={peaks.current[c]?.v ?? -90} />
+        {FLOOR_CHANNELS.map((c) => (
+          <Meter key={c} ch={c} db={levels[c] ?? -90} peak={peaks.current[c]?.v ?? -90} />
         ))}
+        {/* Üst şeritler: türetilir; hiçbir hoparlör kullanmıyorsa soluk. */}
+        <div className="flex min-w-0 flex-[4] items-stretch justify-between gap-2.5 border-l border-line pl-2.5" title="Üst şeritler">
+          {HEIGHT_CHANNELS.map((c) => (
+            <Meter
+              key={c}
+              ch={c}
+              db={levels[c] ?? -90}
+              peak={peaks.current[c]?.v ?? -90}
+              dim={!used.has(c)}
+            />
+          ))}
+        </div>
       </div>
       <p className="mt-2 text-xs text-faint">
         {runState === 'running' ? 'Örnek veri · canlı' : 'Başlat’a basınca seviyeler hareket eder (örnek veri).'}
@@ -373,12 +418,15 @@ function Meters() {
   )
 }
 
-function Meter({ ch, db, peak }: { ch: LogicalChannel; db: number; peak: number }) {
+function Meter({ ch, db, peak, dim }: { ch: LogicalChannel; db: number; peak: number; dim?: boolean }) {
   const pos = (v: number) => Math.min(1, Math.max(0, (v - MIN_DB) / -MIN_DB))
   const hot = db > -6
   const warm = db > -18
   return (
-    <div className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
+    <div
+      className={cx('flex min-w-0 flex-1 flex-col items-center gap-1.5', dim && 'opacity-35')}
+      title={dim ? `${CHANNEL_LABELS[ch]}: hiçbir hoparlör kullanmıyor` : CHANNEL_LABELS[ch]}
+    >
       <span className="num text-[11px] text-muted">{db <= -89 ? '−∞' : fmt(db, 0)}</span>
       <div className="relative w-full max-w-[34px] flex-1 overflow-hidden rounded-[3px] bg-raised">
         {/* Bölme çizgileri */}

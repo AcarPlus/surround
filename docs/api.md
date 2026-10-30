@@ -13,7 +13,7 @@ mühendislik alanları değiştiyse yeniden başlatılır (oda/konum gibi arayü
 
 ## Tipler (`ui/src/api/types.ts`)
 Motor yapılandırmasını yansıtır: `Source`, `Output`, `Speaker`, `Device`, `SinkStatus`, `Room`,
-`Config` (= source, upmix, upmixOptions, outputs, speakers, room, processing), `EngineInfo` ve `LogicalChannel` (FL FR FC LFE BL BR SL SR).
+`Config` (= source, upmix, upmixOptions, outputs, speakers, room, processing), `EngineInfo` ve `LogicalChannel` (FL FR FC LFE BL BR SL SR TFL TFR TBL TBR; üst şeritler için bkz. docs/duzen.md).
 Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, "ön" planda yukarıdadır.
 `deviceChannel` 1 tabanlıdır.
 
@@ -26,7 +26,7 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 | `getStatus()` | Çıkış başına `SinkStatus[]` (çalışmıyorsa boş) |
 | `playTone(deviceId, channel)` | Test sesi |
 | `onStatus(cb)` | Çalışırken ~250 ms'de bir durum (köprüde); unsubscribe döner |
-| `onLevels(cb)` | Mantıksal kanal tepe seviyeleri (dBFS, `LevelFrame`), ~20 Hz; motorda upmix ve genel işleme sonrası, kanal katlamadan önce ölçülür |
+| `onLevels(cb)` | Mantıksal kanal tepe seviyeleri (dBFS, `LevelFrame`: kanal adı → dB nesnesi), ~20 Hz; motorda upmix ve genel işleme sonrası, kanal katlamadan önce ölçülür. Biçim aynı, artık 12 anahtar (FL..SR + TFL TFR TBL TBR); hiçbir hoparlörün kullanmadığı üst şerit -90 gösterir |
 | `onEngine(cb)` | `EngineInfo` (`upmix: "off" \| "stereo" \| "native"`, `sourceChannels`, `sourceRate`, `upmixLatencyMs`), durumla aynı sıklıkta; durunca bir kez `"off"` |
 | `onEngineError(cb)` | Çalışma sırasında motor hataları (akış kopması, test sesi hatası vb.) |
 

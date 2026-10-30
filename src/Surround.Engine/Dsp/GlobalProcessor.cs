@@ -65,8 +65,9 @@ public sealed class ProcessingSettings
 }
 
 /// <summary>
-/// Global "make cheap speakers sound good" chain on interleaved logical 7.1 frames, in place:
+/// Global "make cheap speakers sound good" chain on interleaved logical frames, in place:
 /// preamp → 10-band EQ → bass boost → clarity → linked compressor (dynamic boost) → M/S ambience.
+/// The 7.1 lanes are always processed; height lanes only when the layout plays them (they are silent otherwise).
 /// Single audio thread calls <see cref="Process"/>; any thread may call <see cref="Update"/>.
 /// Gains are smoothed per sample so live changes do not click; filter coefficients swap at buffer boundaries.
 /// </summary>
@@ -78,12 +79,20 @@ public sealed class GlobalProcessor
     private volatile ProcessingSettings _settings = ProcessingSettings.Bypass;
     private ProcessingSettings? _applied;
     private readonly double[] _z = new double[Ch * ProcessingSettings.StageCount * 2];
+    private readonly int[] _lanes;
+    private readonly bool _top, _topBack;
     private readonly float _atk, _rel, _smooth;
     private float _preamp = 1f, _width = 1f, _makeup, _grDb;
     private bool _active;
 
-    public GlobalProcessor(int sampleRate)
+    /// <param name="used">Per logical channel; height lanes not marked are skipped. Null = all lanes.</param>
+    public GlobalProcessor(int sampleRate, IReadOnlyList<bool>? used = null)
     {
+        _lanes = Enumerable.Range(0, Ch)
+            .Where(c => !Channels.IsHeight(c) || used is null || (c < used.Count && used[c]))
+            .ToArray();
+        _top = _lanes.Contains(Channels.TFL) && _lanes.Contains(Channels.TFR);
+        _topBack = _lanes.Contains(Channels.TBL) && _lanes.Contains(Channels.TBR);
         _atk = Coef(sampleRate, 0.005);
         _rel = Coef(sampleRate, 0.150);
         _smooth = Coef(sampleRate, 0.030);
@@ -98,7 +107,7 @@ public sealed class GlobalProcessor
         var s = _settings;
         if (!ReferenceEquals(s, _applied))
         {
-            for (int c = 0; c < Ch; c++)
+            foreach (int c in _lanes)
                 BiquadCascade.ClearIdle(s.Stages, _z.AsSpan(c * ProcessingSettings.StageCount * 2, ProcessingSettings.StageCount * 2));
             if (!s.Enabled && _active) { Array.Clear(_z); _preamp = 1f; _width = 1f; _makeup = 0; _grDb = 0; }
             _applied = s;
@@ -109,14 +118,16 @@ public sealed class GlobalProcessor
         bool eq = s.HasEq;
         float invRatio = 1f / s.Ratio, slope = 1f - invRatio;
         int zStride = ProcessingSettings.StageCount * 2;
+        var lanes = _lanes;
 
         for (int f = 0; f < frames; f++)
         {
             int b = f * Ch;
             _preamp = Approach(_preamp, s.Preamp, _smooth);
             float peak = 0f;
-            for (int c = 0; c < Ch; c++)
+            for (int i = 0; i < lanes.Length; i++)
             {
+                int c = lanes[i];
                 float x = buf[b + c] * _preamp;
                 if (eq) x = (float)BiquadCascade.Process(s.Stages, _z.AsSpan(c * zStride, zStride), x);
                 buf[b + c] = x;
@@ -134,7 +145,7 @@ public sealed class GlobalProcessor
                     : slope * (over + KneeDb / 2) * (over + KneeDb / 2) / (2 * KneeDb);
                 _grDb += (target - _grDb) * (target > _grDb ? _atk : _rel);
                 float g = MathF.Exp((_makeup - _grDb) * 0.11512925f); // ln(10)/20
-                for (int c = 0; c < Ch; c++) buf[b + c] *= g;
+                for (int i = 0; i < lanes.Length; i++) buf[b + lanes[i]] *= g;
             }
 
             _width = Approach(_width, s.Width, _smooth);
@@ -143,6 +154,8 @@ public sealed class GlobalProcessor
                 Widen(buf, b + Channels.FL, b + Channels.FR, _width);
                 Widen(buf, b + Channels.BL, b + Channels.BR, _width);
                 Widen(buf, b + Channels.SL, b + Channels.SR, _width);
+                if (_top) Widen(buf, b + Channels.TFL, b + Channels.TFR, _width);
+                if (_topBack) Widen(buf, b + Channels.TBL, b + Channels.TBR, _width);
             }
         }
     }

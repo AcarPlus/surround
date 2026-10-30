@@ -7,20 +7,20 @@ public enum UpmixState
 {
     /// <summary>Upmix switched off (or not applicable to the source).</summary>
     Off = 0,
-    /// <summary>Content is effectively stereo; FL/FR are upmixed to 7.1.</summary>
+    /// <summary>Content is effectively stereo; FL/FR are upmixed to 7.1 (plus the used height lanes).</summary>
     Stereo = 1,
     /// <summary>Real multichannel content; channels pass through unchanged.</summary>
     Native = 2,
 }
 
-/// <summary>Stereo (logical FL/FR) to logical 7.1 upmixer. Single audio thread; <see cref="Update"/> from any thread.</summary>
+/// <summary>Stereo (logical FL/FR) to logical 7.1 + height lanes upmixer. Single audio thread; <see cref="Update"/> from any thread.</summary>
 public interface IStereoUpmixer
 {
     /// <summary>Delay of the front (FL/FC/FR) outputs relative to the input, in frames.</summary>
     int LatencyFrames { get; }
 
     /// <summary>
-    /// Reads FL/FR from interleaved logical frames <paramref name="input"/> and writes all 8 channels of
+    /// Reads FL/FR from interleaved logical frames <paramref name="input"/> and writes all <see cref="Channels.Count"/> channels of
     /// <paramref name="output"/> (same layout). The two spans must not overlap.
     /// </summary>
     void Process(ReadOnlySpan<float> input, Span<float> output, int frames);
@@ -31,13 +31,13 @@ public interface IStereoUpmixer
 /// <summary>
 /// Which logical channels the speaker layout actually plays (from <see cref="ChannelFold"/>'s used set). The upmixers
 /// steer only onto available channels, so coherent sources are never summed by the fold (+3 dB errors), and decide
-/// whether the ambience needs complementary side/back pairs.
+/// whether the ambience needs complementary side/back pairs. Height lanes are derived only when some speaker plays them.
 /// </summary>
 public sealed class UpmixLayout
 {
     private readonly bool[] _available;
 
-    /// <param name="available">Per logical channel (FL..SR); LFE is ignored.</param>
+    /// <param name="available">Per logical channel (FL..TBR; a shorter list leaves the rest unavailable); LFE is ignored.</param>
     /// <param name="lfeAllowed">Some speaker maps LFE explicitly, so a derived LFE is heard (and not only folded).</param>
     public UpmixLayout(IReadOnlyList<bool> available, bool lfeAllowed)
     {
@@ -51,6 +51,7 @@ public sealed class UpmixLayout
     public bool Has(int channel) => _available[channel];
     public bool LfeAllowed { get; }
     public bool AnySurround => Has(Channels.SL) || Has(Channels.BL) || Has(Channels.SR) || Has(Channels.BR);
+    public bool AnyHeight => Has(Channels.TFL) || Has(Channels.TFR) || Has(Channels.TBL) || Has(Channels.TBR);
 }
 
 /// <summary>Immutable, linear form of the live-updatable <see cref="UpmixOptions"/> fields.</summary>
@@ -59,15 +60,22 @@ public sealed class UpmixSettings
     public float CenterGain { get; private init; } = 1f;
     public float SurroundGain { get; private init; } = 1f;
     public float LfeGain { get; private init; } = 1f;
+    public float HeightGain { get; private init; } = DefaultHeightGain;
+
+    private static readonly float DefaultHeightGain = (float)Math.Pow(10, UpmixOptions.DefaultHeightDb / 20);
 
     public static UpmixSettings Default { get; } = new();
 
     public static UpmixSettings Build(UpmixOptions? o)
     {
         if (o is null) return Default;
-        static float G(double db) =>
-            (float)Math.Pow(10, (double.IsFinite(db) ? Math.Clamp(db, UpmixOptions.MinDb, UpmixOptions.MaxDb) : 0) / 20);
-        return new UpmixSettings { CenterGain = G(o.CenterDb), SurroundGain = G(o.SurroundDb), LfeGain = o.LfeEnabled ? 1f : 0f };
+        static float G(double db, double min = UpmixOptions.MinDb, double max = UpmixOptions.MaxDb, double fallback = 0) =>
+            (float)Math.Pow(10, (double.IsFinite(db) ? Math.Clamp(db, min, max) : fallback) / 20);
+        return new UpmixSettings
+        {
+            CenterGain = G(o.CenterDb), SurroundGain = G(o.SurroundDb), LfeGain = o.LfeEnabled ? 1f : 0f,
+            HeightGain = G(o.HeightDb, UpmixOptions.MinHeightDb, UpmixOptions.MaxHeightDb, UpmixOptions.DefaultHeightDb),
+        };
     }
 }
 

@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore, LISTENER_ID } from '../store/useStore'
-import { computeAuto, primaryChannel, type PresetId } from '../lib/geometry'
+import { computeAuto, primaryChannel } from '../lib/geometry'
+import { countLayout, formatLayout, parseLayout } from '../lib/layout'
+import { effectiveRole, roleLabel } from '../lib/roles'
 import { deviceColorVar } from '../lib/colors'
 import { fmt } from '../lib/format'
 import { Button, NumberField, cx } from '../components/ui'
 import { IconPlus, IconWand } from '../components/icons'
 
 const PAD = 40
+const QUICK_LAYOUTS = ['2.0', '3.1', '4.1', '5.1', '7.1', '5.1.2', '7.1.4']
 
 interface Drag {
   id: string
@@ -21,12 +24,11 @@ export function RoomScreen() {
   const auto = useStore((s) => s.auto)
   const selection = useStore((s) => s.selection)
   const lowLatency = useStore((s) => s.lowLatency)
-  const preset = useStore((s) => s.preset)
   const select = useStore((s) => s.select)
   const setRoomSize = useStore((s) => s.setRoomSize)
   const moveSpeaker = useStore((s) => s.moveSpeaker)
   const moveListener = useStore((s) => s.moveListener)
-  const setPreset = useStore((s) => s.setPreset)
+  const applyLayout = useStore((s) => s.applyLayout)
   const addSpeaker = useStore((s) => s.addSpeaker)
   const autoAll = useStore((s) => s.autoAll)
 
@@ -35,6 +37,23 @@ export function RoomScreen() {
   const drag = useRef<Drag | null>(null)
   const [size, setSize] = useState({ w: 800, h: 560 })
   const [hover, setHover] = useState<string | null>(null)
+  const currentLabel = useMemo(() => formatLayout(countLayout(speakers)), [speakers])
+  const [layoutText, setLayoutText] = useState(currentLabel)
+  const [layoutErr, setLayoutErr] = useState<string | null>(null)
+  useEffect(() => {
+    setLayoutText(currentLabel)
+    setLayoutErr(null)
+  }, [currentLabel])
+
+  const submitLayout = (text: string) => {
+    const r = parseLayout(text)
+    if (!r.ok) {
+      setLayoutErr(r.error)
+      return
+    }
+    setLayoutErr(null)
+    applyLayout(r.spec)
+  }
 
   useEffect(() => {
     const el = wrapRef.current
@@ -116,15 +135,47 @@ export function RoomScreen() {
             onChange={(v) => setRoomSize(room.widthM, v)}
           />
         </div>
-        <div className="flex items-center gap-1.5">
-          <span className="mr-1 text-xs text-muted">Yerleşim</span>
-          {(['2.0', '5.1', '7.1'] as PresetId[]).map((p) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-xs text-muted">Düzen</span>
+          <div className="relative">
+            <input
+              aria-label="Düzen (X.Y veya X.Y.Z)"
+              title={layoutErr ?? 'X.Y veya X.Y.Z: zemin, sub, üst hoparlör sayısı (örn. 5.1.2). Enter ile uygula.'}
+              aria-invalid={layoutErr ? true : undefined}
+              value={layoutText}
+              placeholder="5.1.2"
+              spellCheck={false}
+              onChange={(e) => {
+                setLayoutText(e.target.value)
+                setLayoutErr(null)
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitLayout(layoutText)
+              }}
+              className={cx(
+                'num h-7 w-[76px] rounded border bg-surface px-2 text-center text-[13px] outline-none focus:border-accent',
+                layoutErr ? 'border-err' : 'border-line-strong',
+              )}
+            />
+            {layoutErr && (
+              <span
+                role="alert"
+                className="absolute left-0 top-full z-30 mt-1 w-max max-w-[260px] rounded border border-err/50 bg-raised px-2 py-1 text-xs text-err shadow-[var(--shadow)]"
+              >
+                {layoutErr}
+              </span>
+            )}
+          </div>
+          <Button size="sm" onClick={() => submitLayout(layoutText)} title="Yazılan düzeni uygula">
+            Uygula
+          </Button>
+          {QUICK_LAYOUTS.map((p) => (
             <Button
               key={p}
               size="sm"
-              variant={preset === p ? 'primary' : 'default'}
-              onClick={() => setPreset(p)}
-              title={`${p} yerleşimini 2 m yarıçapta uygula`}
+              variant={currentLabel === p ? 'primary' : 'default'}
+              onClick={() => submitLayout(p)}
+              title={`${p} düzenini uygula`}
             >
               {p}
             </Button>
@@ -284,6 +335,14 @@ export function RoomScreen() {
                 <rect x={-5} y={-6} width={10} height={12} rx={1.5} fill="none" stroke={color} strokeWidth={1.5} />
                 <circle cy={2} r={2.4} fill={color} />
                 <circle cy={-3} r={1} fill={color} />
+                {s.elevated && (
+                  <g transform="translate(13 -16)">
+                    <rect x={-13} y={-7.5} width={26} height={15} rx={3} fill="rgb(var(--accent))" />
+                    <text y={3.5} textAnchor="middle" fontSize={9.5} fontWeight={700} fill="rgb(var(--accent-fg))">
+                      Üst
+                    </text>
+                  </g>
+                )}
                 <text y={30} textAnchor="middle" fontSize={11} fontWeight={600} fill="rgb(var(--fg))" stroke="rgb(var(--surface))" strokeWidth={3} paintOrder="stroke">
                   {s.name}
                 </text>
@@ -306,13 +365,14 @@ export function RoomScreen() {
             className="pointer-events-none absolute z-10 w-[188px] rounded-md border border-line-strong bg-raised p-2.5 text-xs shadow-[var(--shadow)]"
             style={{
               left: Math.min(size.w - 200, px(hovered.x) + 24),
-              top: Math.max(8, Math.min(size.h - 130, py(hovered.y) - 40)),
+              top: Math.max(8, Math.min(size.h - 150, py(hovered.y) - 40)),
             }}
           >
             <div className="mb-1.5 flex items-center justify-between gap-2">
               <span className="truncate font-semibold">{hovered.name}</span>
               <span className="text-faint">{auto[hovered.id]?.delay && auto[hovered.id]?.gain ? 'Otomatik' : 'Manuel'}</span>
             </div>
+            <Row k="Rol" v={roleLabel(effectiveRole(hovered))} />
             <Row k="Mesafe" v={`${fmt(byId[hovered.id]?.distance ?? 0)} m`} />
             <Row k="Gecikme" v={`${fmt(hovered.delayMs)} ms`} />
             <Row k="Kazanç" v={`${fmt(hovered.gainDb, 1)} dB`} />
@@ -338,7 +398,7 @@ export function RoomScreen() {
         </div>
         {speakers.length === 0 && (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-muted">
-            Hoparlör yok. Bir yerleşim seçin veya “Hoparlör ekle”ye basın.
+            Hoparlör yok. Bir düzen yazın (örn. 5.1.2) veya “Hoparlör ekle”ye basın.
           </div>
         )}
       </div>

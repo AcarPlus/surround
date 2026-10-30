@@ -7,15 +7,16 @@ describe('upmixOptions', () => {
     expect(normalizeUpmixOptions(undefined)).toEqual(defaultUpmixOptions())
     expect(normalizeUpmixOptions({ mode: 'game' })).toEqual({ ...defaultUpmixOptions(), mode: 'game' })
     expect(defaultUpmixOptions().mode).toBe('film')
+    expect(defaultUpmixOptions().heightDb).toBe(-3)
   })
 
   it('geçersiz değerleri düzeltir ve aralığa kırpar', () => {
-    const n = normalizeUpmixOptions({ mode: 'concert' as never, centerDb: 20, surroundDb: -40, lfeEnabled: 'x' as never })
-    expect(n).toEqual({ mode: 'film', centerDb: 6, surroundDb: -12, lfeEnabled: true })
+    const n = normalizeUpmixOptions({ mode: 'concert' as never, centerDb: 20, surroundDb: -40, lfeEnabled: 'x' as never, heightDb: 30 })
+    expect(n).toEqual({ mode: 'film', centerDb: 6, surroundDb: -12, lfeEnabled: true, heightDb: 6 })
   })
 
   it('JSON gidiş-dönüşünde korunur', () => {
-    const o = { mode: 'game' as const, centerDb: -3.5, surroundDb: 2, lfeEnabled: false }
+    const o = { mode: 'game' as const, centerDb: -3.5, surroundDb: 2, lfeEnabled: false, heightDb: -9 }
     expect(normalizeUpmixOptions(JSON.parse(JSON.stringify(o)))).toEqual(o)
   })
 })

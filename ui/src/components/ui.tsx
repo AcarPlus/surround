@@ -337,11 +337,12 @@ export function BigSlider(props: {
   max: number
   step: number
   display: string
+  disabled?: boolean
   onChange: (v: number) => void
 }) {
   const fill = ((props.value - props.min) / (props.max - props.min)) * 100
   return (
-    <div>
+    <div className={props.disabled ? 'opacity-50' : undefined}>
       <div className="mb-1 flex items-baseline justify-between gap-3">
         <span className="text-[13px] font-medium">{props.label}</span>
         <span className="num text-[13px] text-fg">{props.display}</span>
@@ -354,6 +355,7 @@ export function BigSlider(props: {
         max={props.max}
         step={props.step}
         value={props.value}
+        disabled={props.disabled}
         style={{ ['--fill' as string]: `${fill}%` }}
         onChange={(e) => props.onChange(Number(e.target.value))}
       />

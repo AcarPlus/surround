@@ -8,7 +8,7 @@ public sealed record SpeakerRoute(string Name, int DeviceChannel, float[] MixRow
     double HighPassHz = 0, float BassShare = 0, double[]? Eq = null);
 
 /// <summary>
-/// Builds device-channel frames from logical 7.1 frames and pushes them into the sink's ring buffer. Producer side only.
+/// Builds device-channel frames from logical frames (7.1 + height lanes) and pushes them into the sink's ring buffer. Producer side only.
 /// Per speaker: (mix row × gain + bass share) → EQ → high-pass → delay; then the optional device limiter.
 /// </summary>
 public sealed class SinkMixer

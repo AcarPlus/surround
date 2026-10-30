@@ -10,10 +10,10 @@ public class PeakMeterTests
     {
         var m = new PeakMeter();
         var frames = new float[4 * Channels.Count];
-        frames[0 * 8 + Channels.FL] = 0.5f;
-        frames[2 * 8 + Channels.FL] = -0.8f;   // negative counts by magnitude
-        frames[1 * 8 + Channels.LFE] = 0.1f;
-        frames[3 * 8 + Channels.SR] = 1.0f;
+        frames[0 * Channels.Count + Channels.FL] = 0.5f;
+        frames[2 * Channels.Count + Channels.FL] = -0.8f;   // negative counts by magnitude
+        frames[1 * Channels.Count + Channels.LFE] = 0.1f;
+        frames[3 * Channels.Count + Channels.SR] = 1.0f;
         m.Update(frames, 4);
 
         var peaks = new float[Channels.Count];

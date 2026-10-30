@@ -12,7 +12,7 @@ public sealed class PeakMeter
     /// <summary>Floor reported for silence, dBFS.</summary>
     public const float FloorDb = -90f;
 
-    /// <summary>Scans <paramref name="frames"/> interleaved logical frames (8 channels each).</summary>
+    /// <summary>Scans <paramref name="frames"/> interleaved logical frames (<see cref="Channels.Count"/> channels each).</summary>
     public void Update(ReadOnlySpan<float> logical, int frames)
     {
         const int n = Channels.Count;
@@ -28,7 +28,7 @@ public sealed class PeakMeter
             if (local[c] > Volatile.Read(ref _peaks[c])) Volatile.Write(ref _peaks[c], local[c]);
     }
 
-    /// <summary>Writes linear peaks (8 values) and resets the hold.</summary>
+    /// <summary>Writes linear peaks (<see cref="Channels.Count"/> values) and resets the hold.</summary>
     public void Drain(Span<float> dest)
     {
         for (int c = 0; c < Channels.Count && c < dest.Length; c++)

@@ -5,9 +5,9 @@ Motor (C#) ile arayüz (TS) arasındaki config alanları. JSON camelCase. Alan y
 ## Ses akışı
 
 ```
-yakalama → mantıksal 8 kanal (map)
+yakalama → mantıksal 12 kanal (map: kaynak en fazla 7.1 doldurur; üst şeritler türetilir, bkz. docs/duzen.md)
          → upmix (açıksa; çok kanallı kaynakta yalnızca içerik stereo iken, bkz. docs/upmix.md)
-         → [genel işleme: preamp, 10 bant EQ, bas güçlendirme, netlik, dinamik güçlendirme, ortam]  (8 kanala aynı ayar, dinamik bağlı)
+         → [genel işleme: preamp, 10 bant EQ, bas güçlendirme, netlik, dinamik güçlendirme, ortam]  (tüm kanallara aynı ayar, dinamik bağlı; kullanılmayan üst şeritler atlanır)
          → seviye ölçerleri
          → kanal katlama: hiçbir hoparlörün çalmadığı kanallar komşulara (FC→FL+FR, SL→BL, …)
          → bas yolu: highPassHz'li hoparlörlerden kesilen bas → bassReceiver hoparlörlere
@@ -26,7 +26,7 @@ yakalama → mantıksal 8 kanal (map)
 | `bassBoostDb` | 0..12 | 0 | ~100 Hz alçak raf |
 | `clarityDb` | 0..12 | 0 | Varlık/netlik: ~3,5 kHz tepe + ~10 kHz yüksek raf (yarısı) |
 | `dynamicBoost` | 0..1 | 0 | Sıkıştırma miktarı + otomatik makyaj kazancı (gece/yüksek ses hissi) |
-| `ambience` | 0..1 | 0 | Çiftlerde (FL/FR, BL/BR, SL/SR) M/S genişletme |
+| `ambience` | 0..1 | 0 | Çiftlerde (FL/FR, BL/BR, SL/SR, ikisi de kullanılıyorsa TFL/TFR ve TBL/TBR) M/S genişletme |
 | `limiter` | bool | true | Her çıkış cihazında tepe sınırlayıcı, -1 dBFS tavan |
 
 ## Hoparlör alanları (speakers[])
@@ -45,7 +45,7 @@ Bas kuralları:
 
 ## Canlı güncelleme
 
-`processing`, hoparlör `eq`/`eqPreset` ve `upmixOptions.centerDb`/`surroundDb`/`lfeEnabled` değişiklikleri motoru yeniden başlatmaz (`EngineFingerprint` bunları dışlar); `SurroundEngine.UpdateLive(cfg)` ile kesintisiz uygulanır. `highPassHz`/`bassReceiver` ve `upmixOptions.mode` değişikliği yeniden başlatır.
+`processing`, hoparlör `eq`/`eqPreset` ve `upmixOptions.centerDb`/`surroundDb`/`heightDb`/`lfeEnabled` değişiklikleri motoru yeniden başlatmaz (`EngineFingerprint` bunları dışlar); `SurroundEngine.UpdateLive(cfg)` ile kesintisiz uygulanır. `highPassHz`/`bassReceiver` ve `upmixOptions.mode` değişikliği yeniden başlatır.
 
 ## Köprü
 

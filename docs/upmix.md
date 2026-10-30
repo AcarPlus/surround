@@ -14,6 +14,7 @@ hoparlörü olmayan kanalları kullanılan komşulara katlamak. Kod: `src/Surrou
 | `centerDb` | -12..+6 | 0 | Orta (diyalog) seviyesi | Evet |
 | `surroundDb` | -12..+6 | 0 | Yan/arka kanallara yönlenen her şeyin seviyesi | Evet |
 | `lfeEnabled` | bool | true | Orta sinyalden LFE türet | Evet |
+| `heightDb` | -24..+6 | -3 | Türetilen üst şeritlerin (TFL/TFR/TBL/TBR) seviyesi; upmix kapalıyken/yerel içerikte de geçerli (bkz. docs/duzen.md) | Evet |
 
 Canlı alanlar `EngineFingerprint`'ten dışlanır, `SurroundEngine.UpdateLive` ile uygulanır; kazançlar 30 ms'de yumuşatılır.
 Aralık dışı değerler `ConfigValidator` hatasıdır.

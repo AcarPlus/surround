@@ -1,6 +1,7 @@
 import type { SurroundApi } from './client'
 import {
   LOGICAL_CHANNELS,
+  isHeightChannel,
   defaultProcessing,
   defaultUpmixOptions,
   type Config,
@@ -141,13 +142,19 @@ export function createMockApi(): SurroundApi {
   setInterval(() => {
     if (!running && LOGICAL_CHANNELS.every((c) => levels[c] <= -89)) return
     const surround = config.upmix || config.source.deviceId === 'vb-cable'
+    const laneUsed = (c: LogicalChannel) => config.speakers.some((sp) => (sp.source[c] ?? 0) > 0)
     for (const c of LOGICAL_CHANNELS) {
+      // Hiçbir hoparlörün satırında olmayan üst şerit hesaplanmaz (motor gibi): sessiz.
+      if (running && isHeightChannel(c) && !laneUsed(c)) {
+        levels[c] = -90
+        continue
+      }
       if (!running) {
         levels[c] = Math.max(-90, levels[c] - 6)
         continue
       }
       energy[c] = Math.min(1, Math.max(0, energy[c] + rand(-0.18, 0.18)))
-      const base = c === 'LFE' ? -34 : c === 'FC' ? -22 : c === 'FL' || c === 'FR' ? -18 : surround ? -30 : -44
+      const base = isHeightChannel(c) ? -34 + (config.upmixOptions?.heightDb ?? -3) : c === 'LFE' ? -34 : c === 'FC' ? -22 : c === 'FL' || c === 'FR' ? -18 : surround ? -30 : -44
       levels[c] = round(base + energy[c] * 22 + rand(-2, 2) - 8, 1)
     }
     const frame = { ...levels }

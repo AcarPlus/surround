@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { LOGICAL_CHANNELS, flatEq, type Speaker } from '../api/types'
+import { CHANNEL_LABELS, HEIGHT_CHANNELS, LOGICAL_CHANNELS, flatEq, type Speaker } from '../api/types'
 import { EqEditor } from './EqEditor'
 import {
   CUSTOM_ID,
@@ -11,6 +11,15 @@ import {
 } from '../lib/presets'
 import { LISTENER_ID, selectSpeaker, useStore } from '../store/useStore'
 import { computeAuto } from '../lib/geometry'
+import {
+  CUSTOM_MANUAL_LABEL,
+  CUSTOM_MAP_LABEL,
+  ROLES,
+  ROLE_CUSTOM_MANUAL,
+  ROLE_CUSTOM_MAP,
+  angleFromListener,
+  effectiveRole,
+} from '../lib/roles'
 import { deviceColorVar } from '../lib/colors'
 import { fmt } from '../lib/format'
 import { Badge, Button, Field, NumberField, SectionTitle, Select, Switch, cx } from './ui'
@@ -87,6 +96,7 @@ function SpeakerPanel() {
   const lowLatency = useStore((s) => s.lowLatency)
   const updateSpeaker = useStore((s) => s.updateSpeaker)
   const setMix = useStore((s) => s.setMix)
+  const setRole = useStore((s) => s.setRole)
   const setAuto = useStore((s) => s.setAuto)
   const removeSpeaker = useStore((s) => s.removeSpeaker)
   const playTone = useStore((s) => s.playTone)
@@ -99,6 +109,7 @@ function SpeakerPanel() {
   const { dMax, byId } = computeAuto(speakers, room.listener)
   const d = byId[sp.id]?.distance ?? 0
   const disabled = lowLatency && dev?.kind === 'network'
+  const fromMap = sp.role === ROLE_CUSTOM_MAP
   const clash = speakers.some(
     (o) => o.id !== sp.id && o.outputDeviceId === sp.outputDeviceId && o.deviceChannel === sp.deviceChannel,
   )
@@ -131,6 +142,8 @@ function SpeakerPanel() {
           </p>
         </div>
       </div>
+
+      <RoleSection sp={sp} onRole={(r) => setRole(sp.id, r)} />
 
       {disabled && (
         <div className="flex gap-2 rounded border border-warn/40 bg-warn/10 p-2 text-xs text-warn">
@@ -180,18 +193,31 @@ function SpeakerPanel() {
 
       <section>
         <SectionTitle>Kanal karışımı</SectionTitle>
+        {fromMap && (
+          <p className="mb-2 text-xs text-faint">
+            Konumdan hesaplanıyor: dinleyiciye göre <span className="num">{fmt(angleFromListener(sp, room.listener), 0)}°</span>
+            {sp.elevated ? ', üst şeritler' : ''}. Elle değiştirmek için rolü “{CUSTOM_MANUAL_LABEL}” yap.
+          </p>
+        )}
         <div className="space-y-1">
           {LOGICAL_CHANNELS.map((ch) => {
             const v = sp.source[ch] ?? 0
+            const first = ch === HEIGHT_CHANNELS[0]
             return (
-              <div key={ch} className="flex items-center gap-2">
-                <span className={cx('num w-8 text-xs', v > 0 ? 'text-fg' : 'text-faint')}>{ch}</span>
+              <div key={ch} className={cx('flex items-center gap-2', first && 'mt-2 border-t border-line pt-2')}>
+                <span
+                  title={CHANNEL_LABELS[ch]}
+                  className={cx('num w-8 text-xs', v > 0 ? 'text-fg' : 'text-faint')}
+                >
+                  {ch}
+                </span>
                 <input
                   type="range"
                   min={0}
                   max={1}
                   step={0.05}
                   value={v}
+                  disabled={fromMap}
                   aria-label={`${ch} kazancı`}
                   style={{ ['--fill' as string]: `${v * 100}%` }}
                   onChange={(e) => setMix(sp.id, ch, Number(e.target.value))}
@@ -203,6 +229,7 @@ function SpeakerPanel() {
                   min={0}
                   max={1}
                   step={0.05}
+                  disabled={fromMap}
                   onChange={(n) => setMix(sp.id, ch, n)}
                 />
               </div>
@@ -263,6 +290,41 @@ function SpeakerPanel() {
         </Button>
       </div>
     </div>
+  )
+}
+
+/** Rol açılır listesi (docs/duzen.md): seçim karışım satırını yazar; satırı elle değiştirmek rolü "Özel (elle)" yapar. */
+function RoleSection({ sp, onRole }: { sp: Speaker; onRole: (role: string) => void }) {
+  const updateSpeaker = useStore((s) => s.updateSpeaker)
+  const role = effectiveRole(sp)
+  const floor = ROLES.filter((r) => !r.elevated && !r.bassReceiver)
+  const top = ROLES.filter((r) => r.elevated)
+  const bass = ROLES.filter((r) => r.bassReceiver)
+  const opt = (r: { id: string; label: string }) => (
+    <option key={r.id} value={r.id}>
+      {r.label}
+    </option>
+  )
+  return (
+    <section>
+      <Field label="Rol">
+        <Select ariaLabel="Hoparlör rolü" value={role} onChange={onRole}>
+          <optgroup label="Zemin">{floor.map(opt)}</optgroup>
+          <optgroup label="Bas">{bass.map(opt)}</optgroup>
+          <optgroup label="Üst">{top.map(opt)}</optgroup>
+          <optgroup label="Özel">
+            <option value={ROLE_CUSTOM_MAP}>{CUSTOM_MAP_LABEL}</option>
+            <option value={ROLE_CUSTOM_MANUAL}>{CUSTOM_MANUAL_LABEL}</option>
+          </optgroup>
+        </Select>
+      </Field>
+      {role === ROLE_CUSTOM_MAP && (
+        <label className="mt-2.5 flex items-center justify-between gap-3 text-[13px]">
+          Üst hoparlör (tavan / yükseklik)
+          <Switch checked={!!sp.elevated} onChange={(v) => updateSpeaker(sp.id, { elevated: v || undefined })} label="Üst hoparlör" />
+        </label>
+      )}
+    </section>
   )
 }
 

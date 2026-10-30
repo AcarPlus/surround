@@ -46,9 +46,10 @@ public sealed class StereoDetector
 }
 
 /// <summary>
-/// The upmix stage on interleaved logical 7.1 frames, in place. For a stereo source the upmixer always runs. For a
-/// multichannel source the <see cref="StereoDetector"/> chooses between upmixing FL/FR and passing all channels
-/// through; the two are crossfaded over 30 ms. The native path is delayed by the upmixer's latency so both are
+/// The upmix stage on interleaved logical frames, in place. For a stereo source the upmixer always runs. For a
+/// multichannel source the <see cref="StereoDetector"/> chooses between upmixing FL/FR and passing the 7.1 channels
+/// through (with <see cref="NativeHeights"/> deriving the used height lanes from them); the two are crossfaded over
+/// 30 ms. The native path is delayed by the upmixer's latency so both are
 /// time-aligned (film mode: the whole chain then has that constant latency). The upmixer runs all the time so it is
 /// warm when the crossfade starts.
 /// </summary>
@@ -61,19 +62,23 @@ public sealed class AdaptiveUpmix
     private readonly bool _adaptive;
     private readonly StereoDetector _det;
     private readonly DelayLine[] _native;
+    private readonly NativeHeights? _heights;
+    private readonly float[] _nf = new float[Ch];
     private readonly float _step;
     private float[] _buf = new float[Ch * 4096];
     private float _w;
     private volatile int _state;
 
     /// <param name="adaptive">Source has more than two channels: detect stereo content instead of always upmixing.</param>
-    public AdaptiveUpmix(int sampleRate, IStereoUpmixer upmixer, bool adaptive)
+    /// <param name="nativeHeights">Height lanes of the native path (adaptive only); null = silent there.</param>
+    public AdaptiveUpmix(int sampleRate, IStereoUpmixer upmixer, bool adaptive, NativeHeights? nativeHeights = null)
     {
         _up = upmixer;
         _adaptive = adaptive;
+        _heights = adaptive ? nativeHeights : null;
         _det = new StereoDetector(sampleRate);
-        _native = new DelayLine[Ch];
-        for (int c = 0; c < Ch; c++) _native[c] = new DelayLine(adaptive ? upmixer.LatencyFrames : 0);
+        _native = new DelayLine[Channels.SourceCount];
+        for (int c = 0; c < _native.Length; c++) _native[c] = new DelayLine(adaptive ? upmixer.LatencyFrames : 0);
         _step = (float)(1000 / (CrossfadeMs * sampleRate));
         _w = 1f;
         _state = (int)UpmixState.Stereo;
@@ -83,7 +88,11 @@ public sealed class AdaptiveUpmix
     public int LatencyFrames => _up.LatencyFrames;
     public IStereoUpmixer Upmixer => _up;
 
-    public void Update(UpmixSettings settings) => _up.Update(settings);
+    public void Update(UpmixSettings settings)
+    {
+        _up.Update(settings);
+        _heights?.Update(settings);
+    }
 
     public void Process(Span<float> logical, int frames)
     {
@@ -98,11 +107,14 @@ public sealed class AdaptiveUpmix
         }
 
         bool stereo = _det.Stereo;
+        var nf = _nf.AsSpan();
+        float hTarget = _heights?.Target ?? 0f;
         for (int f = 0; f < frames; f++)
         {
             int b = f * Ch;
             float peak = 0f;
-            for (int c = Channels.FC; c < Ch; c++)
+            // Sources only deliver the 7.1 lanes; the height lanes of the input are always silent.
+            for (int c = Channels.FC; c < Channels.SourceCount; c++)
             {
                 float v = Math.Abs(logical[b + c]);
                 if (v > peak) peak = v;
@@ -110,9 +122,12 @@ public sealed class AdaptiveUpmix
             stereo = _det.Step(peak);
             _w = stereo ? Math.Min(1f, _w + _step) : Math.Max(0f, _w - _step);
             float g = _w * _w * (3 - 2 * _w); // smoothstep; native and upmix are correlated, so gains sum to 1
+            for (int c = 0; c < Channels.SourceCount; c++) nf[c] = _native[c].Process(logical[b + c]);
+            // Kept running while upmixing so the native heights are warm when the crossfade starts.
+            if (_heights != null) _heights.Render(nf, hTarget);
             for (int c = 0; c < Ch; c++)
             {
-                float n = _native[c].Process(logical[b + c]);
+                float n = nf[c];
                 logical[b + c] = g >= 1f ? up[b + c] : g <= 0f ? n : n + g * (up[b + c] - n);
             }
         }
@@ -123,7 +138,8 @@ public sealed class AdaptiveUpmix
 /// <summary>
 /// Moves logical channels that no unmuted speaker plays into used neighbors, with constant power (one target: gain 1;
 /// two: -3 dB each). FC → FL+FR; SL → BL (else FL), SR → BR (else FR); BL → SL (else FL), BR → SR (else FR); FL/FR
-/// → FC/sides/backs for unusual layouts. LFE is never folded here — the bass receivers rule handles it.
+/// → FC/sides/backs for unusual layouts. LFE is never folded here — the bass receivers rule handles it. The height
+/// lanes are neither folded nor fold targets: they are derived only when some speaker plays them.
 /// Runs after the global processing (and the meters), before the bass bus and the sinks.
 /// </summary>
 public sealed class ChannelFold
@@ -159,6 +175,7 @@ public sealed class ChannelFold
         c[BR] = new[] { new[] { SR }, new[] { FR }, new[] { FC }, new[] { BL } };
         c[SL] = new[] { new[] { BL }, new[] { FL }, new[] { FC }, new[] { SR } };
         c[SR] = new[] { new[] { BR }, new[] { FR }, new[] { FC }, new[] { SL } };
+        for (int h = Channels.SourceCount; h < Ch; h++) c[h] = Array.Empty<int[]>();
         return c;
     }
 

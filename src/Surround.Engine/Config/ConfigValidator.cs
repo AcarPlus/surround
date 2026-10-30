@@ -74,6 +74,7 @@ public static class ConfigValidator
             e.Add($"upmixOptions.mode 'game' veya 'film' olmalı (bulunan: '{u.Mode}').");
         CheckRange(e, "upmixOptions.centerDb", u.CenterDb, UpmixOptions.MinDb, UpmixOptions.MaxDb);
         CheckRange(e, "upmixOptions.surroundDb", u.SurroundDb, UpmixOptions.MinDb, UpmixOptions.MaxDb);
+        CheckRange(e, "upmixOptions.heightDb", u.HeightDb, UpmixOptions.MinHeightDb, UpmixOptions.MaxHeightDb);
         return e;
     }
 

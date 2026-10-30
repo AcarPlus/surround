@@ -31,7 +31,7 @@ public sealed class SpeakerConfig
     public string OutputDeviceId { get; set; } = "";
     /// <summary>1-based channel index on the output device.</summary>
     public int DeviceChannel { get; set; } = 1;
-    /// <summary>Mix row: logical channel name (FL, FR, FC, LFE, BL, BR, SL, SR) to linear gain.</summary>
+    /// <summary>Mix row: logical channel name (FL, FR, FC, LFE, BL, BR, SL, SR, TFL, TFR, TBL, TBR) to linear gain.</summary>
     public Dictionary<string, double> Source { get; set; } = new();
     public double DelayMs { get; set; }
     public double GainDb { get; set; }
@@ -53,7 +53,7 @@ public sealed class SpeakerConfig
     public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
-/// <summary>Global sound processing on the logical 8 channels, plus the per-output limiter switch. Live-updatable.</summary>
+/// <summary>Global sound processing on the logical channels, plus the per-output limiter switch. Live-updatable.</summary>
 public sealed class ProcessingConfig
 {
     public const int Bands = 10;
@@ -71,7 +71,7 @@ public sealed class ProcessingConfig
     public double ClarityDb { get; set; }
     /// <summary>0..1: compression amount with automatic makeup gain.</summary>
     public double DynamicBoost { get; set; }
-    /// <summary>0..1: M/S widening of the FL/FR, BL/BR and SL/SR pairs.</summary>
+    /// <summary>0..1: M/S widening of the FL/FR, BL/BR, SL/SR, TFL/TFR and TBL/TBR pairs.</summary>
     public double Ambience { get; set; }
     /// <summary>Peak limiter (-1 dBFS ceiling) on every output device.</summary>
     public bool Limiter { get; set; } = true;
@@ -82,13 +82,15 @@ public sealed class ProcessingConfig
 }
 
 /// <summary>
-/// Stereo to 7.1 upmix settings (used when <see cref="SurroundConfig.Upmix"/> is on). The gains and the LFE switch are
-/// live-updatable; a mode change restarts the engine.
+/// Stereo to 7.1 (plus height lanes) upmix settings (used when <see cref="SurroundConfig.Upmix"/> is on). The gains and the LFE switch are
+/// live-updatable (the height level also applies to the heights derived from native multichannel content); a mode
+/// change restarts the engine.
 /// </summary>
 public sealed class UpmixOptions
 {
     public const string Game = "game", Film = "film";
     public const double MinDb = -12, MaxDb = 6;
+    public const double MinHeightDb = -24, MaxHeightDb = 6, DefaultHeightDb = -3;
 
     /// <summary>"game" (time-domain matrix decoder, no added front latency) or "film" (STFT, ~21 ms at 48 kHz).</summary>
     public string Mode { get; set; } = Film;
@@ -98,6 +100,11 @@ public sealed class UpmixOptions
     public double SurroundDb { get; set; }
     /// <summary>Derive LFE from the low-passed mid (heard only on speakers whose row maps LFE).</summary>
     public bool LfeEnabled { get; set; } = true;
+    /// <summary>
+    /// Level of the derived height lanes (TFL/TFR/TBL/TBR), dB. Additive: at 0 dB the height lanes of one side together
+    /// carry as much power as that side's ambience. Only matters when some speaker maps a height lane.
+    /// </summary>
+    public double HeightDb { get; set; } = DefaultHeightDb;
 
     public bool IsGame => string.Equals(Mode?.Trim(), Game, StringComparison.OrdinalIgnoreCase);
 
@@ -142,7 +149,7 @@ public sealed class SurroundConfig
     /// <summary>
     /// Canonical JSON of the engine-relevant fields only (extra/UI members dropped). Two configs with the same
     /// fingerprint produce an identical audio graph, so a running engine need not restart between them.
-    /// Processing, per-speaker EQ and the upmix gains/LFE switch are excluded: <see cref="SurroundEngine.UpdateLive"/>
+    /// Processing, per-speaker EQ and the upmix gains (center/surround/height)/LFE switch are excluded: <see cref="SurroundEngine.UpdateLive"/>
     /// applies them in place. The upmix mode is kept (switching it rebuilds the upmixer).
     /// </summary>
     public string EngineFingerprint()

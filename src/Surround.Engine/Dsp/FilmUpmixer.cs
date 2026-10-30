@@ -12,6 +12,8 @@ namespace Surround.Engine.Dsp;
 /// constant power (center extraction); the out-of-phase part stays where it was in FL/FR. Hard-left stays in FL.</item>
 /// <item>Ambient: 40 % of the power in FL/FR, the rest back to the time domain and through the complementary all-pass
 /// decorrelators into SL/SR and BL/BR (<see cref="SurroundRenderer"/>, 10 ms precedence delay).</item>
+/// <item>Heights (only lanes some speaker plays): the same time-domain ambient pair, high-passed, additively through
+/// their own decorrelators (<see cref="HeightRenderer"/>).</item>
 /// <item>LFE: LR4 low-pass (120 Hz) of the mid, delayed to line up with the STFT path.</item>
 /// </list>
 /// Five real outputs (FL, FR, FC, ambient L, ambient R) need three complex inverse FFTs (two signals per FFT; FC
@@ -37,10 +39,11 @@ public sealed class FilmUpmixer : IStereoUpmixer
     private readonly float _alpha, _gainK, _cgK, _af, _as;
     private readonly bool _hasFc, _lfeAllowed;
     private readonly SurroundRenderer _sur;
+    private readonly HeightRenderer? _hgt;
     private readonly LinkwitzRiley _lfeLp;
     private readonly DelayLine _lfeDelay;
     private volatile UpmixSettings _settings = UpmixSettings.Default;
-    private float _cgFrame = 1f, _sg = 1f, _lg;
+    private float _cgFrame = 1f, _sg = 1f, _lg, _hg = UpmixSettings.Default.HeightGain;
     private int _pos;
 
     public FilmUpmixer(int sampleRate, UpmixLayout? layout = null)
@@ -70,6 +73,7 @@ public sealed class FilmUpmixer : IStereoUpmixer
         _af = sur ? MathF.Sqrt(UpmixTuning.FrontAmbientShare) : 1f;
         _as = sur ? MathF.Sqrt(1 - UpmixTuning.FrontAmbientShare) : 0f;
         _sur = new SurroundRenderer(sampleRate, layout);
+        _hgt = HeightRenderer.Create(sampleRate, layout);
         _lfeLp = LinkwitzRiley.LowPass(sampleRate, UpmixTuning.LfeHz);
         _lfeDelay = new DelayLine(_n);
         _lfeAllowed = layout.LfeAllowed;
@@ -102,12 +106,15 @@ public sealed class FilmUpmixer : IStereoUpmixer
 
             _sg = GlobalProcessor.Approach(_sg, st.SurroundGain, _gainK);
             _lg = GlobalProcessor.Approach(_lg, lfeTarget, _gainK);
+            _hg = GlobalProcessor.Approach(_hg, st.HeightGain, _gainK);
             var o = output.Slice(b, Ch);
             o[Channels.FL] = fl;
             o[Channels.FR] = fr;
             o[Channels.FC] = fc;
             o[Channels.LFE] = _lfeDelay.Process(_lfeLp.Process(0.5f * (l + r))) * _lg;
             _sur.Render(al, ar, _as * _sg, 0, 0, 0, 0, o);
+            if (_hgt != null) _hgt.Render(al, ar, _hg, o);
+            else o.Slice(Channels.SourceCount).Clear();
         }
     }
 

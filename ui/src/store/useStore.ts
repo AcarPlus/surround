@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { api } from '../api/client'
 import {
   LOGICAL_CHANNELS,
+  isHeightChannel,
   type Config,
   type Device,
   type EngineInfo,
@@ -19,14 +20,9 @@ import {
   defaultUpmixOptions,
   normalizeUpmixOptions,
 } from '../api/types'
-import {
-  clamp,
-  clampToRoom,
-  computeAuto,
-  presetLayout,
-  round,
-  type PresetId,
-} from '../lib/geometry'
+import { clamp, clampToRoom, computeAuto, round, type PresetId } from '../lib/geometry'
+import { assignExisting, layoutSlots, type LayoutSpec } from '../lib/layout'
+import { ROLE_CUSTOM_MANUAL, ROLE_CUSTOM_MAP, computeMapSource, roleDef, rolePatch } from '../lib/roles'
 import { matchSoundPreset, soundPresetPatch } from '../lib/presets'
 
 export type Screen = 'room' | 'devices' | 'source' | 'sound' | 'calibration'
@@ -71,6 +67,10 @@ interface State {
   select: (id: string | null) => void
   toggleRun: () => Promise<void>
   setPreset: (p: PresetChoice) => void
+  /** X.Y.Z düzenini uygular; mevcut hoparlörlerin cihaz/EQ/bas ayarları rol, sonra konum sırasıyla korunur. */
+  applyLayout: (spec: LayoutSpec) => void
+  /** Rol seçer: karışım satırını (ve Subwoofer için bassReceiver'ı) yazar. */
+  setRole: (id: string, role: string) => void
   setLowLatency: (v: boolean) => void
   setRoomSize: (widthM: number, depthM: number) => void
   moveListener: (x: number, y: number) => void
@@ -103,10 +103,23 @@ const initialTheme = (): Theme => {
   }
 }
 
-/** Otomatik işaretli hoparlörlerin gecikme/kazanç değerlerini geometriden yeniden hesaplar. */
+const sameRowStrict = (a: Speaker['source'], b: Speaker['source']): boolean => {
+  const ka = Object.keys(a) as LogicalChannel[]
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k])
+}
+
+/**
+ * Otomatik işaretli hoparlörlerin gecikme/kazanç değerlerini geometriden yeniden hesaplar;
+ * "Özel (haritadan)" rolündekilerin karışım satırını dinleyiciye göre açıdan yeniden üretir.
+ */
 function recalc(speakers: Speaker[], listener: Point, auto: Record<string, AutoFlags>): Speaker[] {
   const { byId } = computeAuto(speakers, listener)
-  return speakers.map((s) => {
+  return speakers.map((s0) => {
+    let s = s0
+    if (s.role === ROLE_CUSTOM_MAP) {
+      const row = computeMapSource(s, listener)
+      if (!sameRowStrict(row, s.source)) s = { ...s, source: row }
+    }
     const a = auto[s.id]
     const v = byId[s.id]
     if (!a || !v) return s
@@ -244,48 +257,74 @@ export const useStore = create<State>()((set, get) => {
         set({ preset })
         return
       }
-      const { room, devices, outputs, lowLatency } = get()
-      const layout = presetLayout(preset, room.listener)
-      // Çok kanallı cihaz varsa kanalları sırayla ona, yoksa yerel cihazlara dağıt.
+      const [floor, sub] = preset.split('.').map(Number)
+      get().applyLayout({ floor, sub, height: 0 })
+    },
+
+    applyLayout(spec) {
+      const { room, devices, outputs, lowLatency, speakers: existing, auto: oldAuto } = get()
+      const slots = layoutSlots(spec, room.listener)
       const renders = devices.filter((d) => d.flow === 'render' && !(lowLatency && d.kind === 'network'))
-      const multi = renders.find((d) => d.channels >= layout.length) ?? null
-      const pool = multi ? [multi] : renders
-      const slots: { dev: Device; ch: number }[] = []
-      for (const d of pool) for (let c = 1; c <= d.channels; c++) slots.push({ dev: d, ch: c })
-      const names: Record<LogicalChannel, string> = {
-        FL: 'Ön sol',
-        FR: 'Ön sağ',
-        FC: 'Orta',
-        LFE: 'Sub',
-        BL: 'Arka sol',
-        BR: 'Arka sağ',
-        SL: 'Yan sol',
-        SR: 'Yan sağ',
+      if (renders.length === 0 || slots.length === 0) {
+        get().showToast('Çıkış cihazı bulunamadı.')
+        return
       }
-      const speakers: Speaker[] = layout.map((p, i) => {
-        const slot = slots[i] ?? slots[slots.length - 1]
-        const pos = clampToRoom(p, room)
-        return {
-          id: `spk-${Date.now().toString(36)}-${i}`,
-          name: names[p.channel],
-          outputDeviceId: slot.dev.id,
-          deviceChannel: slot.ch,
-          source: { [p.channel]: 1 },
-          delayMs: 0,
-          gainDb: 0,
-          mute: false,
-          x: round(pos.x, 3),
-          y: round(pos.y, 3),
+      const { matches, byRole, dropped } = assignExisting(slots, existing)
+      // Yeni yuvalar için boş cihaz kanalları: çok kanallı cihaz yeterliyse onu, yoksa yerel cihazları sırayla kullan.
+      const multi = renders.find((d) => d.channels >= slots.length) ?? null
+      const pool = multi ? [multi] : renders
+      const taken = new Set(matches.flatMap((m) => (m ? [`${m.outputDeviceId}#${m.deviceChannel}`] : [])))
+      const free: { dev: Device; ch: number }[] = []
+      for (const d of pool) for (let c = 1; c <= d.channels; c++) if (!taken.has(`${d.id}#${c}`)) free.push({ dev: d, ch: c })
+      const stamp = Date.now().toString(36)
+      const speakers: Speaker[] = slots.map((slot, i) => {
+        const pos = clampToRoom(slot, room)
+        const pt = { x: round(pos.x, 3), y: round(pos.y, 3) }
+        const prev = matches[i]
+        const elevated = slot.category === 'height' ? true : undefined
+        const def = roleDef(slot.role)
+        const base: Speaker = prev
+          ? { ...prev, name: byRole[i] ? prev.name : slot.name }
+          : (() => {
+              const f = free.shift() ?? { dev: pool[pool.length - 1], ch: 1 }
+              return {
+                id: `spk-${stamp}-${i}`,
+                name: slot.name,
+                outputDeviceId: f.dev.id,
+                deviceChannel: f.ch,
+                source: {},
+                delayMs: 0,
+                gainDb: 0,
+                mute: false,
+                x: 0,
+                y: 0,
+              }
+            })()
+        const next: Speaker = { ...base, ...pt, role: slot.role, elevated }
+        next.source = def ? { ...def.source } : computeMapSource(next, room.listener)
+        if (slot.category === 'sub') {
+          next.bassReceiver = true
+          next.highPassHz = undefined
         }
+        return next
       })
       let outs = outputs
       for (const s of speakers) outs = ensureOutput(outs, s.outputDeviceId)
+      const label = `${spec.floor}.${spec.sub}`
       commit({
         speakers,
         outputs: outs,
-        preset,
+        preset: spec.height === 0 && (label === '2.0' || label === '5.1' || label === '7.1') ? (label as PresetId) : 'custom',
         selection: null,
-        auto: Object.fromEntries(speakers.map((s) => [s.id, { delay: true, gain: true }])),
+        auto: Object.fromEntries(speakers.map((s) => [s.id, oldAuto[s.id] ?? { delay: true, gain: true }])),
+      })
+      if (dropped > 0) get().showToast(`${dropped} eski hoparlör yeni düzene sığmadı, çıkarıldı.`, 4000)
+    },
+
+    setRole(id, role) {
+      const { speakers, room } = get()
+      commit({
+        speakers: speakers.map((s) => (s.id === id ? { ...s, ...rolePatch(s, role, room.listener) } : s)),
       })
     },
 
@@ -349,7 +388,7 @@ export const useStore = create<State>()((set, get) => {
           const source = { ...s.source }
           if (gain <= 0) delete source[ch]
           else source[ch] = round(clamp(gain, 0, 1), 2)
-          return { ...s, source }
+          return { ...s, source, role: ROLE_CUSTOM_MANUAL }
         }),
       })
     },
@@ -372,7 +411,7 @@ export const useStore = create<State>()((set, get) => {
       let ch = 1
       while (usedCh.has(ch) && ch < dev.channels) ch++
       const usedLogical = new Set(speakers.flatMap((s) => Object.keys(s.source)))
-      const logical = LOGICAL_CHANNELS.find((c) => !usedLogical.has(c))
+      const logical = LOGICAL_CHANNELS.find((c) => !isHeightChannel(c) && !usedLogical.has(c))
       const id = `spk-${Date.now().toString(36)}`
       const p = clampToRoom({ x: room.listener.x + 1, y: room.listener.y - 1 }, room)
       const sp: Speaker = {

@@ -14,6 +14,8 @@ namespace Surround.Engine.Dsp;
 /// to FC.</item>
 /// <item>Ambient: 40 % of its power stays in FL/FR, the rest goes to the side/back channels through complementary
 /// all-pass decorrelators and a 10 ms precedence delay (<see cref="SurroundRenderer"/>).</item>
+/// <item>Heights (only lanes some speaker plays): the high-passed ambient pair, additively, through their own
+/// decorrelators (<see cref="HeightRenderer"/>).</item>
 /// </list>
 /// Fronts get no added latency.
 /// </summary>
@@ -30,12 +32,13 @@ public sealed class GameUpmixer : IStereoUpmixer
 
     private readonly Ring _full, _layout;
     private readonly SurroundRenderer _sur;
+    private readonly HeightRenderer? _hgt;
     private readonly LinkwitzRiley _lfeLp;
     private readonly bool _lfeAllowed;
     private readonly float _hpA, _covK, _gainK, _af, _as;
     private volatile UpmixSettings _settings = UpmixSettings.Default;
     private float _hl, _hr, _xl, _xr, _pLL, _pRR, _pLR;
-    private float _cg = 1f, _sg = 1f, _lg = 1f;
+    private float _cg = 1f, _sg = 1f, _lg = 1f, _hg = UpmixSettings.Default.HeightGain;
 
     public GameUpmixer(int sampleRate, UpmixLayout? layout = null)
     {
@@ -43,6 +46,7 @@ public sealed class GameUpmixer : IStereoUpmixer
         _full = new Ring(RingNodes);
         _layout = new Ring(RingNodes.Where(n => n.Ch is Channels.FL or Channels.FR || layout.Has(n.Ch)).ToArray());
         _sur = new SurroundRenderer(sampleRate, layout);
+        _hgt = HeightRenderer.Create(sampleRate, layout);
         _lfeLp = LinkwitzRiley.LowPass(sampleRate, UpmixTuning.LfeHz);
         _lfeAllowed = layout.LfeAllowed;
         _lg = _lfeAllowed ? 1f : 0f;
@@ -73,6 +77,7 @@ public sealed class GameUpmixer : IStereoUpmixer
             _cg = GlobalProcessor.Approach(_cg, st.CenterGain, _gainK);
             _sg = GlobalProcessor.Approach(_sg, st.SurroundGain, _gainK);
             _lg = GlobalProcessor.Approach(_lg, lfeTarget, _gainK);
+            _hg = GlobalProcessor.Approach(_hg, st.HeightGain, _gainK);
 
             // Steering detector on the high-passed pair: low bass would make the estimates wobble at 2× its frequency.
             _hl = UpmixTuning.Flush(_hpA * (_hl + l - _xl)); _xl = l;
@@ -125,6 +130,7 @@ public sealed class GameUpmixer : IStereoUpmixer
             o[Channels.FL] = MathF.Sqrt(gfl * gfl * pm * pm + afk * afk * ce * ce) * s - _af * se * a;
             o[Channels.FR] = polR * MathF.Sqrt(gfr * gfr * pm * pm + afk * afk * se * se) * s + _af * ce * a;
             _sur.Render(al, ar, _as * _sg, sl, bl, sr, br, o);
+            _hgt?.Render(al, ar, _hg, o);
             o[Channels.LFE] = _lfeLp.Process(0.5f * (l + r)) * _lg;
         }
     }
