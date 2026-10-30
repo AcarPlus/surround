@@ -1,0 +1,26 @@
+import type { Config, Device, LevelFrame, SinkStatus } from './types'
+import { createMockApi } from './mock'
+import { createBridgeApi, hasBridge } from './bridge'
+
+/**
+ * Arayüzün backend ile konuştuğu TEK sınır. Uygulama yalnızca bu arayüzü kullanır;
+ * Masaüstü uygulamasında (WebView2) köprü, tarayıcıda (`npm run dev`) sahte veri kullanılır.
+ */
+export interface SurroundApi {
+  listDevices(): Promise<Device[]>
+  getConfig(): Promise<Config>
+  saveConfig(config: Config): Promise<void>
+  start(): Promise<void>
+  stop(): Promise<void>
+  getStatus(): Promise<SinkStatus[]>
+  /** deviceChannel 1 tabanlıdır. */
+  playTone(deviceId: string, channel: number): Promise<void>
+  /** Çalışırken ~1 sn aralıkla çağrılır. Dönen fonksiyon aboneliği iptal eder. */
+  onStatus(cb: (status: SinkStatus[]) => void): () => void
+  /** Kaynak seviye ölçerleri için (tasarım aşamasında eklendi). */
+  onLevels(cb: (levels: LevelFrame) => void): () => void
+  /** Çalışma sırasında motorun bildirdiği hatalar (yakalama/oynatma akışı kopması vb.). */
+  onEngineError(cb: (message: string) => void): () => void
+}
+
+export const api: SurroundApi = hasBridge() ? createBridgeApi() : createMockApi()

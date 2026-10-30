@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Surround</AssemblyName>
+    <RootNamespace>Surround.Desktop</RootNamespace>
+    <ApplicationIcon>Assets\surround.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.1.0</Version>
+    <Product>Surround</Product>
+    <Company>Surround</Company>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
+    <PackageReference Include="Velopack" Version="1.2.161" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Surround.Engine\Surround.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- WPF projeleri System.IO'yu örtük using olarak almaz. -->
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\surround.ico" />
+  </ItemGroup>
+
+  <!--
+    Derlenmiş arayüz (ui/dist) çıktıdaki ui\ klasörüne kopyalanır. Bu proje npm çalıştırmaz;
+    önce `npm run build` (ui klasöründe) gerekir (build.ps1 bunu yapar). dist yoksa uygulama bunu açılışta bildirir.
+  -->
+  <ItemGroup>
+    <Content Include="..\..\ui\dist\**\*" Link="ui\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
