@@ -20,6 +20,10 @@ try
         case "devices": return CmdDevices(all);
         case "validate": return CmdValidate(Require(opts, "config"));
         case "run": return CmdRun(Require(opts, "config"));
+        case "probe":
+            return CmdProbe(Require(opts, "device"),
+                opts.TryGetValue("seconds", out var ps) ? double.Parse(ps, System.Globalization.CultureInfo.InvariantCulture) : 5,
+                opts.TryGetValue("buffer", out var pb) ? int.Parse(pb) : 20);
         case "tone":
             return CmdTone(Require(opts, "device"), int.Parse(Require(opts, "channel")),
                 opts.TryGetValue("seconds", out var sec) ? double.Parse(sec, System.Globalization.CultureInfo.InvariantCulture) : 2);
@@ -152,4 +156,40 @@ static int CmdTone(string deviceId, int channel, double seconds)
     ToneRunner.Play(deviceId, channel, seconds, cts.Token);
     Console.WriteLine("Bitti.");
     return 0;
+}
+
+/// <summary>Loopback-captures a render device and prints packet size/interval statistics (diagnoses bursty sources).</summary>
+static int CmdProbe(string deviceId, double seconds, int bufferMs)
+{
+    using var en = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+    var dev = en.GetDevice(deviceId.Trim());
+    using var cap = new ProbeLoopback(dev, bufferMs);
+    using var keep = new NAudio.Wave.WasapiOut(dev, NAudio.CoreAudioApi.AudioClientShareMode.Shared, true, 50);
+    keep.Init(new NAudio.Wave.SilenceProvider(NAudio.Wave.WaveFormat.CreateIeeeFloatWaveFormat(cap.WaveFormat.SampleRate, cap.WaveFormat.Channels)));
+    var sizes = new List<int>(); var gaps = new List<double>();
+    var sw = System.Diagnostics.Stopwatch.StartNew(); double last = 0;
+    cap.DataAvailable += (_, e) =>
+    {
+        double now = sw.Elapsed.TotalMilliseconds;
+        lock (sizes) { sizes.Add(e.BytesRecorded / cap.WaveFormat.BlockAlign); if (last > 0) gaps.Add(now - last); last = now; }
+    };
+    keep.Play(); cap.StartRecording();
+    Thread.Sleep(TimeSpan.FromSeconds(seconds));
+    cap.StopRecording(); keep.Stop();
+    lock (sizes)
+    {
+        if (sizes.Count == 0) { Console.WriteLine("Paket gelmedi."); return 1; }
+        gaps.Sort();
+        double p99 = gaps.Count > 0 ? gaps[(int)(gaps.Count * 0.99)] : 0;
+        Console.WriteLine($"{dev.FriendlyName}: {cap.WaveFormat.SampleRate} Hz/{cap.WaveFormat.Channels} kanal, tampon {bufferMs} ms");
+        Console.WriteLine($"paket {sizes.Count}, kare min/ort/maks {sizes.Min()}/{sizes.Average():F0}/{sizes.Max()}, {sizes.Sum() / seconds:F0} kare/sn");
+        if (gaps.Count > 0) Console.WriteLine($"aralık ms ort/p99/maks {gaps.Average():F1}/{p99:F1}/{gaps.Max():F1}");
+    }
+    return 0;
+}
+
+sealed class ProbeLoopback(NAudio.CoreAudioApi.MMDevice d, int ms) : NAudio.CoreAudioApi.WasapiCapture(d, false, ms)
+{
+    protected override NAudio.CoreAudioApi.AudioClientStreamFlags GetAudioClientStreamFlags() =>
+        NAudio.CoreAudioApi.AudioClientStreamFlags.Loopback | base.GetAudioClientStreamFlags();
 }

@@ -17,7 +17,8 @@ public sealed class DriftController
         _kp = kp; _ki = ki; _tau = smoothingTauSeconds;
     }
 
-    public double TargetMs { get; }
+    /// <summary>Settable so the reader can grow its jitter buffer after underruns.</summary>
+    public double TargetMs { get; set; }
     public double SmoothedFillMs => _smoothed;
     public double Correction { get; private set; }
 

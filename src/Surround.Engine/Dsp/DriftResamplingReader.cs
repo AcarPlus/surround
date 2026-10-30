@@ -8,7 +8,8 @@ public sealed class DriftResamplingReader
 {
     private readonly RingBuffer _ring;
     private readonly int _ch;
-    private readonly double _srcRate, _devRate, _targetMs;
+    private readonly double _srcRate, _devRate, _maxTargetMs;
+    private double _targetMs;
     private readonly DriftController _ctl;
     private readonly HermiteResampler _res;
     private float[] _in = new float[4096];
@@ -19,11 +20,15 @@ public sealed class DriftResamplingReader
     public DriftResamplingReader(RingBuffer ring, int channels, double srcRate, double devRate, double targetMs)
     {
         _ring = ring; _ch = channels; _srcRate = srcRate; _devRate = devRate; _targetMs = targetMs;
+        // Adaptive jitter buffer: each underrun grows the target (independent source/sink clocks such as
+        // VB-Cable vs. a sound card occasionally drain a tight ring), capped so latency stays bounded.
+        _maxTargetMs = Math.Max(3 * targetMs, 150);
         _ctl = new DriftController(targetMs);
         _res = new HermiteResampler(channels);
     }
 
     public double FillMs => Volatile.Read(ref _fillMs);
+    public double TargetMs => Volatile.Read(ref _targetMs);
     public double CorrectionPpm => _ctl.Correction * 1e6;
     public long Underruns => Interlocked.Read(ref _underruns);
     public long Overruns => Interlocked.Read(ref _overruns);
@@ -69,6 +74,8 @@ public sealed class DriftResamplingReader
             output.Slice(produced * ch).Clear();
             Interlocked.Increment(ref _underruns);
             _primed = false;
+            Volatile.Write(ref _targetMs, Math.Min(_targetMs * 1.25 + 5, _maxTargetMs));
+            _ctl.TargetMs = _targetMs;
         }
     }
 }
