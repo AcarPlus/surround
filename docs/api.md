@@ -30,8 +30,25 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 | `onEngine(cb)` | `EngineInfo` (`upmix: "off" \| "stereo" \| "native"`, `sourceChannels`, `sourceRate`, `upmixLatencyMs`), durumla aynı sıklıkta; durunca bir kez `"off"` |
 | `onEngineError(cb)` | Çalışma sırasında motor hataları (akış kopması, test sesi hatası vb.) |
 
+| `getAppSettings()` | Uygulama ayarları (`app.json`, motor yapılandırmasından ayrı): `{ switchDefaultDevice, startWithWindows, startEngineOnLaunch, minimizeToTray }` (hepsi boolean; varsayılan `true, false, false, true`). Dahili `restore*` alanları dönmez |
+| `saveAppSettings(settings)` | Verilen alanları kaydeder (eksik alan değişmez, bilinmeyen/`restore*` alanlar yok sayılır); başarıyla `null` döner. `startWithWindows` HKCU\...\Run altındaki `Surround` değerini yazar/siler (komut: `"<exe>" --tray`; Velopack kurulumunda güncellemelerden etkilenmeyen kök başlatıcı); yazılamazsa reddeder. Motor çalışırken `switchDefaultDevice` değişirse hemen uygulanır |
+
 ## Arayüze özgü durum (config'e yazılmaz)
 - Hoparlör başına "Otomatik" gecikme/kazanç bayrakları (`auto`). Otomatikken `delayMs`/`gainDb`
   değerleri geometriden hesaplanıp `Speaker` içine yazılır; yani motor her zaman nihai sayıyı görür.
 - Hesap: `delay = (dMax - d) / 343 * 1000` ms, `gain = 20*log10(d / dMax)` dB (`ui/src/lib/geometry.ts`).
 - Önizleme: adrese `?nocable` eklenirse mock VB-Cable'sız çalışır (Kaynak ekranındaki uyarıyı görmek için).
+
+## Uygulama davranışı (masaüstü kabuğu)
+- **Varsayılan çıkış cihazı** (`switchDefaultDevice`): kaynak `loopback` ise motor başlayınca (ve kaynak değişerek yeniden başlayınca)
+  kaynak cihaz Windows'un varsayılan çıkışı (Konsol, Multimedya, İletişim) yapılır; önceki varsayılan `app.json` içine
+  (`restoreDeviceId`, `restoreCommunicationsId`, `restoreSourceId`) yazılır. Motor durunca, uygulamadan çıkınca (pencere, tepsi
+  "Çıkış", oturum kapanışı) geri yüklenir. Çökme olursa sonraki açılışta motor başlatılmıyorsa geri yüklenir. Kullanıcı bu arada
+  bir rolü başka cihaza çevirmişse o rol elleşilmez; eski cihaz artık yoksa atlanır. COM hataları arayüze fırlatılmaz, `engineError` olarak bildirilir.
+- **Tepsi**: simge her zaman görünür (tooltip "Surround — çalışıyor/durdu"); çift tık pencereyi gösterir; menü Göster, Başlat/Durdur, Çıkış.
+  `minimizeToTray` açıkken pencereyi kapatmak gizler (ilk seferde "Surround arka planda çalışıyor" balonu), Çıkış gerçekten kapatır.
+  Tepsiden başlat/durdur yapılınca arayüz `status`/`engine` olaylarıyla durumu görür.
+- `--tray` bağımsız değişkeni: pencere açılmadan tepsiye başlar (WebView ilk gösterimde oluşturulur). `startEngineOnLaunch` açıksa
+  yapılandırma geçerliyse motor otomatik başlar; başlayamazsa tepsi balonu gösterilir.
+- Açılışta sıfır underrun: ilk saniyedeki underrun, DSP döngülerinin yavaş tier-0 JIT koduyla çalışmasından kaynaklanıyordu;
+  `TieredPGO=false` ve `TieredCompilationQuickJitForLoops=false` (App ve Cli csproj) ile giderildi.

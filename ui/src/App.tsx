@@ -9,6 +9,7 @@ import { DevicesScreen } from './screens/DevicesScreen'
 import { SourceScreen } from './screens/SourceScreen'
 import { CalibrationScreen } from './screens/CalibrationScreen'
 import { SoundScreen } from './screens/SoundScreen'
+import { SettingsScreen } from './screens/SettingsScreen'
 
 const NUDGE_M = 0.05
 
@@ -82,6 +83,7 @@ export function App() {
                 {screen === 'source' && <SourceScreen />}
                 {screen === 'sound' && <SoundScreen />}
                 {screen === 'calibration' && <CalibrationScreen />}
+                {screen === 'settings' && <SettingsScreen />}
               </motion.div>
             </AnimatePresence>
           )}

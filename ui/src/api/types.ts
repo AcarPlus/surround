@@ -234,6 +234,36 @@ export interface EngineInfo {
   upmixLatencyMs: number
 }
 
+/**
+ * Profil: tek tıkla uygulanan ses işleme + upmix takımı (Film, Oyun, Müzik, kullanıcı profilleri).
+ * Config kökünde `profiles` olarak saklanır; motor bilinmeyen kök alanları olduğu gibi korur.
+ */
+export interface Profile {
+  id: string
+  name: string
+  /** Yerleşik profiller silinemez, yalnızca varsayılana döndürülür. */
+  builtin: boolean
+  processing: Processing
+  upmix: boolean
+  upmixOptions: UpmixOptions
+}
+
+/** Uygulama (Windows entegrasyonu) ayarları; yapılandırma belgesinden ayrı saklanır. */
+export interface AppSettings {
+  /** Başlatınca Windows varsayılan çıkışını kaynak cihaza (VB-Cable) çevir, durdurunca geri al. */
+  switchDefaultDevice: boolean
+  startWithWindows: boolean
+  startEngineOnLaunch: boolean
+  minimizeToTray: boolean
+}
+
+export const defaultAppSettings = (): AppSettings => ({
+  switchDefaultDevice: true,
+  startWithWindows: false,
+  startEngineOnLaunch: false,
+  minimizeToTray: true,
+})
+
 export interface Config {
   source: Source
   upmix: boolean
@@ -244,6 +274,10 @@ export interface Config {
   room: Room
   /** Yoksa varsayılan geçerli. */
   processing?: Processing
+  /** Profiller (yerleşik + kullanıcı); yoksa yerleşikler oluşturulur. */
+  profiles?: Profile[]
+  /** Etkin profilin kimliği; yoksa profil seçili değil. */
+  activeProfileId?: string
 }
 
 /** Kaynak kanal seviyeleri, dBFS (-90 .. 0). Eski motorlarda üst şeritler eksik olabilir; okurken `?? -90` kullan. */

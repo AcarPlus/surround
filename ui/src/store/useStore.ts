@@ -10,6 +10,7 @@ import {
   type Output,
   type Point,
   type Processing,
+  type Profile,
   defaultProcessing,
   normalizeProcessing,
   type Room,
@@ -24,8 +25,17 @@ import { clamp, clampToRoom, computeAuto, round, type PresetId } from '../lib/ge
 import { assignExisting, layoutSlots, type LayoutSpec } from '../lib/layout'
 import { ROLE_CUSTOM_MANUAL, ROLE_CUSTOM_MAP, computeMapSource, roleDef, rolePatch } from '../lib/roles'
 import { matchSoundPreset, soundPresetPatch } from '../lib/presets'
+import {
+  builtinProfile,
+  cleanProfileName,
+  isProfileModified,
+  newProfileId,
+  normalizeProfiles,
+  profilePatch,
+  snapshotState,
+} from '../lib/profiles'
 
-export type Screen = 'room' | 'devices' | 'source' | 'sound' | 'calibration'
+export type Screen = 'room' | 'devices' | 'source' | 'sound' | 'calibration' | 'settings'
 export type Theme = 'dark' | 'light'
 export type PresetChoice = PresetId | 'custom'
 export type RunState = 'stopped' | 'starting' | 'running'
@@ -46,6 +56,10 @@ interface State {
   speakers: Speaker[]
   room: Room
   processing: Processing
+  /** Yerleşik + kullanıcı profilleri; yerleşikler her zaman başta. */
+  profiles: Profile[]
+  /** Etkin profilin kimliği (hiçbiri seçili değilse null). */
+  activeProfileId: string | null
   /** Hoparlör başına gecikme/kazanç otomatik mi (yalnızca arayüz durumu). */
   auto: Record<string, AutoFlags>
 
@@ -91,6 +105,17 @@ interface State {
   /** Ses işleme alanlarını değiştirir; ses karakterini etkileyen bir alan değişirse etiket 'Özel' olur. */
   setProcessing: (patch: Partial<Processing>) => void
   applySoundPreset: (id: string) => void
+  /** Profili uygular: ses işleme + upmix + upmix ayrıntıları tek commit'te (motor canlı uygular). */
+  selectProfile: (id: string) => void
+  /** Mevcut ayarları yeni kullanıcı profili olarak kaydeder ve etkin yapar. Kaydedildiyse true. */
+  saveCurrentAsProfile: (name: string) => boolean
+  /** Etkin profilin içeriğini mevcut ayarlarla değiştirir ("Profili güncelle"). */
+  updateActiveProfile: () => void
+  renameProfile: (id: string, name: string) => void
+  /** Yalnızca kullanıcı profilleri silinir. */
+  deleteProfile: (id: string) => void
+  /** Yerleşik profili varsayılanına döndürür; etkinse hemen uygular. */
+  resetBuiltinProfile: (id: string) => void
   playTone: (id: string) => Promise<void>
   showToast: (msg: string, ms?: number) => void
 }
@@ -163,6 +188,8 @@ export const useStore = create<State>()((set, get) => {
     speakers: s.speakers.map((sp) => ({ ...sp, auto: s.auto[sp.id] ?? { delay: true, gain: true } })),
     room: s.room,
     processing: s.processing,
+    profiles: s.profiles,
+    ...(s.activeProfileId ? { activeProfileId: s.activeProfileId } : {}),
   })
 
   const ensureOutput = (outputs: Output[], deviceId: string): Output[] =>
@@ -180,6 +207,8 @@ export const useStore = create<State>()((set, get) => {
     speakers: [],
     room: { widthM: 5, depthM: 4.5, listener: { x: 2.5, y: 2.3 } },
     processing: defaultProcessing(),
+    profiles: normalizeProfiles(undefined),
+    activeProfileId: null,
     auto: {},
 
     preset: 'custom',
@@ -198,6 +227,7 @@ export const useStore = create<State>()((set, get) => {
         cfg.speakers.map((s) => [s.id, s.auto ?? { delay: true, gain: true }]),
       )
       const speakers = cfg.speakers.map(({ auto: _auto, ...rest }) => rest)
+      const profiles = normalizeProfiles(cfg.profiles)
       set({
         devices,
         source: cfg.source,
@@ -207,6 +237,8 @@ export const useStore = create<State>()((set, get) => {
         speakers: recalc(speakers, cfg.room.listener, auto),
         room: cfg.room,
         processing: normalizeProcessing(cfg.processing),
+        profiles,
+        activeProfileId: cfg.activeProfileId && profiles.some((p) => p.id === cfg.activeProfileId) ? cfg.activeProfileId : null,
         auto,
         preset: speakers.length === 0 ? 'custom' : '5.1',
         ready: true,
@@ -491,6 +523,49 @@ export const useStore = create<State>()((set, get) => {
       if (patch) commit({ processing: { ...get().processing, ...patch } }, 150)
     },
 
+    selectProfile(id) {
+      const p = get().profiles.find((v) => v.id === id)
+      if (!p) return
+      commit({ ...profilePatch(p), activeProfileId: id }, 150)
+    },
+
+    saveCurrentAsProfile(name) {
+      const clean = cleanProfileName(name)
+      if (!clean) return false
+      const { profiles, processing, upmix, upmixOptions } = get()
+      const profile: Profile = { id: newProfileId(), name: clean, builtin: false, ...snapshotState({ processing, upmix, upmixOptions }) }
+      commit({ profiles: [...profiles, profile], activeProfileId: profile.id })
+      return true
+    },
+
+    updateActiveProfile() {
+      const { profiles, activeProfileId, processing, upmix, upmixOptions } = get()
+      if (!activeProfileId) return
+      const snap = snapshotState({ processing, upmix, upmixOptions })
+      commit({ profiles: profiles.map((p) => (p.id === activeProfileId ? { ...p, ...snap } : p)) })
+    },
+
+    renameProfile(id, name) {
+      const clean = cleanProfileName(name)
+      const { profiles } = get()
+      if (!clean || !profiles.some((p) => p.id === id && !p.builtin)) return
+      commit({ profiles: profiles.map((p) => (p.id === id ? { ...p, name: clean } : p)) })
+    },
+
+    deleteProfile(id) {
+      const { profiles, activeProfileId } = get()
+      if (!profiles.some((p) => p.id === id && !p.builtin)) return
+      commit({ profiles: profiles.filter((p) => p.id !== id), activeProfileId: activeProfileId === id ? null : activeProfileId })
+    },
+
+    resetBuiltinProfile(id) {
+      const def = builtinProfile(id)
+      const { profiles, activeProfileId } = get()
+      if (!def || !profiles.some((p) => p.id === id)) return
+      const next = profiles.map((p) => (p.id === id ? def : p))
+      commit(activeProfileId === id ? { profiles: next, ...profilePatch(def) } : { profiles: next }, 150)
+    },
+
     async playTone(id) {
       const s = get().speakers.find((v) => v.id === id)
       if (!s) return
@@ -510,6 +585,16 @@ export const useStore = create<State>()((set, get) => {
     },
   }
 })
+
+/** Etkin profil (yoksa null). */
+export const selectActiveProfile = (s: State): Profile | null =>
+  s.activeProfileId ? (s.profiles.find((p) => p.id === s.activeProfileId) ?? null) : null
+
+/** Etkin profil seçiliyken ayarlar ondan sapmış mı? */
+export const selectProfileModified = (s: State): boolean => {
+  const p = selectActiveProfile(s)
+  return p ? isProfileModified(p, s) : false
+}
 
 /** Seçili hoparlör (dinleyici seçiliyse null). */
 export const selectSpeaker = (s: State): Speaker | null =>

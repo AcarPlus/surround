@@ -2,8 +2,10 @@ import type { SurroundApi } from './client'
 import {
   LOGICAL_CHANNELS,
   isHeightChannel,
+  defaultAppSettings,
   defaultProcessing,
   defaultUpmixOptions,
+  type AppSettings,
   type Config,
   type EngineInfo,
   type Device,
@@ -87,6 +89,7 @@ export function createMockApi(): SurroundApi {
   const devices = buildDevices()
   let config = initialConfig()
   let running = false
+  let appSettings: AppSettings = defaultAppSettings()
 
   const counters = new Map<string, { under: number; over: number }>()
   const statusListeners = new Set<(s: SinkStatus[]) => void>()
@@ -172,6 +175,13 @@ export function createMockApi(): SurroundApi {
     },
     async saveConfig(c) {
       config = structuredClone(c)
+    },
+    async getAppSettings() {
+      await wait(60)
+      return { ...appSettings }
+    },
+    async saveAppSettings(s) {
+      appSettings = { ...s }
     },
     async start() {
       await wait(450)

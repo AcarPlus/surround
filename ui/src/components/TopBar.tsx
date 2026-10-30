@@ -1,5 +1,6 @@
 import { useStore, type PresetChoice } from '../store/useStore'
 import { Segmented, Switch, Tip, cx } from './ui'
+import { ProfileMenu } from './ProfileMenu'
 import { IconMoon, IconPlay, IconStop, IconSun } from './icons'
 
 const PRESETS: { value: PresetChoice; label: string }[] = [
@@ -81,6 +82,8 @@ export function TopBar() {
         {running ? <IconStop width={14} height={14} /> : <IconPlay width={14} height={14} />}
         {starting ? 'Başlıyor…' : running ? 'Durdur' : 'Başlat'}
       </button>
+
+      <ProfileMenu />
 
       <div className="flex items-center gap-2">
         <span className="hidden text-xs text-faint xl:inline">Düzen</span>

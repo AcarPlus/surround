@@ -12,5 +12,7 @@ public static class AppPaths
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Surround");
 
     public static string ConfigFile => Path.Combine(DataDir, "config.json");
+    /// <summary>Uygulama ayarları (varsayılan cihaz, Windows ile başlat, tepsi ...); motor yapılandırmasından ayrı.</summary>
+    public static string AppSettingsFile => Path.Combine(DataDir, "app.json");
     public static string WebView2Dir => Path.Combine(CacheDir, "WebView2");
 }

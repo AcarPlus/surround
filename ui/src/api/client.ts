@@ -1,4 +1,4 @@
-import type { Config, Device, EngineInfo, LevelFrame, SinkStatus } from './types'
+import type { AppSettings, Config, Device, EngineInfo, LevelFrame, SinkStatus } from './types'
 import { createMockApi } from './mock'
 import { createBridgeApi, hasBridge } from './bridge'
 
@@ -10,6 +10,9 @@ export interface SurroundApi {
   listDevices(): Promise<Device[]>
   getConfig(): Promise<Config>
   saveConfig(config: Config): Promise<void>
+  /** Windows entegrasyonu ayarları (varsayılan çıkışı çevirme, otomatik başlatma, tepsi). */
+  getAppSettings(): Promise<AppSettings>
+  saveAppSettings(settings: AppSettings): Promise<void>
   start(): Promise<void>
   stop(): Promise<void>
   getStatus(): Promise<SinkStatus[]>

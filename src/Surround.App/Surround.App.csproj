@@ -4,6 +4,8 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
+    <!-- Only for the tray icon (NotifyIcon); all windows are WPF. -->
+    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>Surround</AssemblyName>
@@ -14,6 +16,9 @@
     <Product>Surround</Product>
     <Company>Surround</Company>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Startup: the DSP loops must not run as slow tier-0 code (that starved the sinks and caused an underrun in the first second). -->
+    <TieredPGO>false</TieredPGO>
+    <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
   </PropertyGroup>
 
   <ItemGroup>
@@ -28,6 +33,9 @@
   <ItemGroup>
     <!-- WPF projeleri System.IO'yu örtük using olarak almaz. -->
     <Using Include="System.IO" />
+    <!-- WinForms is referenced only for NotifyIcon; its implicit namespaces would clash with WPF's (Application, MessageBox ...). -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,5 +1,5 @@
 import type { SurroundApi } from './client'
-import type { Config, Device, EngineInfo, LevelFrame, SinkStatus } from './types'
+import { defaultAppSettings, type AppSettings, type Config, type Device, type EngineInfo, type LevelFrame, type SinkStatus } from './types'
 
 /**
  * WebView2 köprüsü: `window.chrome.webview` üzerinden C# tarafıyla (Surround.App/Bridge) JSON-RPC.
@@ -103,6 +103,8 @@ export function createBridgeApi(): SurroundApi {
     listDevices: () => call<Device[]>('listDevices'),
     getConfig: () => call<Config>('getConfig'),
     saveConfig: (config) => call<void>('saveConfig', config),
+    getAppSettings: async () => ({ ...defaultAppSettings(), ...(await call<Partial<AppSettings> | null>('getAppSettings')) }),
+    saveAppSettings: (settings) => call<void>('saveAppSettings', settings),
     start: () => call<void>('start'),
     stop: () => call<void>('stop'),
     getStatus: () => call<SinkStatus[]>('getStatus'),

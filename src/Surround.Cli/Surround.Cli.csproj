@@ -5,6 +5,9 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Startup: the DSP loops must not run as slow tier-0 code (that starved the sinks and caused an underrun in the first second). -->
+    <TieredPGO>false</TieredPGO>
+    <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
   </PropertyGroup>
 
   <ItemGroup>

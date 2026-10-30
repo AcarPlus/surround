@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { useStore, type Screen } from '../store/useStore'
-import { IconDevices, IconEq, IconMic, IconRoom, IconSource } from './icons'
+import { IconDevices, IconEq, IconGear, IconMic, IconRoom, IconSource } from './icons'
 import { cx } from './ui'
 
 const ITEMS: { id: Screen; label: string; icon: ReactNode }[] = [
@@ -11,12 +11,15 @@ const ITEMS: { id: Screen; label: string; icon: ReactNode }[] = [
   { id: 'calibration', label: 'Kalibrasyon', icon: <IconMic /> },
 ]
 
+/** Alta sabitlenir. */
+const SETTINGS_ITEM: { id: Screen; label: string; icon: ReactNode } = { id: 'settings', label: 'Ayarlar', icon: <IconGear /> }
+
 export function NavRail() {
   const screen = useStore((s) => s.screen)
   const setScreen = useStore((s) => s.setScreen)
   return (
     <nav aria-label="Ana gezinme" className="flex w-[76px] shrink-0 flex-col gap-1 border-r border-line bg-surface px-2 py-3">
-      {ITEMS.map((it) => {
+      {[...ITEMS, SETTINGS_ITEM].map((it) => {
         const active = screen === it.id
         return (
           <button
@@ -25,6 +28,7 @@ export function NavRail() {
             aria-current={active ? 'page' : undefined}
             className={cx(
               'relative flex flex-col items-center gap-1 rounded-md py-2 text-[11px] font-medium transition-colors',
+              it.id === 'settings' && 'mt-auto',
               active ? 'bg-raised text-fg' : 'text-muted hover:bg-raised/60 hover:text-fg',
             )}
           >

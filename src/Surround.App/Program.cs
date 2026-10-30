@@ -1,4 +1,5 @@
 using System.Windows;
+using Surround.Desktop.Bridge;
 using Velopack;
 
 namespace Surround.Desktop;
@@ -21,11 +22,17 @@ public static class Program
         using var instance = SingleInstance.TryAcquire();
         if (instance is null) return 0; // another instance exists and was asked to come to the front
 
+        // --tray (written by "Windows ile başlat"): stay in the notification area; the window is created on first use.
+        bool startInTray = args.Any(a => a.Equals(StartupRegistration.TrayArgument, StringComparison.OrdinalIgnoreCase));
+
         var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
         var window = new MainWindow();
         instance.Activated += () => app.Dispatcher.InvokeAsync(window.BringToFront);
+        app.SessionEnding += (_, _) => window.PrepareForSessionEnd();
+        app.Exit += (_, _) => window.Shutdown();
         app.MainWindow = window;
-        window.Show();
+        if (!startInTray) window.Show();
+        app.Dispatcher.InvokeAsync(async () => await window.RunStartupAsync());
         return app.Run();
     }
 }

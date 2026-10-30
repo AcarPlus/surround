@@ -36,7 +36,7 @@ export const SOUND_PRESETS: SoundPreset[] = [
     id: 'game',
     label: 'Oyun',
     hint: 'Ayak sesi ve yön için parlak üst orta.',
-    values: { eq: [2, 2, 0, -1, -1, 1, 3, 4, 3, 2], bassBoostDb: 2, clarityDb: 4, dynamicBoost: 0.2, ambience: 0.3, preampDb: -4 },
+    values: { eq: [2, 2, 0, -1, -1, 1, 3, 4, 3, 2], bassBoostDb: 2, clarityDb: 4, dynamicBoost: 0.5, ambience: 0.3, preampDb: -4 },
   },
   {
     id: 'music',

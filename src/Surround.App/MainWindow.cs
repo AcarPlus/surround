@@ -20,6 +20,9 @@ public sealed class MainWindow : Window
     private readonly SurroundBackend _backend = new();
     private BridgeHost? _bridge;
     private string? _devOrigin;
+    private readonly TrayIcon _tray;
+    private bool _exiting;
+    private bool _shutDown;
 
     public MainWindow()
     {
@@ -39,8 +42,71 @@ public sealed class MainWindow : Window
         };
         Content = _web;
 
+        _tray = new TrayIcon(BringToFront, () => _ = ToggleEngineAsync(), ExitApplication);
+        _backend.RunningChanged += running => _ = Dispatcher.InvokeAsync(() => { if (!_shutDown) _tray.SetRunning(running); });
+
         Loaded += async (_, _) => await InitializeWebAsync();
+        Closing += OnClosing;
         Closed += (_, _) => Shutdown();
+    }
+
+    /// <summary>Launch-time chores that do not need the page: repair the default output after a crash, auto-start the engine.</summary>
+    public async Task RunStartupAsync()
+    {
+        var settings = _backend.Settings.Load();
+        try { StartupRegistration.Apply(settings.StartWithWindows); } catch { /* keep the stored value */ }
+
+        if (settings.StartEngineOnLaunch)
+        {
+            try { await _backend.StartAsync(); return; }
+            catch (Exception ex)
+            {
+                _tray.Balloon("Motor başlatılamadı: " + (ex is BridgeException { Errors.Count: > 0 } be ? be.Errors[0] : ex.Message));
+            }
+        }
+        // The engine is not running: if an earlier crash left the source as the default output, undo that now.
+        await Task.Run(_backend.RestoreDefaultDevice);
+    }
+
+    private async Task ToggleEngineAsync()
+    {
+        try
+        {
+            if (_backend.IsRunning) await _backend.StopAsync();
+            else await _backend.StartAsync();
+        }
+        catch (Exception ex)
+        {
+            _tray.Balloon((_backend.IsRunning ? "Durdurulamadı: " : "Başlatılamadı: ") +
+                (ex is BridgeException { Errors.Count: > 0 } be ? be.Errors[0] : ex.Message));
+        }
+    }
+
+    private void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_exiting || !_backend.Settings.Load().MinimizeToTray) return;
+        e.Cancel = true;
+        Hide();
+        var s = _backend.Settings.Load();
+        if (!s.TrayHintShown)
+        {
+            _backend.Settings.Update(x => x with { TrayHintShown = true });
+            _tray.Balloon("Surround arka planda çalışıyor");
+        }
+    }
+
+    /// <summary>Really quits (tray "Çıkış"): stops the engine and restores the default output.</summary>
+    public void ExitApplication()
+    {
+        _exiting = true;
+        Close();
+    }
+
+    /// <summary>Windows is ending the session: do the cleanup now and never block the shutdown by hiding to tray.</summary>
+    public void PrepareForSessionEnd()
+    {
+        _exiting = true;
+        Shutdown();
     }
 
     private async Task InitializeWebAsync()
@@ -131,10 +197,14 @@ public sealed class MainWindow : Window
         "<h3>Arayüz dosyaları bulunamadı</h3><p>Beklenen konum: <code>" + System.Net.WebUtility.HtmlEncode(dir) + "</code></p>" +
         "<p>Önce <code>npm --prefix ui run build</code> çalıştırıp uygulamayı yeniden derleyin (build.ps1 bunu yapar).</p>";
 
-    private void Shutdown()
+    /// <summary>Idempotent (window Closed, session end and Application.Exit all lead here).</summary>
+    public void Shutdown()
     {
+        if (_shutDown) return;
+        _shutDown = true;
         _bridge?.Dispose();
-        _backend.Dispose();
+        _backend.Dispose(); // stops the engine and restores the default output device
+        _tray.Dispose();
         _web.Dispose();
     }
 
