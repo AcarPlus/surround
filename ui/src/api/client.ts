@@ -15,6 +15,8 @@ export interface SurroundApi {
   getStatus(): Promise<SinkStatus[]>
   /** deviceChannel 1 tabanlıdır. */
   playTone(deviceId: string, channel: number): Promise<void>
+  /** Windows ses denetim masasını açar (mmsys.cpl); VB-Cable'ı 7.1 yapmak için. */
+  openSoundPanel(): Promise<void>
   /** Çalışırken ~1 sn aralıkla çağrılır. Dönen fonksiyon aboneliği iptal eder. */
   onStatus(cb: (status: SinkStatus[]) => void): () => void
   /** Kaynak seviye ölçerleri için (tasarım aşamasında eklendi). */

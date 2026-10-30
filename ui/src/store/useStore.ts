@@ -7,6 +7,9 @@ import {
   type LogicalChannel,
   type Output,
   type Point,
+  type Processing,
+  defaultProcessing,
+  normalizeProcessing,
   type Room,
   type SinkStatus,
   type Source,
@@ -20,8 +23,9 @@ import {
   round,
   type PresetId,
 } from '../lib/geometry'
+import { matchSoundPreset, soundPresetPatch } from '../lib/presets'
 
-export type Screen = 'room' | 'devices' | 'source' | 'calibration'
+export type Screen = 'room' | 'devices' | 'source' | 'sound' | 'calibration'
 export type Theme = 'dark' | 'light'
 export type PresetChoice = PresetId | 'custom'
 export type RunState = 'stopped' | 'starting' | 'running'
@@ -40,6 +44,7 @@ interface State {
   outputs: Output[]
   speakers: Speaker[]
   room: Room
+  processing: Processing
   /** Hoparlör başına gecikme/kazanç otomatik mi (yalnızca arayüz durumu). */
   auto: Record<string, AutoFlags>
 
@@ -74,6 +79,9 @@ interface State {
   addOutput: (deviceId: string) => void
   setSource: (patch: Partial<Source>) => void
   setUpmix: (v: boolean) => void
+  /** Ses işleme alanlarını değiştirir; ses karakterini etkileyen bir alan değişirse etiket 'Özel' olur. */
+  setProcessing: (patch: Partial<Processing>) => void
+  applySoundPreset: (id: string) => void
   playTone: (id: string) => Promise<void>
   showToast: (msg: string, ms?: number) => void
 }
@@ -113,7 +121,7 @@ function describeError(e: unknown): string {
 
 export const useStore = create<State>()((set, get) => {
   /** Yapılandırmayı değiştiren her eylem buradan geçer: yeniden hesapla + gecikmeli kaydet. */
-  const commit = (patch: Partial<State>) => {
+  const commit = (patch: Partial<State>, delayMs = 400) => {
     const cur = get()
     const next = { ...cur, ...patch }
     const speakers = recalc(next.speakers, next.room.listener, next.auto)
@@ -121,7 +129,7 @@ export const useStore = create<State>()((set, get) => {
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
       api.saveConfig(buildConfig(get())).catch((e) => get().showToast(describeError(e), 6000))
-    }, 400)
+    }, delayMs)
   }
 
   /** Kaydedilecek belge: hoparlörlerin `auto` bayrakları da içinde taşınır. */
@@ -131,6 +139,7 @@ export const useStore = create<State>()((set, get) => {
     outputs: s.outputs,
     speakers: s.speakers.map((sp) => ({ ...sp, auto: s.auto[sp.id] ?? { delay: true, gain: true } })),
     room: s.room,
+    processing: s.processing,
   })
 
   const ensureOutput = (outputs: Output[], deviceId: string): Output[] =>
@@ -146,6 +155,7 @@ export const useStore = create<State>()((set, get) => {
     outputs: [],
     speakers: [],
     room: { widthM: 5, depthM: 4.5, listener: { x: 2.5, y: 2.3 } },
+    processing: defaultProcessing(),
     auto: {},
 
     preset: 'custom',
@@ -170,6 +180,7 @@ export const useStore = create<State>()((set, get) => {
         outputs: cfg.outputs,
         speakers: recalc(speakers, cfg.room.listener, auto),
         room: cfg.room,
+        processing: normalizeProcessing(cfg.processing),
         auto,
         preset: speakers.length === 0 ? 'custom' : '5.1',
         ready: true,
@@ -311,7 +322,9 @@ export const useStore = create<State>()((set, get) => {
       const { speakers, outputs } = get()
       let outs = outputs
       if (patch.outputDeviceId) outs = ensureOutput(outs, patch.outputDeviceId)
-      commit({ speakers: speakers.map((s) => (s.id === id ? { ...s, ...patch } : s)), outputs: outs })
+      // EQ sürüklemesi canlı uygulanır; kayıt sıklığını sınırla.
+      const live = 'eq' in patch || 'eqPreset' in patch
+      commit({ speakers: speakers.map((s) => (s.id === id ? { ...s, ...patch } : s)), outputs: outs }, live ? 150 : 400)
     },
 
     setMix(id, ch, gain) {
@@ -402,6 +415,23 @@ export const useStore = create<State>()((set, get) => {
       commit({ source: next })
     },
     setUpmix: (upmix) => commit({ upmix }),
+
+    setProcessing(patch) {
+      const cur = get().processing
+      const changesSound = Object.keys(patch).some((k) => k !== 'enabled' && k !== 'limiter' && k !== 'preset')
+      const next: Processing = {
+        ...cur,
+        ...patch,
+        preset: patch.preset ?? cur.preset,
+      }
+      if (changesSound && patch.preset === undefined) next.preset = matchSoundPreset(next)
+      commit({ processing: next }, 150)
+    },
+
+    applySoundPreset(id) {
+      const patch = soundPresetPatch(id)
+      if (patch) commit({ processing: { ...get().processing, ...patch } }, 150)
+    },
 
     async playTone(id) {
       const s = get().speakers.find((v) => v.id === id)

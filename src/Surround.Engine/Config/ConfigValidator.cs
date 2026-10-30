@@ -53,8 +53,35 @@ public static class ConfigValidator
             }
             if (s.DelayMs < 0 || !double.IsFinite(s.DelayMs)) e.Add($"{n}: delayMs geçersiz.");
             if (!double.IsFinite(s.GainDb)) e.Add($"{n}: gainDb geçersiz.");
+            if (s.Eq != null) CheckEq(e, $"{n}: eq", s.Eq);
+            if (!(s.HighPassHz == 0 || (s.HighPassHz >= MinHighPassHz && s.HighPassHz <= MaxHighPassHz)))
+                e.Add($"{n}: highPassHz 0 (kapalı) veya {MinHighPassHz}-{MaxHighPassHz} aralığında olmalı.");
+            if (s.HighPassHz > 0 && s.BassReceiver)
+                e.Add($"{n}: hem bası kesilen (highPassHz) hem bas alıcısı (bassReceiver) olamaz.");
         }
+
+        var p = cfg.Processing;
+        CheckRange(e, "processing.preampDb", p.PreampDb, -24, 12);
+        CheckEq(e, "processing.eq", p.Eq);
+        CheckRange(e, "processing.bassBoostDb", p.BassBoostDb, 0, 12);
+        CheckRange(e, "processing.clarityDb", p.ClarityDb, 0, 12);
+        CheckRange(e, "processing.dynamicBoost", p.DynamicBoost, 0, 1);
+        CheckRange(e, "processing.ambience", p.Ambience, 0, 1);
         return e;
+    }
+
+    public const double MinHighPassHz = 40, MaxHighPassHz = 250, MaxEqDb = 12;
+
+    private static void CheckRange(List<string> e, string field, double v, double min, double max)
+    {
+        if (!(v >= min && v <= max)) e.Add($"{field} {min}..{max} aralığında olmalı (bulunan: {v}).");
+    }
+
+    private static void CheckEq(List<string> e, string field, double[] eq)
+    {
+        if (eq.Length != ProcessingConfig.Bands) { e.Add($"{field}: {ProcessingConfig.Bands} bant olmalı (bulunan: {eq.Length})."); return; }
+        for (int b = 0; b < eq.Length; b++)
+            if (!(Math.Abs(eq[b]) <= MaxEqDb)) e.Add($"{field}[{b}] -{MaxEqDb}..+{MaxEqDb} dB aralığında olmalı (bulunan: {eq[b]}).");
     }
 
     /// <summary>Checks that need to look at real (or faked) devices.</summary>

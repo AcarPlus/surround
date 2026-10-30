@@ -138,3 +138,17 @@ input[type='range']:disabled {
 svg text {
   user-select: none;
 }
+
+/* Büyük kaydırıcı (Ses ekranı) */
+input[type='range'].big-range {
+  height: 24px;
+}
+input[type='range'].big-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+}
+input[type='range'].big-range::-webkit-slider-thumb {
+  width: 20px;
+  height: 20px;
+  margin-top: -7px;
+}

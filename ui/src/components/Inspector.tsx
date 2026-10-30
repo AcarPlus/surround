@@ -1,6 +1,14 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { LOGICAL_CHANNELS } from '../api/types'
+import { LOGICAL_CHANNELS, flatEq, type Speaker } from '../api/types'
+import { EqEditor } from './EqEditor'
+import {
+  CUSTOM_ID,
+  CUSTOM_LABEL,
+  SPEAKER_PRESETS,
+  speakerPresetPatch,
+  speakerPresetValue,
+} from '../lib/presets'
 import { LISTENER_ID, selectSpeaker, useStore } from '../store/useStore'
 import { computeAuto } from '../lib/geometry'
 import { deviceColorVar } from '../lib/colors'
@@ -203,6 +211,8 @@ function SpeakerPanel() {
         </div>
       </section>
 
+      <EqBassSection sp={sp} />
+
       <section>
         <SectionTitle
           right={<Badge tone={a.delay && a.gain ? 'accent' : 'neutral'}>{a.delay && a.gain ? 'Otomatik' : 'Elle'}</Badge>}
@@ -253,6 +263,97 @@ function SpeakerPanel() {
         </Button>
       </div>
     </div>
+  )
+}
+
+const HIGH_PASS_OPTIONS = [80, 100, 120, 150, 200]
+
+function EqBassSection({ sp }: { sp: Speaker }) {
+  const speakers = useStore((s) => s.speakers)
+  const updateSpeaker = useStore((s) => s.updateSpeaker)
+  const hp = sp.highPassHz ?? 0
+  const presetValue = speakerPresetValue(sp)
+  const anyHighPass = speakers.some((s) => (s.highPassHz ?? 0) > 0)
+  const anyReceiver = speakers.some((s) => s.bassReceiver)
+
+  return (
+    <section>
+      <SectionTitle>EQ ve bas</SectionTitle>
+      <div className="space-y-3">
+        <Field label="Hoparlör ön ayarı">
+          <Select
+            ariaLabel="Hoparlör ön ayarı"
+            value={presetValue}
+            onChange={(v) => {
+              const patch = speakerPresetPatch(v)
+              if (patch) updateSpeaker(sp.id, patch)
+            }}
+          >
+            {SPEAKER_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+            {presetValue === CUSTOM_ID && <option value={CUSTOM_ID}>{CUSTOM_LABEL}</option>}
+          </Select>
+        </Field>
+
+        <div>
+          <div className="mb-1.5 flex items-center justify-between text-xs text-muted">
+            <span>10 bant EQ</span>
+            <button
+              type="button"
+              className="text-faint hover:text-fg disabled:opacity-40 disabled:hover:text-faint"
+              disabled={!sp.eq}
+              onClick={() => updateSpeaker(sp.id, { eq: undefined, eqPreset: 'flat' })}
+            >
+              Sıfırla
+            </button>
+          </div>
+          <EqEditor
+            compact
+            value={sp.eq ?? flatEq()}
+            onChange={(eq) => updateSpeaker(sp.id, { eq, eqPreset: CUSTOM_ID })}
+          />
+        </div>
+
+        <Field label="Küçük hoparlör (bas kes)">
+          <Select
+            ariaLabel="Küçük hoparlör bas kesme"
+            value={hp}
+            onChange={(v) => updateSpeaker(sp.id, { highPassHz: Number(v) || undefined, ...(Number(v) ? { bassReceiver: undefined } : {}) })}
+          >
+            <option value={0}>Kapalı</option>
+            {hp > 0 && !HIGH_PASS_OPTIONS.includes(hp) && <option value={hp}>{hp} Hz</option>}
+            {HIGH_PASS_OPTIONS.map((f) => (
+              <option key={f} value={f}>
+                {f} Hz
+              </option>
+            ))}
+          </Select>
+        </Field>
+
+        <div>
+          <label className="flex items-center justify-between gap-3 text-[13px]">
+            Bas alıcısı (dahili sub / subwoofer)
+            <Switch
+              checked={!!sp.bassReceiver}
+              onChange={(v) => updateSpeaker(sp.id, { bassReceiver: v || undefined, ...(v ? { highPassHz: undefined } : {}) })}
+              label="Bas alıcısı"
+            />
+          </label>
+          <p className="mt-1 text-xs text-faint">Kesilen baslar ve LFE bu hoparlöre gider.</p>
+        </div>
+
+        {anyHighPass && !anyReceiver && (
+          <div className="flex gap-2 rounded border border-warn/40 bg-warn/10 p-2 text-xs text-warn">
+            <IconWarn className="mt-px shrink-0" />
+            Bir hoparlörün basları kesiliyor ama bas alıcısı yok; kesilen bas kaybolur. Bir hoparlörü (örn. dahili sub)
+            bas alıcısı yap.
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 

@@ -103,6 +103,7 @@ export function createBridgeApi(): SurroundApi {
     stop: () => call<void>('stop'),
     getStatus: () => call<SinkStatus[]>('getStatus'),
     playTone: (deviceId, channel) => call<void>('playTone', deviceId, channel),
+    openSoundPanel: () => call<void>('openSoundPanel'),
     onStatus: (cb) => subscribe(statusListeners, cb),
     onLevels: (cb) => subscribe(levelListeners, cb),
     onEngineError: (cb) => subscribe(errorListeners, cb),

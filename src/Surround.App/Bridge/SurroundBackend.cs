@@ -36,6 +36,7 @@ public sealed class SurroundBackend : IDisposable
             case "stop": await StopAsync(); return null;
             case "getStatus": return _host.LastStatus;
             case "playTone": return await Task.Run(() => PlayTone(Arg(args, 0).GetString() ?? "", Arg(args, 1).GetInt32()));
+            case "openSoundPanel": OpenSoundPanel(); return null;
             default: throw new BridgeException($"Bilinmeyen yöntem: {method}");
         }
     }
@@ -85,10 +86,20 @@ public sealed class SurroundBackend : IDisposable
             var errors = await Task.Run(() => Validate(cfg));
             if (errors.Count > 0) throw new BridgeException(errors);
 
-            if (_host.IsRunning && cfg.EngineFingerprint() != _runningFingerprint)
+            if (_host.IsRunning)
             {
-                await RestartAsync(cfg);
-                _runningFingerprint = cfg.EngineFingerprint();
+                var fp = cfg.EngineFingerprint();
+                if (fp != _runningFingerprint)
+                {
+                    await RestartAsync(cfg);
+                    _runningFingerprint = fp;
+                }
+                else
+                {
+                    // Same audio graph: processing and speaker EQ are swapped in place, no dropout.
+                    try { await _host.UpdateLiveAsync(cfg); }
+                    catch (Exception ex) { throw new BridgeException($"Ses ayarları uygulanamadı: {ex.Message}"); }
+                }
             }
             return null;
         }
@@ -137,6 +148,18 @@ public sealed class SurroundBackend : IDisposable
             _runningFingerprint = null;
         }
         finally { _gate.Release(); }
+    }
+
+    // ---- system ----
+
+    /// <summary>Opens the Windows Sound control panel (e.g. to set VB-Cable to 7.1).</summary>
+    private static void OpenSoundPanel()
+    {
+        try
+        {
+            using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("control", "mmsys.cpl") { UseShellExecute = true });
+        }
+        catch (Exception ex) { throw new BridgeException($"Ses denetim masası açılamadı: {ex.Message}"); }
     }
 
     // ---- tone ----

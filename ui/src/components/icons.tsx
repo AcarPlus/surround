@@ -87,3 +87,16 @@ export const IconWand = (p: SVGProps<SVGSVGElement>) => (
     <path d="M5 19 16 8M14 6l4 4M7 4v3M5.5 5.5h3M19 15v3M17.5 16.5h3" />
   </svg>
 )
+export const IconEq = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <path d="M6 3.5v17M12 3.5v17M18 3.5v17" />
+    <circle cx="6" cy="14" r="2" fill="rgb(var(--surface))" />
+    <circle cx="12" cy="8" r="2" fill="rgb(var(--surface))" />
+    <circle cx="18" cy="16" r="2" fill="rgb(var(--surface))" />
+  </svg>
+)
+export const IconCheck = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base({ width: 16, height: 16, ...p })}>
+    <path d="M4.5 12.5 10 18l9.5-11" />
+  </svg>
+)

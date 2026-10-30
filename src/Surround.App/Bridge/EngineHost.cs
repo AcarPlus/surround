@@ -53,6 +53,14 @@ public sealed class EngineHost : IDisposable
 
     public Task StopAsync() => Enqueue(StopCore);
 
+    /// <summary>Applies processing / speaker EQ changes to the running engine without a restart (no-op when stopped).</summary>
+    public Task UpdateLiveAsync(SurroundConfig cfg) => Enqueue(() =>
+    {
+        if (_engine is null) return;
+        _engine.UpdateLive(cfg);
+        _config = cfg;
+    });
+
     private Task Enqueue(Action action)
     {
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

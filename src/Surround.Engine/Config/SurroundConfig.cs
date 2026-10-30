@@ -37,7 +37,46 @@ public sealed class SpeakerConfig
     public double GainDb { get; set; }
     public bool Mute { get; set; }
 
+    /// <summary>Per-speaker 10-band EQ in dB (same bands as <see cref="ProcessingConfig.Eq"/>); null = flat. Live-updatable.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double[]? Eq { get; set; }
+    /// <summary>UI label only; the engine ignores it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EqPreset { get; set; }
+    /// <summary>0 = full range; 40..250 = LR4 high-pass, the cut bass goes to the bass receivers.</summary>
+    public double HighPassHz { get; set; }
+    /// <summary>Receives the bass cut from high-passed speakers (and LFE from a native multichannel source).</summary>
+    public bool BassReceiver { get; set; }
+
     /// <summary>Unknown JSON members (UI-only data such as room layout) preserved across load/save; the engine ignores them.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>Global sound processing on the logical 8 channels, plus the per-output limiter switch. Live-updatable.</summary>
+public sealed class ProcessingConfig
+{
+    public const int Bands = 10;
+    /// <summary>Center frequencies of the 10 EQ bands (Hz). Ends are shelves, the rest peaking.</summary>
+    public static readonly double[] BandHz = { 31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000 };
+
+    /// <summary>false skips the global processing (the limiter still runs).</summary>
+    public bool Enabled { get; set; } = true;
+    /// <summary>UI label only; the engine ignores it.</summary>
+    public string Preset { get; set; } = "flat";
+    public double PreampDb { get; set; }
+    private double[] _eq = new double[Bands];
+    public double[] Eq { get => _eq; set => _eq = value ?? new double[Bands]; }
+    public double BassBoostDb { get; set; }
+    public double ClarityDb { get; set; }
+    /// <summary>0..1: compression amount with automatic makeup gain.</summary>
+    public double DynamicBoost { get; set; }
+    /// <summary>0..1: M/S widening of the FL/FR, BL/BR and SL/SR pairs.</summary>
+    public double Ambience { get; set; }
+    /// <summary>Peak limiter (-1 dBFS ceiling) on every output device.</summary>
+    public bool Limiter { get; set; } = true;
+
+    /// <summary>Unknown JSON members preserved across load/save; the engine ignores them.</summary>
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
 }
@@ -46,6 +85,8 @@ public sealed class SurroundConfig
 {
     public SourceConfig Source { get; set; } = new();
     public bool Upmix { get; set; }
+    private ProcessingConfig _processing = new();
+    public ProcessingConfig Processing { get => _processing; set => _processing = value ?? new(); }
     public List<OutputConfig> Outputs { get; set; } = new();
     public List<SpeakerConfig> Speakers { get; set; } = new();
 
@@ -73,14 +114,16 @@ public sealed class SurroundConfig
     /// <summary>
     /// Canonical JSON of the engine-relevant fields only (extra/UI members dropped). Two configs with the same
     /// fingerprint produce an identical audio graph, so a running engine need not restart between them.
+    /// Processing and per-speaker EQ are excluded: <see cref="SurroundEngine.UpdateLive"/> applies them in place.
     /// </summary>
     public string EngineFingerprint()
     {
         var copy = Parse(ToJson());
         copy.Extra = null;
+        copy.Processing = new();
         copy.Source.Extra = null;
         foreach (var o in copy.Outputs) o.Extra = null;
-        foreach (var s in copy.Speakers) { s.Extra = null; s.Name = ""; }
+        foreach (var s in copy.Speakers) { s.Extra = null; s.Name = ""; s.Eq = null; s.EqPreset = null; }
         return copy.ToJson();
     }
 

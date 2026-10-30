@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api/client'
-import { LOGICAL_CHANNELS, type LevelFrame, type LogicalChannel } from '../api/types'
+import { LOGICAL_CHANNELS, type Device, type LevelFrame, type LogicalChannel } from '../api/types'
 import { useStore } from '../store/useStore'
-import { Card, Field, ScreenHeader, SectionTitle, Segmented, Select, Switch, cx } from '../components/ui'
-import { IconWarn } from '../components/icons'
+import { Badge, Button, Card, Field, ScreenHeader, SectionTitle, Segmented, Select, Switch, cx } from '../components/ui'
+import { IconCheck, IconWarn } from '../components/icons'
 import { fmt } from '../lib/format'
 
 const MIN_DB = -60
@@ -21,24 +21,21 @@ export function SourceScreen() {
   const flow = source.mode === 'capture' ? 'capture' : 'render'
   const options = devices.filter((d) => d.flow === flow)
   const current = devices.find((d) => d.id === source.deviceId)
-  const hasCable = devices.some((d) => d.flow === 'capture' && d.channels >= 8)
+  const cable = findCable(devices)
+  const cableSelected = !!cable && source.mode === 'loopback' && source.deviceId === cable.id
+  const selectedIsCable = !!current && /cable/i.test(current.name)
+  const twoChannel = selectedIsCable && current.channels <= 2
 
   return (
     <div className="h-full overflow-y-auto p-5">
       <ScreenHeader title="Kaynak" sub="Sesin yakalandığı cihaz ve kanal seviyeleri." />
 
-      {!hasCable && (
-        <div className="mb-4 flex items-start gap-3 rounded-lg border border-warn/40 bg-warn/10 p-3 text-[13px]">
-          <IconWarn className="mt-0.5 shrink-0 text-warn" />
-          <div>
-            <p className="font-semibold text-warn">Gerçek 7.1 için VB-Cable önerilir</p>
-            <p className="mt-0.5 text-muted">
-              8 kanallı bir yakalama cihazı bulunamadı. Oyun/medya uygulamaları ayrık 5.1/7.1 gönderebilmek için sanal
-              bir 8 kanallı cihaza ihtiyaç duyar; aksi halde yalnızca 2 kanal alınır ve yükseltme (upmix) kullanılır.
-            </p>
-          </div>
-        </div>
-      )}
+      <CableGuide
+        cable={cable}
+        cableSelected={cableSelected}
+        twoChannel={twoChannel}
+        onSelect={() => cable && setSource({ mode: 'loopback', deviceId: cable.id })}
+      />
 
       <div className="grid grid-cols-1 gap-4 min-[1100px]:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
         <Card className="space-y-4 self-start p-4">
@@ -72,6 +69,12 @@ export function SourceScreen() {
               {current.channels} kanal · {(current.sampleRate / 1000).toString().replace('.', ',')} kHz
             </p>
           )}
+          {twoChannel && (
+            <p className="flex items-start gap-1.5 text-xs text-warn">
+              <IconWarn className="mt-px shrink-0" />
+              Windows’ta 7.1 olarak yapılandırılmamış — yukarıdaki 3. adım.
+            </p>
+          )}
 
           <div className="border-t border-line pt-4">
             <label className="flex items-start justify-between gap-3">
@@ -91,6 +94,156 @@ export function SourceScreen() {
         </Card>
       </div>
     </div>
+  )
+}
+
+/** VB-Cable'ın oynatma (render) ucu: adında CABLE geçen, tercihen "16ch" olan cihaz. */
+function findCable(devices: Device[]): Device | undefined {
+  const renders = devices.filter((d) => d.flow === 'render' && /cable/i.test(d.name))
+  return renders.find((d) => /16ch/i.test(d.name)) ?? renders[0]
+}
+
+function CableGuide({
+  cable,
+  cableSelected,
+  twoChannel,
+  onSelect,
+}: {
+  cable: Device | undefined
+  cableSelected: boolean
+  twoChannel: boolean
+  onSelect: () => void
+}) {
+  const showToast = useStore((s) => s.showToast)
+  const openPanel = async () => {
+    try {
+      await api.openSoundPanel()
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : String(e), 6000)
+    }
+  }
+
+  const steps: { done: boolean; title: ReactNode; body?: ReactNode }[] = [
+    {
+      done: !!cable,
+      title: (
+        <>
+          VB-Cable’ı <span className="num">vb-audio.com</span>’dan kur ve bilgisayarı yeniden başlat.
+        </>
+      ),
+    },
+    {
+      done: false,
+      title: (
+        <>
+          Windows varsayılan çıkışını <b className="font-semibold">“CABLE In 16ch”</b> yap.
+        </>
+      ),
+    },
+    {
+      done: false,
+      title: (
+        <>
+          Ses panelinde <b className="font-semibold">CABLE In 16ch</b> → Yapılandır → <b className="font-semibold">7.1</b>.
+        </>
+      ),
+      body: (
+        <Button size="sm" className="mt-1.5" onClick={openPanel}>
+          Ses panelini aç
+        </Button>
+      ),
+    },
+    {
+      done: cableSelected,
+      title: (
+        <>
+          Burada kaynak olarak <b className="font-semibold">CABLE In 16ch</b> + <b className="font-semibold">Loopback</b> seç.
+        </>
+      ),
+      body: cable ? (
+        <Button size="sm" variant={cableSelected ? 'default' : 'primary'} className="mt-1.5" onClick={onSelect} disabled={cableSelected}>
+          {cableSelected ? 'Kaynak seçili' : 'Kaynak olarak seç'}
+        </Button>
+      ) : undefined,
+    },
+    {
+      done: false,
+      title: (
+        <>
+          Ön hoparlörleri <b className="font-semibold">Hoparlör (Realtek)</b> cihazına ekle (Cihazlar ekranı).
+        </>
+      ),
+    },
+  ]
+
+  return (
+    <Card className="mb-4 p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-[14px] font-semibold">Tüm hoparlörleri uygulamadan geçir (önerilen)</h2>
+          <p className="mt-0.5 text-xs text-muted">
+            Windows sesi tek bir sanal 7.1 cihaza gönderir; uygulama kanalları ayırıp tüm hoparlörlere dağıtır.
+          </p>
+        </div>
+        {cable ? (
+          <Badge tone="ok" className="mt-0.5 shrink-0">
+            VB-Cable bulundu
+          </Badge>
+        ) : (
+          <Badge tone="warn" className="mt-0.5 shrink-0">
+            VB-Cable bulunamadı
+          </Badge>
+        )}
+      </div>
+
+      {cable ? (
+        <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-ok/40 bg-ok/10 p-3 text-[13px]">
+          <IconCheck className="shrink-0 text-ok" />
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold text-ok">VB-Cable bulundu</p>
+            <p className="num mt-0.5 truncate text-xs text-muted">
+              {cable.name} · {cable.channels} kanal
+            </p>
+            {twoChannel && cableSelected && (
+              <p className="mt-1 text-xs text-warn">Windows’ta 7.1 olarak yapılandırılmamış — 3. adım.</p>
+            )}
+          </div>
+          <Button size="sm" variant={cableSelected ? 'default' : 'primary'} onClick={onSelect} disabled={cableSelected}>
+            {cableSelected ? 'Kaynak seçili' : 'Kaynak olarak seç'}
+          </Button>
+        </div>
+      ) : (
+        <div className="mb-3 flex items-start gap-3 rounded-lg border border-warn/40 bg-warn/10 p-3 text-[13px]">
+          <IconWarn className="mt-0.5 shrink-0 text-warn" />
+          <div>
+            <p className="font-semibold text-warn">VB-Cable bulunamadı</p>
+            <p className="mt-0.5 text-muted">
+              Oyun/medya uygulamalarının ayrık 5.1/7.1 gönderebilmesi için sanal 8 kanallı bir cihaz gerekir; kurulmazsa
+              yalnızca 2 kanal alınır ve yükseltme (upmix) kullanılır. Kurulumdan sonra bu ekranı yenile.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <ol className="space-y-2.5">
+        {steps.map((st, i) => (
+          <li key={i} className="flex items-start gap-3 text-[13px]">
+            <span
+              className={cx(
+                'num mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold',
+                st.done ? 'border-ok bg-ok text-bg' : 'border-line-strong text-muted',
+              )}
+            >
+              {st.done ? <IconCheck width={11} height={11} strokeWidth={2.4} /> : i + 1}
+            </span>
+            <div className="min-w-0">
+              <p className="leading-5">{st.title}</p>
+              {st.body}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </Card>
   )
 }
 

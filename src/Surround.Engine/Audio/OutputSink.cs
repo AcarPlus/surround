@@ -21,7 +21,7 @@ public sealed class OutputSink : IDisposable
     public int DeviceRate { get; }
     public int DeviceChannels { get; }
 
-    public OutputSink(MMDevice device, double bufferMs, int sourceRate, IReadOnlyList<SpeakerRoute> routes, Action<string>? log = null, Action<string>? error = null)
+    public OutputSink(MMDevice device, double bufferMs, int sourceRate, IReadOnlyList<SpeakerRoute> routes, bool limiter, Action<string>? log = null, Action<string>? error = null)
     {
         _device = device;
         _log = log;
@@ -36,7 +36,8 @@ public sealed class OutputSink : IDisposable
 
         int capFrames = (int)(sourceRate * Math.Max(0.5, 5 * bufferMs / 1000.0));
         _ring = new RingBuffer(capFrames * DeviceChannels, DeviceChannels);
-        _mixer = new SinkMixer(DeviceChannels, routes);
+        // The limiter always runs (bypassed when off) so its look-ahead delay is the same on every output.
+        _mixer = new SinkMixer(DeviceChannels, routes, sourceRate, new PeakLimiter(DeviceChannels, sourceRate) { Enabled = limiter });
         _reader = new DriftResamplingReader(_ring, DeviceChannels, sourceRate, DeviceRate, bufferMs);
 
         _out = new WasapiOut(device, AudioClientShareMode.Shared, true, 30);
@@ -51,11 +52,18 @@ public sealed class OutputSink : IDisposable
 
     public void Start() => _out.Play();
 
-    /// <summary>Called from the capture thread with logical 7.1 frames.</summary>
-    public void Push(ReadOnlySpan<float> logical, int frames)
+    /// <summary>Called from the capture thread with logical 7.1 frames and the bass bus (one sample per frame, may be empty).</summary>
+    public void Push(ReadOnlySpan<float> logical, ReadOnlySpan<float> bass, int frames)
     {
-        int dropped = _mixer.Process(logical, frames, _ring);
+        int dropped = _mixer.Process(logical, bass, frames, _ring);
         if (dropped > 0) _reader.AddOverruns(1);
+    }
+
+    /// <summary>Live changes: per-speaker EQ (aligned with the constructor's routes) and the limiter switch.</summary>
+    public void UpdateLive(IReadOnlyList<double[]?> eqPerRoute, bool limiter)
+    {
+        _mixer.SetEq(eqPerRoute);
+        _mixer.LimiterEnabled = limiter;
     }
 
     public SinkStatus GetStatus() =>

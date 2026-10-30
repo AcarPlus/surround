@@ -27,6 +27,9 @@ public sealed class SurroundEngine : IDisposable
     private int[] _map = Array.Empty<int>();
     private float[] _srcFloat = new float[16384];
     private float[] _logical = new float[8 * 4096];
+    private float[] _bassBuf = new float[4096];
+    private GlobalProcessor? _proc;
+    private BassManager? _bass;
     private bool _upmixActive;
     private long _frames;
     private bool _started;
@@ -67,14 +70,18 @@ public sealed class SurroundEngine : IDisposable
                 else _log?.Invoke($"Uyarı: upmix yalnızca 2 kanallı kaynakta çalışır (kaynak {n} kanal); atlandı.");
             }
 
+            _proc = new GlobalProcessor(fs);
+            _proc.Update(ProcessingSettings.Build(_cfg.Processing, fs));
+            var bass = PlanBass(fs, nativeMultichannel: !_upmixActive && n > 2);
+
             foreach (var o in _cfg.Outputs)
             {
                 var dev = en.GetDevice(o.DeviceId.Trim());
                 var routes = _cfg.Speakers
                     .Where(s => SurroundConfig.SameId(s.OutputDeviceId, o.DeviceId))
-                    .Select(s => BuildRoute(s, fs))
+                    .Select(s => BuildRoute(s, fs, bass))
                     .ToList();
-                var sink = new OutputSink(dev, o.BufferMs, fs, routes, _log, msg => Error?.Invoke(msg));
+                var sink = new OutputSink(dev, o.BufferMs, fs, routes, _cfg.Processing.Limiter, _log, msg => Error?.Invoke(msg));
                 _sinks.Add(sink);
                 _log?.Invoke($"Çıkış: {sink.Name} ({sink.DeviceRate} Hz, {sink.DeviceChannels} kanal), {routes.Count} hoparlör");
             }
@@ -101,12 +108,74 @@ public sealed class SurroundEngine : IDisposable
         }
     }
 
-    private SpeakerRoute BuildRoute(SpeakerConfig s, int fs)
+    /// <summary>Per-receiver shares of the bass bus and of the folded LFE (0 = none).</summary>
+    private readonly record struct BassPlanResult(float BusShare, float LfeFold);
+
+    /// <summary>
+    /// Bass management: the cut bass of high-passed speakers is split evenly over the (unmuted) receivers. With a
+    /// native multichannel source the LFE is folded into receivers whose row lacks it; an upmixed LFE is derived from
+    /// the fronts already, so it is not added twice.
+    /// </summary>
+    private BassPlanResult PlanBass(int fs, bool nativeMultichannel)
+    {
+        var active = _cfg.Speakers.Where(s => !s.Mute).ToList();
+        var cut = active.Where(s => s.HighPassHz > 0).ToList();
+        var recv = active.Where(s => s.BassReceiver).ToList();
+        if (cut.Count > 0 && recv.Count == 0)
+            _log?.Invoke($"Uyarı: {cut.Count} hoparlörün bası kesiliyor ama bas alıcısı (bassReceiver) yok; kesilen bas duyulmayacak.");
+
+        float share = 0f;
+        if (cut.Count > 0 && recv.Count > 0)
+        {
+            _bass = new BassManager(fs, cut.Select(s => new BassSource(MixRow(s), s.GainDb, s.HighPassHz)).ToList());
+            share = 1f / recv.Count;
+        }
+        int lacking = nativeMultichannel ? recv.Count(s => !HasLfe(s)) : 0;
+        return new BassPlanResult(share, lacking > 0 ? 1f / lacking : 0f);
+    }
+
+    private static bool HasLfe(SpeakerConfig s) =>
+        s.Source.Any(kv => Channels.IndexOf(kv.Key) == Channels.LFE && kv.Value != 0);
+
+    private static float[] MixRow(SpeakerConfig s)
     {
         var row = new float[Channels.Count];
         foreach (var (k, v) in s.Source) row[Channels.IndexOf(k)] = (float)v;
+        return row;
+    }
+
+    private SpeakerRoute BuildRoute(SpeakerConfig s, int fs, BassPlanResult bass)
+    {
+        var row = MixRow(s);
+        float share = 0f;
+        if (s.BassReceiver)
+        {
+            share = bass.BusShare;
+            if (!HasLfe(s)) row[Channels.LFE] = bass.LfeFold;
+        }
         int delay = (int)Math.Round(Math.Max(0, _cfg.EffectiveDelayMs(s)) * fs / 1000.0);
-        return new SpeakerRoute(s.Name, s.DeviceChannel - 1, row, s.GainDb, s.Mute, delay);
+        return new SpeakerRoute(s.Name, s.DeviceChannel - 1, row, s.GainDb, s.Mute, delay, s.HighPassHz, share, s.Eq);
+    }
+
+    /// <summary>
+    /// Applies the live-updatable part of <paramref name="cfg"/> (processing, per-speaker EQ, limiter switch) without a
+    /// restart. The caller ensures the config has the running engine's <see cref="SurroundConfig.EngineFingerprint"/>.
+    /// Coefficients are built here, off the audio thread, and swapped in by reference.
+    /// </summary>
+    public void UpdateLive(SurroundConfig cfg)
+    {
+        if (!_started || _srcFormat is null) return;
+        var routed = cfg.ForRouting();
+        _proc?.Update(ProcessingSettings.Build(routed.Processing, _srcFormat.SampleRate));
+        // Sinks were created in routed.Outputs order with speakers in config order; the fingerprint keeps both stable.
+        for (int i = 0; i < _sinks.Count && i < routed.Outputs.Count; i++)
+        {
+            var eqs = routed.Speakers
+                .Where(s => SurroundConfig.SameId(s.OutputDeviceId, routed.Outputs[i].DeviceId))
+                .Select(s => s.Eq)
+                .ToList();
+            _sinks[i].UpdateLive(eqs, routed.Processing.Limiter);
+        }
     }
 
     private void OnData(object? sender, WaveInEventArgs e)
@@ -132,14 +201,23 @@ public sealed class SurroundEngine : IDisposable
                     _logical[f * Channels.Count + _map[c]] = _srcFloat[f * n + c];
         }
 
-        var span = new ReadOnlySpan<float>(_logical, 0, frames * Channels.Count);
+        var span = new Span<float>(_logical, 0, frames * Channels.Count);
+        _proc?.Process(span, frames);
         _meter.Update(span, frames);
-        foreach (var s in _sinks) s.Push(span, frames);
+
+        ReadOnlySpan<float> bass = default;
+        if (_bass != null)
+        {
+            if (_bassBuf.Length < frames) _bassBuf = new float[frames * 2];
+            _bass.Process(span, _bassBuf, frames);
+            bass = new ReadOnlySpan<float>(_bassBuf, 0, frames);
+        }
+        foreach (var s in _sinks) s.Push(span, bass, frames);
         _frames += frames;
     }
 
     /// <summary>
-    /// Peak level per logical channel (FL..SR, post-upmix) in dBFS since the previous call, floor -90.
+    /// Peak level per logical channel (FL..SR, post-upmix and global processing) in dBFS since the previous call, floor -90.
     /// <paramref name="dest"/> needs <see cref="Channels.Count"/> elements. Safe to call from any one polling thread.
     /// </summary>
     public void DrainLevels(Span<float> dest)

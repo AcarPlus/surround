@@ -1,12 +1,13 @@
 import type { ReactNode } from 'react'
 import { useStore, type Screen } from '../store/useStore'
-import { IconDevices, IconMic, IconRoom, IconSource } from './icons'
+import { IconDevices, IconEq, IconMic, IconRoom, IconSource } from './icons'
 import { cx } from './ui'
 
 const ITEMS: { id: Screen; label: string; icon: ReactNode }[] = [
   { id: 'room', label: 'Oda', icon: <IconRoom /> },
   { id: 'devices', label: 'Cihazlar', icon: <IconDevices /> },
   { id: 'source', label: 'Kaynak', icon: <IconSource /> },
+  { id: 'sound', label: 'Ses', icon: <IconEq /> },
   { id: 'calibration', label: 'Kalibrasyon', icon: <IconMic /> },
 ]
 

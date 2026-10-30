@@ -1,6 +1,7 @@
 import type { SurroundApi } from './client'
 import {
   LOGICAL_CHANNELS,
+  defaultProcessing,
   type Config,
   type Device,
   type LevelFrame,
@@ -19,11 +20,17 @@ function buildDevices(): Device[] {
     { id: 'usb-headset', name: 'Kulaklık (USB)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
     { id: 'hdmi-nvidia', name: 'HDMI (NVIDIA)', kind: 'multichannel', flow: 'render', channels: 8, sampleRate: 48000, isDefault: false },
     { id: 'phone-salon', name: 'Salon telefonu', kind: 'network', flow: 'render', channels: 2, sampleRate: 44100, isDefault: false },
-    { id: 'vb-cable', name: 'VB-Cable', kind: 'multichannel', flow: 'capture', channels: 8, sampleRate: 48000, isDefault: false },
+    { id: 'vb-cable', name: 'CABLE Output (VB-Audio Virtual Cable)', kind: 'multichannel', flow: 'capture', channels: 8, sampleRate: 48000, isDefault: false },
+    { id: 'vb-cable-in-16', name: 'CABLE In 16ch (VB-Audio Virtual Cable)', kind: 'multichannel', flow: 'render', channels: 8, sampleRate: 48000, isDefault: false },
+    { id: 'vb-cable-in', name: 'CABLE Input (VB-Audio Virtual Cable)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
   ]
-  // Önizleme: ?nocable -> VB-Cable yokmuş gibi (uyarı bandını görmek için).
-  if (typeof location !== 'undefined' && location.search.includes('nocable')) {
-    return devices.filter((d) => d.id !== 'vb-cable')
+  if (typeof location !== 'undefined') {
+    // Önizleme: ?nocable -> VB-Cable yokmuş gibi (kurulum adımlarını görmek için).
+    if (location.search.includes('nocable')) return devices.filter((d) => !d.name.includes('CABLE'))
+    // ?cable2ch -> CABLE In 16ch Windows'ta 7.1 yapılmamış (2 kanal).
+    if (location.search.includes('cable2ch')) {
+      return devices.map((d) => (d.id === 'vb-cable-in-16' ? { ...d, channels: 2 } : d))
+    }
   }
   return devices
 }
@@ -68,6 +75,7 @@ function initialConfig(): Config {
     ],
     speakers,
     room,
+    processing: defaultProcessing(),
   }
 }
 
@@ -153,6 +161,9 @@ export function createMockApi(): SurroundApi {
     async playTone(deviceId, channel) {
       console.info('[mock] playTone', deviceId, channel)
       await wait(900)
+    },
+    async openSoundPanel() {
+      console.info('[mock] openSoundPanel')
     },
     onStatus(cb) {
       statusListeners.add(cb)

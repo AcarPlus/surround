@@ -8,6 +8,7 @@ import { RoomScreen } from './screens/RoomScreen'
 import { DevicesScreen } from './screens/DevicesScreen'
 import { SourceScreen } from './screens/SourceScreen'
 import { CalibrationScreen } from './screens/CalibrationScreen'
+import { SoundScreen } from './screens/SoundScreen'
 
 const NUDGE_M = 0.05
 
@@ -79,6 +80,7 @@ export function App() {
                 {screen === 'room' && <RoomScreen />}
                 {screen === 'devices' && <DevicesScreen />}
                 {screen === 'source' && <SourceScreen />}
+                {screen === 'sound' && <SoundScreen />}
                 {screen === 'calibration' && <CalibrationScreen />}
               </motion.div>
             </AnimatePresence>
