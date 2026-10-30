@@ -81,10 +81,38 @@ public sealed class ProcessingConfig
     public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
+/// <summary>
+/// Stereo to 7.1 upmix settings (used when <see cref="SurroundConfig.Upmix"/> is on). The gains and the LFE switch are
+/// live-updatable; a mode change restarts the engine.
+/// </summary>
+public sealed class UpmixOptions
+{
+    public const string Game = "game", Film = "film";
+    public const double MinDb = -12, MaxDb = 6;
+
+    /// <summary>"game" (time-domain matrix decoder, no added front latency) or "film" (STFT, ~21 ms at 48 kHz).</summary>
+    public string Mode { get; set; } = Film;
+    /// <summary>Level of the extracted center (dialog), dB.</summary>
+    public double CenterDb { get; set; }
+    /// <summary>Level of everything steered or spread to the side/back channels, dB.</summary>
+    public double SurroundDb { get; set; }
+    /// <summary>Derive LFE from the low-passed mid (heard only on speakers whose row maps LFE).</summary>
+    public bool LfeEnabled { get; set; } = true;
+
+    public bool IsGame => string.Equals(Mode?.Trim(), Game, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Unknown JSON members preserved across load/save; the engine ignores them.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
 public sealed class SurroundConfig
 {
     public SourceConfig Source { get; set; } = new();
+    /// <summary>On/off switch of the upmix; details in <see cref="UpmixOptions"/>.</summary>
     public bool Upmix { get; set; }
+    private UpmixOptions _upmixOptions = new();
+    public UpmixOptions UpmixOptions { get => _upmixOptions; set => _upmixOptions = value ?? new(); }
     private ProcessingConfig _processing = new();
     public ProcessingConfig Processing { get => _processing; set => _processing = value ?? new(); }
     public List<OutputConfig> Outputs { get; set; } = new();
@@ -114,13 +142,15 @@ public sealed class SurroundConfig
     /// <summary>
     /// Canonical JSON of the engine-relevant fields only (extra/UI members dropped). Two configs with the same
     /// fingerprint produce an identical audio graph, so a running engine need not restart between them.
-    /// Processing and per-speaker EQ are excluded: <see cref="SurroundEngine.UpdateLive"/> applies them in place.
+    /// Processing, per-speaker EQ and the upmix gains/LFE switch are excluded: <see cref="SurroundEngine.UpdateLive"/>
+    /// applies them in place. The upmix mode is kept (switching it rebuilds the upmixer).
     /// </summary>
     public string EngineFingerprint()
     {
         var copy = Parse(ToJson());
         copy.Extra = null;
         copy.Processing = new();
+        copy.UpmixOptions = new() { Mode = copy.UpmixOptions.IsGame ? UpmixOptions.Game : UpmixOptions.Film };
         copy.Source.Extra = null;
         foreach (var o in copy.Outputs) o.Extra = null;
         foreach (var s in copy.Speakers) { s.Extra = null; s.Name = ""; s.Eq = null; s.EqPreset = null; }

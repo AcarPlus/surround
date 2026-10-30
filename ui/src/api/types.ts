@@ -133,9 +133,62 @@ export function normalizeProcessing(p?: Partial<Processing> | null): Processing 
   return { ...d, ...p, eq }
 }
 
+/** Upmix modu: oyun = düşük gecikmeli matris çözücü, film = STFT tabanlı yüksek kalite. Bkz. docs/upmix.md. */
+export type UpmixMode = 'game' | 'film'
+
+/** Upmix ayrıntıları; `upmix` açık/kapalı anahtarı ayrı kalır (geriye uyum). */
+export interface UpmixOptions {
+  mode: UpmixMode
+  /** Orta (diyalog) seviyesi, dB -12..+6. */
+  centerDb: number
+  /** Yan/arka seviyesi, dB -12..+6. */
+  surroundDb: number
+  /** LFE üret (yalnızca LFE'ye atanmış hoparlörde duyulur). */
+  lfeEnabled: boolean
+}
+
+export const UPMIX_DB_MIN = -12
+export const UPMIX_DB_MAX = 6
+
+export const defaultUpmixOptions = (): UpmixOptions => ({
+  mode: 'film',
+  centerDb: 0,
+  surroundDb: 0,
+  lfeEnabled: true,
+})
+
+const clampDb = (v: unknown, d: number) =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.min(UPMIX_DB_MAX, Math.max(UPMIX_DB_MIN, v)) : d
+
+/** Eksik/bozuk alanları varsayılanla doldurur. */
+export function normalizeUpmixOptions(u?: Partial<UpmixOptions> | null): UpmixOptions {
+  const d = defaultUpmixOptions()
+  if (!u) return d
+  return {
+    mode: u.mode === 'game' || u.mode === 'film' ? u.mode : d.mode,
+    centerDb: clampDb(u.centerDb, d.centerDb),
+    surroundDb: clampDb(u.surroundDb, d.surroundDb),
+    lfeEnabled: typeof u.lfeEnabled === 'boolean' ? u.lfeEnabled : d.lfeEnabled,
+  }
+}
+
+/** Upmix durumu: kapalı | stereo içerik upmix ediliyor | yerel çok kanal geçiyor. */
+export type UpmixStateName = 'off' | 'stereo' | 'native'
+
+/** Motorun anlık durumu (çalışırken ~4 Hz). */
+export interface EngineInfo {
+  upmix: UpmixStateName
+  sourceChannels: number
+  sourceRate: number
+  /** Upmix'in eklediği gecikme (ms); film modunda ~21 ms. */
+  upmixLatencyMs: number
+}
+
 export interface Config {
   source: Source
   upmix: boolean
+  /** Yoksa varsayılan geçerli. */
+  upmixOptions?: UpmixOptions
   outputs: Output[]
   speakers: Speaker[]
   room: Room

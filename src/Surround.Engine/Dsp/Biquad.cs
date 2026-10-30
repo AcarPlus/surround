@@ -31,6 +31,9 @@ public sealed class Biquad
         double y = _b0 * x + _z1;
         _z1 = _b1 * x - _a1 * y + _z2;
         _z2 = _b2 * x - _a2 * y;
+        // Decaying state on silence would end up subnormal (slow, and subnormal float output); flush it.
+        if (Math.Abs(_z1) < 1e-25) _z1 = 0;
+        if (Math.Abs(_z2) < 1e-25) _z2 = 0;
         return (float)y;
     }
 

@@ -67,6 +67,13 @@ public static class ConfigValidator
         CheckRange(e, "processing.clarityDb", p.ClarityDb, 0, 12);
         CheckRange(e, "processing.dynamicBoost", p.DynamicBoost, 0, 1);
         CheckRange(e, "processing.ambience", p.Ambience, 0, 1);
+
+        var u = cfg.UpmixOptions;
+        var um = u.Mode?.Trim().ToLowerInvariant();
+        if (um != UpmixOptions.Game && um != UpmixOptions.Film)
+            e.Add($"upmixOptions.mode 'game' veya 'film' olmalı (bulunan: '{u.Mode}').");
+        CheckRange(e, "upmixOptions.centerDb", u.CenterDb, UpmixOptions.MinDb, UpmixOptions.MaxDb);
+        CheckRange(e, "upmixOptions.surroundDb", u.SurroundDb, UpmixOptions.MinDb, UpmixOptions.MaxDb);
         return e;
     }
 

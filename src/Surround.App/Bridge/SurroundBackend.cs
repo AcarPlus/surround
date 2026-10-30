@@ -20,6 +20,7 @@ public sealed class SurroundBackend : IDisposable
 
     public event Action<IReadOnlyList<SinkStatusDto>>? Status { add => _host.StatusChanged += value; remove => _host.StatusChanged -= value; }
     public event Action<float[]>? Levels { add => _host.LevelsChanged += value; remove => _host.LevelsChanged -= value; }
+    public event Action<EngineInfoDto>? Info { add => _host.InfoChanged += value; remove => _host.InfoChanged -= value; }
     public event Action<string>? EngineError { add => _host.Error += value; remove => _host.Error -= value; }
 
     public SurroundBackend(ConfigStore? store = null) => _store = store ?? new ConfigStore();

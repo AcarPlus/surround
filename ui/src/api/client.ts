@@ -1,4 +1,4 @@
-import type { Config, Device, LevelFrame, SinkStatus } from './types'
+import type { Config, Device, EngineInfo, LevelFrame, SinkStatus } from './types'
 import { createMockApi } from './mock'
 import { createBridgeApi, hasBridge } from './bridge'
 
@@ -21,6 +21,8 @@ export interface SurroundApi {
   onStatus(cb: (status: SinkStatus[]) => void): () => void
   /** Kaynak seviye ölçerleri için (tasarım aşamasında eklendi). */
   onLevels(cb: (levels: LevelFrame) => void): () => void
+  /** Motor durumu (upmix durumu, kaynak formatı), durum örnekleriyle birlikte; durunca bir kez `upmix: 'off'`. */
+  onEngine(cb: (info: EngineInfo) => void): () => void
   /** Çalışma sırasında motorun bildirdiği hatalar (yakalama/oynatma akışı kopması vb.). */
   onEngineError(cb: (message: string) => void): () => void
 }

@@ -5,8 +5,11 @@ Motor (C#) ile arayüz (TS) arasındaki config alanları. JSON camelCase. Alan y
 ## Ses akışı
 
 ```
-yakalama → mantıksal 8 kanal (map/upmix)
+yakalama → mantıksal 8 kanal (map)
+         → upmix (açıksa; çok kanallı kaynakta yalnızca içerik stereo iken, bkz. docs/upmix.md)
          → [genel işleme: preamp, 10 bant EQ, bas güçlendirme, netlik, dinamik güçlendirme, ortam]  (8 kanala aynı ayar, dinamik bağlı)
+         → seviye ölçerleri
+         → kanal katlama: hiçbir hoparlörün çalmadığı kanallar komşulara (FC→FL+FR, SL→BL, …)
          → bas yolu: highPassHz'li hoparlörlerden kesilen bas → bassReceiver hoparlörlere
          → hoparlör satırı (karışım × kazanç) → hoparlör EQ'su → yüksek geçiren → gecikme
          → cihaz başına limiter (-1 dBFS) → ring → drift → cihaz
@@ -37,11 +40,12 @@ yakalama → mantıksal 8 kanal (map/upmix)
 
 Bas kuralları:
 - Kesilen bas tüm alıcılara eşit bölünür (toplam seviye korunur). Alıcı yoksa bas kaybolur, motor uyarı loglar.
-- LFE, satırında LFE olmayan alıcılara yalnızca kaynak gerçek çok kanallıysa (upmix kapalı/2 kanaldan fazla) eklenir. Upmix'te LFE zaten ön sinyalden türetildiği için iki kez eklenmez.
+- LFE, satırında LFE olmayan alıcılara kaynak 2 kanaldan fazlaysa eklenir (upmix açık olsa da: içerik her an gerçek çok kanallıya dönebilir). Upmix'in türettiği LFE yalnızca satırında LFE olan bir hoparlör varsa üretilir; böylece alıcılar (ör. 2.1 ön hoparlörler) ön sinyalin basını iki kez almaz.
+- Kanal katlama LFE'ye dokunmaz; LFE yalnızca bu kurala göre dağıtılır.
 
 ## Canlı güncelleme
 
-`processing` ve hoparlör `eq`/`eqPreset` değişiklikleri motoru yeniden başlatmaz (`EngineFingerprint` bunları dışlar); `SurroundEngine.UpdateLive(cfg)` ile kesintisiz uygulanır. `highPassHz`/`bassReceiver` değişikliği yeniden başlatır.
+`processing`, hoparlör `eq`/`eqPreset` ve `upmixOptions.centerDb`/`surroundDb`/`lfeEnabled` değişiklikleri motoru yeniden başlatmaz (`EngineFingerprint` bunları dışlar); `SurroundEngine.UpdateLive(cfg)` ile kesintisiz uygulanır. `highPassHz`/`bassReceiver` ve `upmixOptions.mode` değişikliği yeniden başlatır.
 
 ## Köprü
 
@@ -52,9 +56,10 @@ Bas kuralları:
 - Aralık dışı değerler `ConfigValidator` hatası verir (Türkçe mesaj); DSP ayrıca savunmacı olarak kırpar. `eq` tam 10 eleman olmalı. Bir hoparlör aynı anda `highPassHz > 0` ve `bassReceiver` olamaz.
 - Susturulmuş (`mute`) hoparlörler bas kaynağı/alıcısı sayılmaz.
 - Kesilen bas, kesilen hoparlörün kendi `gainDb`'siyle bas yoluna girer; alıcının `gainDb`'si bas yoluna uygulanmaz (yalnızca kendi satırına ve katlanan LFE'ye).
-- LFE katlama: kaynak upmix'siz ve 2 kanaldan fazlaysa, satırında LFE olmayan her alıcıya `1 / (LFE'siz alıcı sayısı)` katsayıyla eklenir.
+- LFE katlama: kaynak 2 kanaldan fazlaysa (upmix durumundan bağımsız), satırında LFE olmayan her alıcıya `1 / (LFE'siz alıcı sayısı)` katsayıyla eklenir.
 - `dynamicBoost` a: eşik `-6 - 24a` dB, oran `1 + 3a`, yumuşak diz 6 dB, atak 5 ms / bırakma 150 ms, makyaj = 0 dBFS'deki kısmanın yarısı. Tüm kanallar tek dedektör.
 - `ambience` a: yan (S) kazancı `1 + a`.
 - Limiter: 1 ms ileri bakış (kapalıyken de aynı gecikme korunur, çıkışlar hizalı kalır), 80 ms bırakma, cihaz kanallarına bağlı tek kazanç.
-- Seviye ölçerleri genel işlemeden sonraki sinyali gösterir.
+- Seviye ölçerleri upmix ve genel işlemeden sonraki, katlamadan önceki sinyali gösterir (ör. SL hoparlörü olmasa da SL içeriği görünür).
+- Kanal katlama planı başlangıçta, susturulmamış hoparlörlerin karışım satırlarından (katsayı ≠ 0; bası kesilen hoparlörler de sayılır) çıkarılır; hoparlör değişikliği zaten yeniden başlatır. Ayrıntı: docs/upmix.md.
 - Kaynak 8'den fazla kanal sunarsa (ör. 16 kanallı VB-Cable) ilk 8 kanal 7.1 sırasıyla alınır, gerisi yok sayılır.

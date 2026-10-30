@@ -119,7 +119,13 @@ static int CmdRun(string path)
         while (!cts.Token.WaitHandle.WaitOne(1000))
         {
             var st = engine.GetStatus();
-            Console.WriteLine($"-- kaynak {st.SourceRate} Hz/{st.SourceChannels} kanal{(st.Upmixing ? " (upmix)" : "")}, {st.SourceFrames} kare");
+            string up = st.UpmixState switch
+            {
+                Surround.Engine.Dsp.UpmixState.Stereo => " (upmix etkin: stereo içerik)",
+                Surround.Engine.Dsp.UpmixState.Native => " (yerel çok kanal)",
+                _ => "",
+            };
+            Console.WriteLine($"-- kaynak {st.SourceRate} Hz/{st.SourceChannels} kanal{up}, {st.SourceFrames} kare");
             foreach (var s in st.Sinks)
                 Console.WriteLine($"   {s.Name}: doluluk {s.FillMs:F1} ms, düzeltme {s.CorrectionPpm:+0.0;-0.0;0.0} ppm, underrun {s.Underruns}, overrun {s.Overruns}, {s.DeviceRate} Hz/{s.DeviceChannels} kanal");
         }

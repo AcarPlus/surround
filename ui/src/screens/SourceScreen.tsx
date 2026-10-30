@@ -1,10 +1,31 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api/client'
-import { LOGICAL_CHANNELS, type Device, type LevelFrame, type LogicalChannel } from '../api/types'
+import {
+  LOGICAL_CHANNELS,
+  UPMIX_DB_MAX,
+  UPMIX_DB_MIN,
+  type Device,
+  type LevelFrame,
+  type LogicalChannel,
+} from '../api/types'
 import { useStore } from '../store/useStore'
-import { Badge, Button, Card, Field, ScreenHeader, SectionTitle, Segmented, Select, Switch, cx } from '../components/ui'
+import {
+  Badge,
+  BigSlider,
+  Button,
+  Card,
+  Chip,
+  Field,
+  ScreenHeader,
+  SectionTitle,
+  Segmented,
+  Select,
+  Switch,
+  cx,
+} from '../components/ui'
 import { IconCheck, IconWarn } from '../components/icons'
-import { fmt } from '../lib/format'
+import { fmt, fmtSigned } from '../lib/format'
+import { upmixStateLabel } from '../lib/upmix'
 
 const MIN_DB = -60
 
@@ -81,11 +102,14 @@ export function SourceScreen() {
               <span>
                 <span className="block text-[13px] font-medium">Upmix</span>
                 <span className="mt-0.5 block text-xs text-muted">
-                  Kaynak yalnızca 2 kanallıysa FC, LFE ve arka/yan kanallar üretilir.
+                  Stereo sesten orta, LFE ve arka/yan kanallar üretilir. 7.1 kaynakta içerik stereo olduğunda kendiliğinden
+                  devreye girer, gerçek çok kanallı ses gelince yerel kanallara döner.
                 </span>
               </span>
               <Switch checked={upmix} onChange={setUpmix} label="Upmix" />
             </label>
+            <UpmixStateBadge />
+            {upmix && <UpmixControls />}
           </div>
         </Card>
 
@@ -93,6 +117,77 @@ export function SourceScreen() {
           <Meters />
         </Card>
       </div>
+    </div>
+  )
+}
+
+/** Motorun bildirdiği anlık upmix durumu (yalnızca çalışırken). */
+function UpmixStateBadge() {
+  const engine = useStore((s) => s.engine)
+  const runState = useStore((s) => s.runState)
+  if (runState !== 'running' || !engine) return null
+  return (
+    <div className="mt-2.5 flex items-center gap-2">
+      <Badge tone={engine.upmix === 'stereo' ? 'accent' : engine.upmix === 'native' ? 'ok' : 'neutral'}>
+        {upmixStateLabel(engine)}
+      </Badge>
+      {engine.upmix === 'stereo' && engine.upmixLatencyMs > 0 && (
+        <span className="num text-[11px] text-faint">+{fmt(engine.upmixLatencyMs, 0)} ms</span>
+      )}
+    </div>
+  )
+}
+
+function UpmixControls() {
+  const o = useStore((s) => s.upmixOptions)
+  const set = useStore((s) => s.setUpmixOptions)
+  const db = (v: number) => `${v === 0 ? '0,0' : fmtSigned(v, 1).replace('.', ',')} dB`
+  return (
+    <div className="mt-4 space-y-4">
+      <div>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Upmix modu">
+          <Chip active={o.mode === 'game'} onClick={() => set({ mode: 'game' })}>
+            Oyun (düşük gecikme)
+          </Chip>
+          <Chip active={o.mode === 'film'} onClick={() => set({ mode: 'film' })}>
+            Film (yüksek kalite)
+          </Chip>
+        </div>
+        <p className="mt-1.5 text-xs text-faint">
+          {o.mode === 'game'
+            ? 'Anlık yön çözümleme; ön hoparlörlere gecikme eklemez.'
+            : 'Frekans bandı başına ayrıştırma; diyalog daha temiz ortalanır, ~21 ms gecikme ekler.'}
+        </p>
+      </div>
+      <BigSlider
+        label="Orta (diyalog)"
+        hint="Ortadaki konuşmanın seviyesi. Orta hoparlör yoksa ön hoparlörlerde etki eder."
+        value={o.centerDb}
+        min={UPMIX_DB_MIN}
+        max={UPMIX_DB_MAX}
+        step={0.5}
+        display={db(o.centerDb)}
+        onChange={(centerDb) => set({ centerDb })}
+      />
+      <BigSlider
+        label="Surround seviyesi"
+        hint="Yan ve arka hoparlörlere giden ortam ve efektlerin seviyesi."
+        value={o.surroundDb}
+        min={UPMIX_DB_MIN}
+        max={UPMIX_DB_MAX}
+        step={0.5}
+        display={db(o.surroundDb)}
+        onChange={(surroundDb) => set({ surroundDb })}
+      />
+      <label className="flex items-start justify-between gap-3">
+        <span>
+          <span className="block text-[13px] font-medium">LFE (sub kanalı)</span>
+          <span className="mt-0.5 block text-xs text-muted">
+            Yalnızca LFE’ye atanmış bir hoparlör varsa duyulur; 2.1 ön hoparlörler bası zaten çalar.
+          </span>
+        </span>
+        <Switch checked={o.lfeEnabled} onChange={(lfeEnabled) => set({ lfeEnabled })} label="LFE" />
+      </label>
     </div>
   )
 }

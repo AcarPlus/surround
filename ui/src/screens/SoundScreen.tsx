@@ -1,7 +1,6 @@
-import type { ReactNode } from 'react'
 import { flatEq } from '../api/types'
 import { useStore } from '../store/useStore'
-import { Button, Card, ScreenHeader, SectionTitle, Switch, cx } from '../components/ui'
+import { BigSlider, Button, Card, Chip, ScreenHeader, SectionTitle, Switch, cx } from '../components/ui'
 import { EqEditor } from '../components/EqEditor'
 import { CUSTOM_ID, CUSTOM_LABEL, SOUND_PRESETS } from '../lib/presets'
 import { fmtSigned } from '../lib/format'
@@ -128,70 +127,6 @@ export function SoundScreen() {
         </div>
         <Switch checked={p.limiter} onChange={(limiter) => setProcessing({ limiter })} label="Limiter" />
       </Card>
-    </div>
-  )
-}
-
-function Chip({
-  active,
-  disabled,
-  onClick,
-  children,
-}: {
-  active: boolean
-  disabled?: boolean
-  onClick?: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={active}
-      className={cx(
-        'h-8 rounded-full border px-3.5 text-[13px] font-medium transition-colors',
-        active
-          ? 'border-accent bg-accent text-accent-fg'
-          : 'border-line-strong bg-raised text-muted hover:border-muted hover:text-fg disabled:hover:border-line-strong disabled:hover:text-muted',
-        disabled && !active && 'opacity-50',
-        disabled && 'cursor-default',
-      )}
-    >
-      {children}
-    </button>
-  )
-}
-
-function BigSlider(props: {
-  label: string
-  hint: string
-  value: number
-  min: number
-  max: number
-  step: number
-  display: string
-  onChange: (v: number) => void
-}) {
-  const fill = ((props.value - props.min) / (props.max - props.min)) * 100
-  return (
-    <div>
-      <div className="mb-1 flex items-baseline justify-between gap-3">
-        <span className="text-[13px] font-medium">{props.label}</span>
-        <span className="num text-[13px] text-fg">{props.display}</span>
-      </div>
-      <input
-        type="range"
-        className="big-range"
-        aria-label={props.label}
-        min={props.min}
-        max={props.max}
-        step={props.step}
-        value={props.value}
-        style={{ ['--fill' as string]: `${fill}%` }}
-        onChange={(e) => props.onChange(Number(e.target.value))}
-      />
-      <p className="mt-0.5 text-xs text-faint">{props.hint}</p>
     </div>
   )
 }

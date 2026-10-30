@@ -7,13 +7,13 @@ köprüsünü, yoksa (`npm run dev`, tarayıcı) `ui/src/api/mock.ts` sahte veri
 ## Köprü protokolü (WebView2)
 JSON-RPC, `postMessage` / `WebMessageReceived` üzerinden. Sayfa -> C#: `{ id, method, params: [] }` (konumsal argümanlar).
 C# -> sayfa: `{ id, result }` ya da `{ id, error: { message, errors?: string[] } }`; itilen olaylar:
-`{ event: "status" | "levels" | "engineError", data }`. C# tarafı: `src/Surround.App/Bridge`.
+`{ event: "status" | "levels" | "engine" | "engineError", data }`. C# tarafı: `src/Surround.App/Bridge`.
 `saveConfig` her zaman diske yazar; doğrulama hatası varsa (boş oda hariç) `errors` ile reddeder, çalışan motor
 mühendislik alanları değiştiyse yeniden başlatılır (oda/konum gibi arayüz alanları yeniden başlatmaz).
 
 ## Tipler (`ui/src/api/types.ts`)
 Motor yapılandırmasını yansıtır: `Source`, `Output`, `Speaker`, `Device`, `SinkStatus`, `Room`,
-`Config` (= source, upmix, outputs, speakers, room) ve `LogicalChannel` (FL FR FC LFE BL BR SL SR).
+`Config` (= source, upmix, upmixOptions, outputs, speakers, room, processing), `EngineInfo` ve `LogicalChannel` (FL FR FC LFE BL BR SL SR).
 Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, "ön" planda yukarıdadır.
 `deviceChannel` 1 tabanlıdır.
 
@@ -26,7 +26,8 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 | `getStatus()` | Çıkış başına `SinkStatus[]` (çalışmıyorsa boş) |
 | `playTone(deviceId, channel)` | Test sesi |
 | `onStatus(cb)` | Çalışırken ~250 ms'de bir durum (köprüde); unsubscribe döner |
-| `onLevels(cb)` | Mantıksal kanal tepe seviyeleri (dBFS, `LevelFrame`), ~20 Hz; motorda upmix sonrası ölçülür |
+| `onLevels(cb)` | Mantıksal kanal tepe seviyeleri (dBFS, `LevelFrame`), ~20 Hz; motorda upmix ve genel işleme sonrası, kanal katlamadan önce ölçülür |
+| `onEngine(cb)` | `EngineInfo` (`upmix: "off" \| "stereo" \| "native"`, `sourceChannels`, `sourceRate`, `upmixLatencyMs`), durumla aynı sıklıkta; durunca bir kez `"off"` |
 | `onEngineError(cb)` | Çalışma sırasında motor hataları (akış kopması, test sesi hatası vb.) |
 
 ## Arayüze özgü durum (config'e yazılmaz)

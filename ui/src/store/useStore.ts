@@ -4,6 +4,7 @@ import {
   LOGICAL_CHANNELS,
   type Config,
   type Device,
+  type EngineInfo,
   type LogicalChannel,
   type Output,
   type Point,
@@ -14,6 +15,9 @@ import {
   type SinkStatus,
   type Source,
   type Speaker,
+  type UpmixOptions,
+  defaultUpmixOptions,
+  normalizeUpmixOptions,
 } from '../api/types'
 import {
   clamp,
@@ -41,6 +45,7 @@ interface State {
   devices: Device[]
   source: Source
   upmix: boolean
+  upmixOptions: UpmixOptions
   outputs: Output[]
   speakers: Speaker[]
   room: Room
@@ -56,6 +61,8 @@ interface State {
   selection: string | null
   runState: RunState
   status: SinkStatus[]
+  /** Çalışırken motorun bildirdiği durum (upmix durumu vb.); dururken null. */
+  engine: EngineInfo | null
   toast: string | null
 
   init: () => Promise<void>
@@ -79,6 +86,8 @@ interface State {
   addOutput: (deviceId: string) => void
   setSource: (patch: Partial<Source>) => void
   setUpmix: (v: boolean) => void
+  /** Upmix ayrıntıları; seviyeler ve LFE canlı uygulanır (kısa gecikmeli kayıt), mod değişimi motoru yeniden başlatır. */
+  setUpmixOptions: (patch: Partial<UpmixOptions>) => void
   /** Ses işleme alanlarını değiştirir; ses karakterini etkileyen bir alan değişirse etiket 'Özel' olur. */
   setProcessing: (patch: Partial<Processing>) => void
   applySoundPreset: (id: string) => void
@@ -136,6 +145,7 @@ export const useStore = create<State>()((set, get) => {
   const buildConfig = (s: State): Config => ({
     source: s.source,
     upmix: s.upmix,
+    upmixOptions: s.upmixOptions,
     outputs: s.outputs,
     speakers: s.speakers.map((sp) => ({ ...sp, auto: s.auto[sp.id] ?? { delay: true, gain: true } })),
     room: s.room,
@@ -152,6 +162,7 @@ export const useStore = create<State>()((set, get) => {
     devices: [],
     source: { deviceId: '', mode: 'loopback' },
     upmix: false,
+    upmixOptions: defaultUpmixOptions(),
     outputs: [],
     speakers: [],
     room: { widthM: 5, depthM: 4.5, listener: { x: 2.5, y: 2.3 } },
@@ -165,6 +176,7 @@ export const useStore = create<State>()((set, get) => {
     selection: null,
     runState: 'stopped',
     status: [],
+    engine: null,
     toast: null,
 
     async init() {
@@ -177,6 +189,7 @@ export const useStore = create<State>()((set, get) => {
         devices,
         source: cfg.source,
         upmix: cfg.upmix,
+        upmixOptions: normalizeUpmixOptions(cfg.upmixOptions),
         outputs: cfg.outputs,
         speakers: recalc(speakers, cfg.room.listener, auto),
         room: cfg.room,
@@ -186,6 +199,7 @@ export const useStore = create<State>()((set, get) => {
         ready: true,
       })
       api.onStatus((status) => set({ status }))
+      api.onEngine((info) => set({ engine: info.sourceRate > 0 ? info : null }))
       api.onEngineError((msg) => get().showToast(msg, 7000))
     },
 
@@ -210,7 +224,7 @@ export const useStore = create<State>()((set, get) => {
         } catch (e) {
           get().showToast(describeError(e), 6000)
         }
-        set({ runState: 'stopped', status: [] })
+        set({ runState: 'stopped', status: [], engine: null })
         return
       }
       set({ runState: 'starting' })
@@ -415,6 +429,11 @@ export const useStore = create<State>()((set, get) => {
       commit({ source: next })
     },
     setUpmix: (upmix) => commit({ upmix }),
+    setUpmixOptions(patch) {
+      const next = normalizeUpmixOptions({ ...get().upmixOptions, ...patch })
+      // Seviye kaydırıcıları canlı uygulanır; kayıt sıklığı ses işleme kaydırıcılarıyla aynı.
+      commit({ upmixOptions: next }, 'mode' in patch ? 400 : 150)
+    },
 
     setProcessing(patch) {
       const cur = get().processing

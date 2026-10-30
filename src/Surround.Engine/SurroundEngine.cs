@@ -12,7 +12,9 @@ public sealed class ConfigException : Exception
     public ConfigException(IReadOnlyList<string> errors) : base(string.Join(Environment.NewLine, errors)) => Errors = errors;
 }
 
-public sealed record EngineStatus(int SourceRate, int SourceChannels, bool Upmixing, long SourceFrames, IReadOnlyList<SinkStatus> Sinks);
+/// <param name="Upmixing">The upmixer currently feeds the speakers (<see cref="UpmixState.Stereo"/>).</param>
+public sealed record EngineStatus(int SourceRate, int SourceChannels, bool Upmixing, long SourceFrames, IReadOnlyList<SinkStatus> Sinks,
+    UpmixState UpmixState = UpmixState.Off, int UpmixLatencyFrames = 0);
 
 public sealed class SurroundEngine : IDisposable
 {
@@ -23,14 +25,14 @@ public sealed class SurroundEngine : IDisposable
     private IWaveIn? _capture;
     private WasapiOut? _keepAlive;
     private WaveFormat? _srcFormat;
-    private Upmixer? _upmixer;
+    private AdaptiveUpmix? _upmix;
+    private ChannelFold? _fold;
     private int[] _map = Array.Empty<int>();
     private float[] _srcFloat = new float[16384];
     private float[] _logical = new float[8 * 4096];
     private float[] _bassBuf = new float[4096];
     private GlobalProcessor? _proc;
     private BassManager? _bass;
-    private bool _upmixActive;
     private long _frames;
     private bool _started;
     private readonly PeakMeter _meter = new();
@@ -64,15 +66,31 @@ public sealed class SurroundEngine : IDisposable
 
             int fs = _srcFormat.SampleRate, n = _srcFormat.Channels;
             _map = Channels.MapForSourceChannels(n);
+            var active = _cfg.Speakers.Where(s => !s.Mute).ToList();
+            var used = ChannelFold.UsedChannels(active.Select(s => (MixRow(s), false)));
+            _fold = ChannelFold.Plan(used);
+            if (_fold != null)
+                _log?.Invoke("Katlama: " + string.Join(", ", _fold.Ops.Select(o => $"{Channels.Names[o.Src]}→{Channels.Names[o.Dst]}{(o.Gain < 0.99f ? " (-3 dB)" : "")}")));
             if (_cfg.Upmix)
             {
-                if (n == 2) { _upmixer = new Upmixer(fs); _upmixActive = true; }
-                else _log?.Invoke($"Uyarı: upmix yalnızca 2 kanallı kaynakta çalışır (kaynak {n} kanal); atlandı.");
+                if (n >= 2)
+                {
+                    // A derived LFE is only produced for speakers that map LFE themselves: the bass receivers already
+                    // play the fronts' bass, so folding a derived LFE into them would count it twice.
+                    var layout = new UpmixLayout(used, active.Any(HasLfe));
+                    IStereoUpmixer up = _cfg.UpmixOptions.IsGame ? new GameUpmixer(fs, layout) : new FilmUpmixer(fs, layout);
+                    up.Update(UpmixSettings.Build(_cfg.UpmixOptions));
+                    _upmix = new AdaptiveUpmix(fs, up, adaptive: n > 2);
+                    _log?.Invoke($"Upmix: {(_cfg.UpmixOptions.IsGame ? "oyun" : "film")} modu, {up.LatencyFrames * 1000.0 / fs:0.#} ms gecikme"
+                        + (n > 2 ? ", stereo içerik otomatik algılanır" : ""));
+                }
+                else _log?.Invoke($"Uyarı: upmix en az 2 kanallı kaynak gerektirir (kaynak {n} kanal); atlandı.");
             }
 
             _proc = new GlobalProcessor(fs);
             _proc.Update(ProcessingSettings.Build(_cfg.Processing, fs));
-            var bass = PlanBass(fs, nativeMultichannel: !_upmixActive && n > 2);
+            // A multichannel source may carry a real LFE at any time (the upmix only takes over while it is silent).
+            var bass = PlanBass(fs, nativeMultichannel: n > 2);
 
             foreach (var o in _cfg.Outputs)
             {
@@ -113,8 +131,8 @@ public sealed class SurroundEngine : IDisposable
 
     /// <summary>
     /// Bass management: the cut bass of high-passed speakers is split evenly over the (unmuted) receivers. With a
-    /// native multichannel source the LFE is folded into receivers whose row lacks it; an upmixed LFE is derived from
-    /// the fronts already, so it is not added twice.
+    /// multichannel source the LFE is folded into receivers whose row lacks it. The upmixers only derive an LFE when
+    /// some speaker maps LFE itself, so receivers never get the fronts' bass twice.
     /// </summary>
     private BassPlanResult PlanBass(int fs, bool nativeMultichannel)
     {
@@ -167,6 +185,7 @@ public sealed class SurroundEngine : IDisposable
         if (!_started || _srcFormat is null) return;
         var routed = cfg.ForRouting();
         _proc?.Update(ProcessingSettings.Build(routed.Processing, _srcFormat.SampleRate));
+        _upmix?.Update(UpmixSettings.Build(routed.UpmixOptions));
         // Sinks were created in routed.Outputs order with speakers in config order; the fingerprint keeps both stable.
         for (int i = 0; i < _sinks.Count && i < routed.Outputs.Count; i++)
         {
@@ -189,21 +208,16 @@ public sealed class SurroundEngine : IDisposable
 
         SampleConverter.ToFloat(e.Buffer, frames * fmt.BlockAlign, fmt, _srcFloat);
 
-        if (_upmixActive)
-        {
-            _upmixer!.Process(_srcFloat, _logical, frames);
-        }
-        else
-        {
-            Array.Clear(_logical, 0, frames * Channels.Count);
-            for (int f = 0; f < frames; f++)
-                for (int c = 0; c < _map.Length; c++)
-                    _logical[f * Channels.Count + _map[c]] = _srcFloat[f * n + c];
-        }
+        Array.Clear(_logical, 0, frames * Channels.Count);
+        for (int f = 0; f < frames; f++)
+            for (int c = 0; c < _map.Length; c++)
+                _logical[f * Channels.Count + _map[c]] = _srcFloat[f * n + c];
 
         var span = new Span<float>(_logical, 0, frames * Channels.Count);
+        _upmix?.Process(span, frames);
         _proc?.Process(span, frames);
         _meter.Update(span, frames);
+        _fold?.Process(span, frames);
 
         ReadOnlySpan<float> bass = default;
         if (_bass != null)
@@ -217,7 +231,8 @@ public sealed class SurroundEngine : IDisposable
     }
 
     /// <summary>
-    /// Peak level per logical channel (FL..SR, post-upmix and global processing) in dBFS since the previous call, floor -90.
+    /// Peak level per logical channel (FL..SR, post-upmix and global processing, before the channel fold) in dBFS since
+    /// the previous call, floor -90.
     /// <paramref name="dest"/> needs <see cref="Channels.Count"/> elements. Safe to call from any one polling thread.
     /// </summary>
     public void DrainLevels(Span<float> dest)
@@ -226,9 +241,12 @@ public sealed class SurroundEngine : IDisposable
         for (int c = 0; c < Channels.Count && c < dest.Length; c++) dest[c] = PeakMeter.ToDb(dest[c]);
     }
 
-    public EngineStatus GetStatus() =>
-        new(_srcFormat?.SampleRate ?? 0, _srcFormat?.Channels ?? 0, _upmixActive, Interlocked.Read(ref _frames),
-            _sinks.Select(s => s.GetStatus()).ToList());
+    public EngineStatus GetStatus()
+    {
+        var state = _upmix?.State ?? UpmixState.Off;
+        return new(_srcFormat?.SampleRate ?? 0, _srcFormat?.Channels ?? 0, state == UpmixState.Stereo, Interlocked.Read(ref _frames),
+            _sinks.Select(s => s.GetStatus()).ToList(), state, _upmix?.LatencyFrames ?? 0);
+    }
 
     public void Dispose()
     {

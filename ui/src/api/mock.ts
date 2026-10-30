@@ -2,7 +2,9 @@ import type { SurroundApi } from './client'
 import {
   LOGICAL_CHANNELS,
   defaultProcessing,
+  defaultUpmixOptions,
   type Config,
+  type EngineInfo,
   type Device,
   type LevelFrame,
   type LogicalChannel,
@@ -68,6 +70,7 @@ function initialConfig(): Config {
   return {
     source: { deviceId: 'vb-cable', mode: 'capture' },
     upmix: true,
+    upmixOptions: defaultUpmixOptions(),
     outputs: [
       { deviceId: 'realtek-spk', latencyMs: 0, bufferMs: 40 },
       { deviceId: 'hdmi-nvidia', latencyMs: 0, bufferMs: 40 },
@@ -87,6 +90,24 @@ export function createMockApi(): SurroundApi {
   const counters = new Map<string, { under: number; over: number }>()
   const statusListeners = new Set<(s: SinkStatus[]) => void>()
   const levelListeners = new Set<(l: LevelFrame) => void>()
+  const engineListeners = new Set<(i: EngineInfo) => void>()
+  let startedAt = 0
+
+  /** Upmix durumu: 2 kanallı kaynakta hep stereo; çok kanallıda ~6 sn'de bir stereo/yerel arasında gidip gelir. */
+  function engineInfo(): EngineInfo {
+    if (!running) return { upmix: 'off', sourceChannels: 0, sourceRate: 0, upmixLatencyMs: 0 }
+    const dev = devices.find((d) => d.id === config.source.deviceId)
+    const channels = dev?.channels ?? 2
+    let upmix: EngineInfo['upmix'] = 'off'
+    if (config.upmix) upmix = channels <= 2 || Math.floor((Date.now() - startedAt) / 6000) % 2 === 0 ? 'stereo' : 'native'
+    const film = config.upmixOptions?.mode !== 'game'
+    return { upmix, sourceChannels: channels, sourceRate: dev?.sampleRate ?? 48000, upmixLatencyMs: config.upmix && film ? 21.3 : 0 }
+  }
+
+  const emitEngine = () => {
+    const info = engineInfo()
+    engineListeners.forEach((cb) => cb(info))
+  }
   const levels = Object.fromEntries(LOGICAL_CHANNELS.map((c) => [c, -90])) as LevelFrame
   const energy = Object.fromEntries(LOGICAL_CHANNELS.map((c) => [c, rand(0.3, 0.7)])) as Record<LogicalChannel, number>
 
@@ -114,6 +135,7 @@ export function createMockApi(): SurroundApi {
     if (!running) return
     const s = snapshot()
     statusListeners.forEach((cb) => cb(s))
+    emitEngine()
   }, 1000)
 
   setInterval(() => {
@@ -147,13 +169,16 @@ export function createMockApi(): SurroundApi {
     async start() {
       await wait(450)
       running = true
+      startedAt = Date.now()
       const s = snapshot()
       statusListeners.forEach((cb) => cb(s))
+      emitEngine()
     },
     async stop() {
       await wait(150)
       running = false
       counters.clear()
+      emitEngine()
     },
     async getStatus() {
       return running ? snapshot() : []
@@ -172,6 +197,10 @@ export function createMockApi(): SurroundApi {
     onLevels(cb) {
       levelListeners.add(cb)
       return () => levelListeners.delete(cb)
+    },
+    onEngine(cb) {
+      engineListeners.add(cb)
+      return () => engineListeners.delete(cb)
     },
     onEngineError() {
       return () => {}

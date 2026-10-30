@@ -7,6 +7,9 @@ namespace Surround.Desktop.Bridge;
 
 public sealed record SinkStatusDto(string DeviceId, double FillMs, double CorrPpm, long Underruns, long Overruns);
 
+/// <summary>Engine-wide state for the UI. <paramref name="Upmix"/>: "off" | "stereo" | "native".</summary>
+public sealed record EngineInfoDto(string Upmix, int SourceChannels, int SourceRate, double UpmixLatencyMs);
+
 /// <summary>
 /// Owns the audio engine on a dedicated (MTA) thread. All engine creation/disposal happens there, and the
 /// same thread samples status (~250 ms) and peak levels (~20 Hz) while the engine runs, so the engine is never
@@ -30,6 +33,8 @@ public sealed class EngineHost : IDisposable
     private volatile IReadOnlyList<SinkStatusDto> _lastStatus = Array.Empty<SinkStatusDto>();
 
     public event Action<IReadOnlyList<SinkStatusDto>>? StatusChanged;
+    /// <summary>Raised with every status sample (and once with "off" on stop).</summary>
+    public event Action<EngineInfoDto>? InfoChanged;
     /// <summary>dBFS per logical channel, FL..SR order, -90 floor.</summary>
     public event Action<float[]>? LevelsChanged;
     public event Action<string>? Error;
@@ -100,9 +105,10 @@ public sealed class EngineHost : IDisposable
                 if (now >= nextStatus)
                 {
                     nextStatus = now + StatusPeriodMs;
-                    var st = Snapshot(_engine, _config!);
+                    var st = Snapshot(_engine, _config!, out var info);
                     _lastStatus = st;
                     StatusChanged?.Invoke(st);
+                    InfoChanged?.Invoke(info);
                 }
             }
             catch (Exception ex)
@@ -172,11 +178,20 @@ public sealed class EngineHost : IDisposable
         Array.Fill(floor, -90f);
         LevelsChanged?.Invoke(floor);
         StatusChanged?.Invoke(Array.Empty<SinkStatusDto>());
+        InfoChanged?.Invoke(new EngineInfoDto("off", 0, 0, 0));
     }
 
-    private static IReadOnlyList<SinkStatusDto> Snapshot(SurroundEngine engine, SurroundConfig cfg)
+    private static IReadOnlyList<SinkStatusDto> Snapshot(SurroundEngine engine, SurroundConfig cfg, out EngineInfoDto info)
     {
         var st = engine.GetStatus();
+        string up = st.UpmixState switch
+        {
+            Surround.Engine.Dsp.UpmixState.Stereo => "stereo",
+            Surround.Engine.Dsp.UpmixState.Native => "native",
+            _ => "off",
+        };
+        info = new EngineInfoDto(up, st.SourceChannels, st.SourceRate,
+            st.SourceRate > 0 ? Math.Round(st.UpmixLatencyFrames * 1000.0 / st.SourceRate, 1) : 0);
         var list = new List<SinkStatusDto>(st.Sinks.Count);
         // Engine sinks are created in cfg.Outputs order.
         for (int i = 0; i < st.Sinks.Count && i < cfg.Outputs.Count; i++)
