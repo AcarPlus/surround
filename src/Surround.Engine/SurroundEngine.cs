@@ -38,7 +38,7 @@ public sealed class SurroundEngine : IDisposable
 
     public SurroundEngine(SurroundConfig cfg, Action<string>? log = null)
     {
-        _cfg = cfg;
+        _cfg = cfg.ForRouting(log);
         _log = log;
     }
 

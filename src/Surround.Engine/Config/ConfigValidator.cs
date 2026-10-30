@@ -19,8 +19,12 @@ public static class ConfigValidator
         if (string.IsNullOrWhiteSpace(cfg.Source.DeviceId)) e.Add("source.deviceId boş olamaz.");
         if (mode != "loopback" && mode != "capture") e.Add($"source.mode 'loopback' veya 'capture' olmalı (bulunan: '{cfg.Source.Mode}').");
 
-        if (cfg.Outputs.Count == 0) e.Add("En az bir çıkış (outputs) gerekli.");
-        if (cfg.Speakers.Count == 0) e.Add("En az bir hoparlör (speakers) gerekli.");
+        bool hadSpeakers = cfg.Speakers.Count > 0;
+        cfg = cfg.ForRouting();
+        if (cfg.Speakers.Count == 0)
+            e.Add(hadSpeakers
+                ? "Tüm hoparlörler kaynak cihazda; yönlendirilecek hoparlör yok. Başka bir cihaza en az bir hoparlör ekleyin."
+                : "En az bir hoparlör (speakers) gerekli.");
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < cfg.Outputs.Count; i++)
@@ -58,6 +62,7 @@ public static class ConfigValidator
     {
         var e = new List<string>();
         var mode = cfg.Source.Mode?.Trim().ToLowerInvariant();
+        cfg = cfg.ForRouting();
         var src = catalog.Find(cfg.Source.DeviceId);
         if (src is null) e.Add($"Kaynak cihaz bulunamadı: {cfg.Source.DeviceId}");
         else

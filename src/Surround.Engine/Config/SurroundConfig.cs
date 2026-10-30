@@ -84,6 +84,23 @@ public sealed class SurroundConfig
         return copy.ToJson();
     }
 
+    /// <summary>
+    /// Copy the engine actually routes: in loopback mode speakers on the source device are dropped (Windows already
+    /// plays them directly), and outputs no remaining speaker uses are dropped (stale entries left by the UI).
+    /// </summary>
+    public SurroundConfig ForRouting(Action<string>? log = null)
+    {
+        var copy = Parse(ToJson());
+        if (string.Equals(copy.Source.Mode?.Trim(), "loopback", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var s in copy.Speakers.Where(s => SameId(s.OutputDeviceId, copy.Source.DeviceId)))
+                log?.Invoke($"'{s.Name}': kaynak cihazda, Windows doğrudan çalıyor; yönlendirilmedi.");
+            copy.Speakers.RemoveAll(s => SameId(s.OutputDeviceId, copy.Source.DeviceId));
+        }
+        copy.Outputs.RemoveAll(o => !copy.Speakers.Any(s => SameId(s.OutputDeviceId, o.DeviceId)));
+        return copy;
+    }
+
     /// <summary>Effective delay in ms for a speaker: output latency compensation + user delay.</summary>
     public double EffectiveDelayMs(SpeakerConfig speaker)
     {

@@ -37,13 +37,16 @@ public class ConfigTests
     }
 
     [Fact]
-    public void FeedbackGuardRejectsLoopbackSourceUsedAsOutput()
+    public void SpeakersOnLoopbackSourceAreLeftToWindows()
     {
         var cfg = SurroundConfig.Parse(Json);
         cfg.Outputs[0].DeviceId = " src ";
         cfg.Speakers[0].OutputDeviceId = "src";
-        var errors = ConfigValidator.Validate(cfg);
-        Assert.Contains(errors, e => e.Contains("geri besleme"));
+        cfg.Outputs.Add(new OutputConfig { DeviceId = "unused" });
+        var routed = cfg.ForRouting();
+        Assert.DoesNotContain(routed.Speakers, s => SurroundConfig.SameId(s.OutputDeviceId, "src"));
+        Assert.DoesNotContain(routed.Outputs, o => SurroundConfig.SameId(o.DeviceId, "src") || o.DeviceId == "unused");
+        Assert.DoesNotContain(ConfigValidator.Validate(cfg), e => e.Contains("geri besleme"));
     }
 
     [Fact]
