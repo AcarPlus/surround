@@ -35,6 +35,7 @@ public sealed class SurroundEngine : IDisposable
     private GlobalProcessor? _proc;
     private BassManager? _bass;
     private long _frames;
+    private long _dspTicks, _dspMaxTicks;
     private bool _started;
     private readonly PeakMeter _meter = new();
     private const int CaptureBufferMs = 20;
@@ -60,7 +61,7 @@ public sealed class SurroundEngine : IDisposable
             using var en = new MMDeviceEnumerator();
             _srcDevice = en.GetDevice(_cfg.Source.DeviceId.Trim());
             bool loopback = _cfg.Source.Mode.Trim().Equals("loopback", StringComparison.OrdinalIgnoreCase);
-            _capture = loopback ? new LoopbackCapture(_srcDevice, CaptureBufferMs) : new WasapiCapture(_srcDevice, false, CaptureBufferMs);
+            _capture = loopback ? new LoopbackCapture(_srcDevice, CaptureBufferMs) : new WasapiCapture(_srcDevice, true, CaptureBufferMs);
             _srcFormat = _capture.WaveFormat;
             if (!SampleConverter.IsSupported(_srcFormat))
                 throw new NotSupportedException($"Kaynak formatı desteklenmiyor: {_srcFormat}");
@@ -116,8 +117,10 @@ public sealed class SurroundEngine : IDisposable
             if (loopback)
             {
                 // Loopback delivers no packets while nothing renders; a silent stream keeps the clock running.
+                // It plays the endpoint's own mix format: the capture's WaveFormat is flattened to a plain WAVEFORMATEX,
+                // which Windows rejects (E_INVALIDARG) for more than 2 channels once the endpoint is set to 5.1/7.1.
                 _keepAlive = new WasapiOut(_srcDevice, AudioClientShareMode.Shared, true, 50);
-                _keepAlive.Init(new SilenceProvider(WaveFormat.CreateIeeeFloatWaveFormat(_srcFormat.SampleRate, _srcFormat.Channels)));
+                _keepAlive.Init(new SilenceProvider(_srcDevice.AudioClient.MixFormat));
                 _keepAlive.Play();
             }
 
@@ -215,6 +218,18 @@ public sealed class SurroundEngine : IDisposable
         int n = fmt.Channels;
         int frames = e.BytesRecorded / fmt.BlockAlign;
         if (frames == 0) return;
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        try { Process(e, fmt, n, frames); }
+        finally
+        {
+            long dt = System.Diagnostics.Stopwatch.GetTimestamp() - t0;
+            Interlocked.Add(ref _dspTicks, dt);
+            if (dt > Interlocked.Read(ref _dspMaxTicks)) Interlocked.Exchange(ref _dspMaxTicks, dt);
+        }
+    }
+
+    private void Process(WaveInEventArgs e, WaveFormat fmt, int n, int frames)
+    {
         if (_srcFloat.Length < frames * n) _srcFloat = new float[frames * n * 2];
         if (_logical.Length < frames * Channels.Count) _logical = new float[frames * Channels.Count * 2];
 
@@ -259,6 +274,16 @@ public sealed class SurroundEngine : IDisposable
         var state = _upmix?.State ?? UpmixState.Off;
         return new(_srcFormat?.SampleRate ?? 0, _srcFormat?.Channels ?? 0, state == UpmixState.Stereo, Interlocked.Read(ref _frames),
             _sinks.Select(s => s.GetStatus()).ToList(), state, _upmix?.LatencyFrames ?? 0);
+    }
+
+    /// <summary>
+    /// Processing time spent in the capture callback since the previous call, and its longest single callback, in ms
+    /// (diagnostics: the capture buffer overflows when one callback outlasts it).
+    /// </summary>
+    public (double TotalMs, double MaxMs) DrainDspTime()
+    {
+        double k = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+        return (Interlocked.Exchange(ref _dspTicks, 0) * k, Interlocked.Exchange(ref _dspMaxTicks, 0) * k);
     }
 
     public void Dispose()

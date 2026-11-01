@@ -35,7 +35,7 @@ try
 }
 catch (ArgumentException ex) when (ex is not ArgumentOutOfRangeException)
 {
-    Console.Error.WriteLine(ex.Message);
+    Console.Error.WriteLine(Environment.GetEnvironmentVariable("SURROUND_TRACE") is null ? ex.Message : ex.ToString());
     return 1;
 }
 catch (FormatException)
@@ -129,7 +129,8 @@ static int CmdRun(string path)
                 Surround.Engine.Dsp.UpmixState.Native => " (yerel çok kanal)",
                 _ => "",
             };
-            Console.WriteLine($"-- kaynak {st.SourceRate} Hz/{st.SourceChannels} kanal{up}, {st.SourceFrames} kare");
+            var (dspMs, dspMax) = engine.DrainDspTime();
+            Console.WriteLine($"-- kaynak {st.SourceRate} Hz/{st.SourceChannels} kanal{up}, {st.SourceFrames} kare, DSP {dspMs / 10:0.0}% (en uzun {dspMax:0.0} ms)");
             foreach (var s in st.Sinks)
                 Console.WriteLine($"   {s.Name}: doluluk {s.FillMs:F1} ms, düzeltme {s.CorrectionPpm:+0.0;-0.0;0.0} ppm, underrun {s.Underruns}, overrun {s.Overruns}, {s.DeviceRate} Hz/{s.DeviceChannels} kanal");
         }
@@ -165,7 +166,7 @@ static int CmdProbe(string deviceId, double seconds, int bufferMs)
     var dev = en.GetDevice(deviceId.Trim());
     using var cap = new ProbeLoopback(dev, bufferMs);
     using var keep = new NAudio.Wave.WasapiOut(dev, NAudio.CoreAudioApi.AudioClientShareMode.Shared, true, 50);
-    keep.Init(new NAudio.Wave.SilenceProvider(NAudio.Wave.WaveFormat.CreateIeeeFloatWaveFormat(cap.WaveFormat.SampleRate, cap.WaveFormat.Channels)));
+    keep.Init(new NAudio.Wave.SilenceProvider(dev.AudioClient.MixFormat));
     var sizes = new List<int>(); var gaps = new List<double>();
     var sw = System.Diagnostics.Stopwatch.StartNew(); double last = 0;
     cap.DataAvailable += (_, e) =>
@@ -188,7 +189,7 @@ static int CmdProbe(string deviceId, double seconds, int bufferMs)
     return 0;
 }
 
-sealed class ProbeLoopback(NAudio.CoreAudioApi.MMDevice d, int ms) : NAudio.CoreAudioApi.WasapiCapture(d, false, ms)
+sealed class ProbeLoopback(NAudio.CoreAudioApi.MMDevice d, int ms) : NAudio.CoreAudioApi.WasapiCapture(d, true, ms)
 {
     protected override NAudio.CoreAudioApi.AudioClientStreamFlags GetAudioClientStreamFlags() =>
         NAudio.CoreAudioApi.AudioClientStreamFlags.Loopback | base.GetAudioClientStreamFlags();
