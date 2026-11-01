@@ -36,7 +36,7 @@ public sealed class FilmUpmixer : IStereoUpmixer
     private readonly float[][] _yr, _yi; // per output, bins 0..N/2
     private readonly float[] _ola;   // Outs × N
     private readonly float[] _out;   // Outs × H, the last completed hop
-    private readonly float _alpha, _gainK, _cgK, _af, _as;
+    private readonly float _alpha, _gainK, _cgK, _afL, _afR, _asL, _asR;
     private readonly bool _hasFc, _lfeAllowed;
     private readonly SurroundRenderer _sur;
     private readonly HeightRenderer? _hgt;
@@ -69,9 +69,8 @@ public sealed class FilmUpmixer : IStereoUpmixer
         _gainK = (float)(1 - Math.Exp(-1 / (UpmixTuning.GainSmoothSeconds * sampleRate)));
         _cgK = (float)(1 - Math.Exp(-_h / (UpmixTuning.GainSmoothSeconds * sampleRate)));
         _hasFc = layout.Has(Channels.FC);
-        bool sur = layout.AnySurround;
-        _af = sur ? MathF.Sqrt(UpmixTuning.FrontAmbientShare) : 1f;
-        _as = sur ? MathF.Sqrt(1 - UpmixTuning.FrontAmbientShare) : 0f;
+        (_afL, _asL) = UpmixTuning.AmbientSplit(layout.LeftSurround);
+        (_afR, _asR) = UpmixTuning.AmbientSplit(layout.RightSurround);
         _sur = new SurroundRenderer(sampleRate, layout);
         _hgt = HeightRenderer.Create(sampleRate, layout);
         _lfeLp = LinkwitzRiley.LowPass(sampleRate, UpmixTuning.LfeHz);
@@ -112,7 +111,7 @@ public sealed class FilmUpmixer : IStereoUpmixer
             o[Channels.FR] = fr;
             o[Channels.FC] = fc;
             o[Channels.LFE] = _lfeDelay.Process(_lfeLp.Process(0.5f * (l + r))) * _lg;
-            _sur.Render(al, ar, _as * _sg, 0, 0, 0, 0, o);
+            _sur.Render(al * _asL, ar * _asR, _sg, 0, 0, 0, 0, o);
             if (_hgt != null) _hgt.Render(al, ar, _hg, o);
             else o.Slice(Channels.SourceCount).Clear();
         }
@@ -200,12 +199,12 @@ public sealed class FilmUpmixer : IStereoUpmixer
 
             // FL/FR = primary + front ambient share; both contain s, so their coefficients add as powers
             // (s and a are uncorrelated by construction) instead of coherently.
-            float afk = _af * ka;
-            float cL = MathF.Sqrt(gL * gL * pm * pm + afk * afk * ce * ce);
-            float cRr = MathF.Sqrt(gR * gR * pm * pm + afk * afk * se * se);
-            _yr[0][k] = cL * sr - _af * se * ar; _yi[0][k] = cL * si - _af * se * ai;
+            float afkL = _afL * ka, afkR = _afR * ka;
+            float cL = MathF.Sqrt(gL * gL * pm * pm + afkL * afkL * ce * ce);
+            float cRr = MathF.Sqrt(gR * gR * pm * pm + afkR * afkR * se * se);
+            _yr[0][k] = cL * sr - _afL * se * ar; _yi[0][k] = cL * si - _afL * se * ai;
             // FR in R's phase: conj(u)·(cR·s + af·ce·a).
-            float qR = cRr * sr + _af * ce * ar, qI = cRr * si + _af * ce * ai;
+            float qR = cRr * sr + _afR * ce * ar, qI = cRr * si + _afR * ce * ai;
             _yr[1][k] = ur * qR + ui * qI; _yi[1][k] = ur * qI - ui * qR;
             // FC half-way between the two phases: sqrt(conj u).
             float hr = MathF.Sqrt(MathF.Max(0f, 0.5f * (1 + ur)));

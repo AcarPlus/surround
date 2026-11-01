@@ -181,6 +181,25 @@ public class UpmixerTests
 
     [Theory]
     [MemberData(nameof(Modes))]
+    public void SideWithoutSurroundKeepsItsAmbienceInFront(string mode)
+    {
+        // FL, FR and only the back right: the left ambience must not be rendered into SL/BL (the fold would add the
+        // decorrelated, delayed copy back onto FL, which already carries it — a comb that sounds like an echo).
+        var layout = new UpmixLayout(Up.Used(Channels.FL, Channels.FR, Channels.BR), false);
+        var l = Up.Noise(N, 30); var r = Up.Noise(N, 31);
+        var lg = Up.Run(Up.Make(mode, layout), l, r);
+        foreach (var c in new[] { Channels.SL, Channels.BL, Channels.SR, Channels.FC })
+            Assert.Equal(0, Up.Energy(lg, c, Warm));
+        double br = Up.Energy(lg, Channels.BR, Warm), fl = Up.Energy(lg, Channels.FL, Warm), fr = Up.Energy(lg, Channels.FR, Warm);
+        Assert.True(br > 0.25 * (fr + br), $"{mode}: right ambience not in BR ({br / (fr + br):P1})");
+        // Left keeps its whole ambience in FL, right shares it with BR.
+        Assert.True(fl > 1.3 * fr, $"{mode}: FL {Sig.Db(Math.Sqrt(fl / fr)):0.0} dB over FR");
+        double outE = Up.Energy(lg, Up.NonLfe, Warm), inE = Up.Energy(l, Warm) + Up.Energy(r, Warm);
+        Assert.InRange(10 * Math.Log10(outE / inE), -1.0, 1.0);
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
     public void SurroundLevelAndLfeSwitch(string mode)
     {
         var l = Up.Noise(N, 15); var r = Up.Noise(N, 16);

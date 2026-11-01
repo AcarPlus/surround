@@ -35,7 +35,7 @@ public sealed class GameUpmixer : IStereoUpmixer
     private readonly HeightRenderer? _hgt;
     private readonly LinkwitzRiley _lfeLp;
     private readonly bool _lfeAllowed;
-    private readonly float _hpA, _covK, _gainK, _af, _as;
+    private readonly float _hpA, _covK, _gainK, _afL, _afR, _asL, _asR;
     private volatile UpmixSettings _settings = UpmixSettings.Default;
     private float _hl, _hr, _xl, _xr, _pLL, _pRR, _pLR;
     private float _cg = 1f, _sg = 1f, _lg = 1f, _hg = UpmixSettings.Default.HeightGain;
@@ -54,9 +54,8 @@ public sealed class GameUpmixer : IStereoUpmixer
         _hpA = (float)(rc / (rc + 1.0 / sampleRate));
         _covK = (float)(1 - Math.Exp(-1 / (SteeringSeconds * sampleRate)));
         _gainK = (float)(1 - Math.Exp(-1 / (UpmixTuning.GainSmoothSeconds * sampleRate)));
-        bool sur = layout.AnySurround;
-        _af = sur ? MathF.Sqrt(UpmixTuning.FrontAmbientShare) : 1f;
-        _as = sur ? MathF.Sqrt(1 - UpmixTuning.FrontAmbientShare) : 0f;
+        (_afL, _asL) = UpmixTuning.AmbientSplit(layout.LeftSurround);
+        (_afR, _asR) = UpmixTuning.AmbientSplit(layout.RightSurround);
     }
 
     public int LatencyFrames => 0;
@@ -126,10 +125,10 @@ public sealed class GameUpmixer : IStereoUpmixer
 
             // FL/FR = steered primary + front ambient share. Both contain s; their coefficients are combined as a
             // power sum so the coherent overlap does not add energy (s and a are uncorrelated by construction).
-            float afk = _af * ka;
-            o[Channels.FL] = MathF.Sqrt(gfl * gfl * pm * pm + afk * afk * ce * ce) * s - _af * se * a;
-            o[Channels.FR] = polR * MathF.Sqrt(gfr * gfr * pm * pm + afk * afk * se * se) * s + _af * ce * a;
-            _sur.Render(al, ar, _as * _sg, sl, bl, sr, br, o);
+            float afkL = _afL * ka, afkR = _afR * ka;
+            o[Channels.FL] = MathF.Sqrt(gfl * gfl * pm * pm + afkL * afkL * ce * ce) * s - _afL * se * a;
+            o[Channels.FR] = polR * MathF.Sqrt(gfr * gfr * pm * pm + afkR * afkR * se * se) * s + _afR * ce * a;
+            _sur.Render(al * _asL, ar * _asR, _sg, sl, bl, sr, br, o);
             _hgt?.Render(al, ar, _hg, o);
             o[Channels.LFE] = _lfeLp.Process(0.5f * (l + r)) * _lg;
         }

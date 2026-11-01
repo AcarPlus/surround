@@ -50,7 +50,9 @@ public sealed class UpmixLayout
 
     public bool Has(int channel) => _available[channel];
     public bool LfeAllowed { get; }
-    public bool AnySurround => Has(Channels.SL) || Has(Channels.BL) || Has(Channels.SR) || Has(Channels.BR);
+    public bool AnySurround => LeftSurround || RightSurround;
+    public bool LeftSurround => Has(Channels.SL) || Has(Channels.BL);
+    public bool RightSurround => Has(Channels.SR) || Has(Channels.BR);
     public bool AnyHeight => Has(Channels.TFL) || Has(Channels.TFR) || Has(Channels.TBL) || Has(Channels.TBR);
 }
 
@@ -93,6 +95,14 @@ public static class UpmixTuning
     public const float Tiny = 1e-20f;
 
     internal static float Flush(float v) => v > -Tiny && v < Tiny ? 0f : v;
+
+    /// <summary>
+    /// Amplitude split of one side's ambience between its front channel and its surround speakers. A side without any
+    /// side/back speaker keeps all of it in front: rendering it through the decorrelators and the precedence delay only
+    /// for the fold to add it back onto the front channel (which already carries the same ambience) combs and echoes.
+    /// </summary>
+    internal static (float Front, float Surround) AmbientSplit(bool sideHasSurround) =>
+        sideHasSurround ? (MathF.Sqrt(FrontAmbientShare), MathF.Sqrt(1 - FrontAmbientShare)) : (1f, 0f);
 }
 
 /// <summary>Schroeder all-pass section: H(z) = (-g + z^-D) / (1 - g·z^-D). Flat magnitude, dispersed phase.</summary>
