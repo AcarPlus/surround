@@ -223,10 +223,14 @@ function UpmixControls() {
   )
 }
 
-/** VB-Cable'ın oynatma (render) ucu: adında CABLE geçen, tercihen "16ch" olan cihaz. */
+/**
+ * VB-Cable'ın oynatma (render) ucu: adında CABLE geçen, tercihen "16ch" olmayan cihaz.
+ * "CABLE Input" hoparlör ucudur ve Yapılandır ile 7.1 olur; "CABLE In 16ch" Line Out ucudur,
+ * Windows'ta Yapılandır düğmesi devre dışıdır.
+ */
 function findCable(devices: Device[]): Device | undefined {
   const renders = devices.filter((d) => d.flow === 'render' && /cable/i.test(d.name))
-  return renders.find((d) => /16ch/i.test(d.name)) ?? renders[0]
+  return renders.find((d) => !/16ch/i.test(d.name)) ?? renders[0]
 }
 
 function CableGuide({
@@ -241,6 +245,14 @@ function CableGuide({
   onSelect: () => void
 }) {
   const showToast = useStore((s) => s.showToast)
+  const [autoDefault, setAutoDefault] = useState(false)
+  useEffect(() => {
+    api
+      .getAppSettings()
+      .then((s) => setAutoDefault(s.switchDefaultDevice))
+      .catch(() => {})
+  }, [])
+  const multichannel = !!cable && cable.channels >= 6
   const openPanel = async () => {
     try {
       await api.openSoundPanel()
@@ -259,18 +271,23 @@ function CableGuide({
       ),
     },
     {
-      done: false,
-      title: (
+      done: !!cable && (cable.isDefault || autoDefault),
+      title: autoDefault ? (
         <>
-          Windows varsayılan çıkışını <b className="font-semibold">“CABLE In 16ch”</b> yap.
+          Başlat’a basınca Surround Windows varsayılan çıkışını <b className="font-semibold">“CABLE Input”</b> yapar,
+          Durdur’da eskisine döndürür.
+        </>
+      ) : (
+        <>
+          Windows varsayılan çıkışını <b className="font-semibold">“CABLE Input”</b> yap.
         </>
       ),
     },
     {
-      done: false,
+      done: multichannel,
       title: (
         <>
-          Ses panelinde <b className="font-semibold">CABLE In 16ch</b> → Yapılandır → <b className="font-semibold">7.1</b>.
+          Ses panelinde <b className="font-semibold">CABLE Input</b> → Yapılandır → <b className="font-semibold">7.1</b>.
         </>
       ),
       body: (
@@ -283,7 +300,7 @@ function CableGuide({
       done: cableSelected,
       title: (
         <>
-          Burada kaynak olarak <b className="font-semibold">CABLE In 16ch</b> + <b className="font-semibold">Loopback</b> seç.
+          Burada kaynak olarak <b className="font-semibold">CABLE Input</b> + <b className="font-semibold">Loopback</b> seç.
         </>
       ),
       body: cable ? (

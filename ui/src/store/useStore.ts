@@ -76,6 +76,8 @@ interface State {
   toast: string | null
 
   init: () => Promise<void>
+  /** Cihaz listesini yeniden okur (Windows'ta kanal sayısı/varsayılan değişince ekran güncellensin). */
+  refreshDevices: () => Promise<void>
   setTheme: (t: Theme) => void
   setScreen: (s: Screen) => void
   select: (id: string | null) => void
@@ -246,6 +248,22 @@ export const useStore = create<State>()((set, get) => {
       api.onStatus((status) => set({ status }))
       api.onEngine((info) => set({ engine: info.sourceRate > 0 ? info : null }))
       api.onEngineError((msg) => get().showToast(msg, 7000))
+    },
+
+    async refreshDevices() {
+      try {
+        const devices = await api.listDevices()
+        const prev = get().devices
+        const same =
+          prev.length === devices.length &&
+          prev.every((d, i) => {
+            const n = devices[i]
+            return d.id === n.id && d.name === n.name && d.channels === n.channels && d.isDefault === n.isDefault
+          })
+        if (!same) set({ devices })
+      } catch {
+        /* sonraki denemede */
+      }
     },
 
     setTheme(theme) {

@@ -30,6 +30,20 @@ export function App() {
     void useStore.getState().init()
   }, [])
 
+  // Windows'taki değişiklikler (7.1 yapılandırma, varsayılan cihaz, takılan cihaz) uygulamaya kendiliğinden yansısın.
+  useEffect(() => {
+    if (!ready) return
+    const refresh = () => {
+      if (document.visibilityState === 'visible') void useStore.getState().refreshDevices()
+    }
+    const id = window.setInterval(refresh, 3000)
+    window.addEventListener('focus', refresh)
+    return () => {
+      window.clearInterval(id)
+      window.removeEventListener('focus', refresh)
+    }
+  }, [ready])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
