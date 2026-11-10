@@ -22,22 +22,26 @@ export function Dialog({
   closable?: boolean
 }) {
   const box = useRef<HTMLDivElement>(null)
+  // onClose çoğu yerde satır içi oktur (her çizimde yeni); etkiye bağımlı olsaydı her tuş vuruşunda odak kutuya
+  // geri sıçrardı. Güncel hali ref'te tutulur.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && closable) {
         e.stopPropagation()
-        onClose()
+        onCloseRef.current()
       }
     }
     window.addEventListener('keydown', onKey, true)
     const prev = document.activeElement as HTMLElement | null
-    box.current?.focus()
+    if (!box.current?.contains(document.activeElement)) box.current?.focus()
     return () => {
       window.removeEventListener('keydown', onKey, true)
       prev?.focus?.()
     }
-  }, [open, closable, onClose])
+  }, [open, closable])
 
   return createPortal(
     <AnimatePresence>

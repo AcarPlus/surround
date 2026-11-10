@@ -271,9 +271,14 @@ export function createMockApi(): SurroundApi {
         const timer = setInterval(() => {
           step++
           if (step === -1) return emit({ phase: 'noise', index: 0, total, message: 'Ortam gürültüsü ölçülüyor…' })
+          // Motor gibi: ölçümde index 1 tabanlı; çözümleme aşaması 1'den yeniden sayar.
           if (step < total) {
             const s = speakers[step]!
-            return emit({ phase: 'measuring', speakerId: s.id, index: step, total, message: `${s.name} ölçülüyor…` })
+            return emit({ phase: 'measuring', speakerId: s.id, index: step + 1, total, message: `${s.name} ölçülüyor…` })
+          }
+          if (step < 2 * total) {
+            const s = speakers[step - total]!
+            return emit({ phase: 'analyzing', speakerId: s.id, index: step - total + 1, total, message: `${s.name} çözümleniyor…` })
           }
           clearInterval(timer)
           calibrationAbort = null

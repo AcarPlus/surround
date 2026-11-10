@@ -14,8 +14,7 @@ import { SetupWizard } from './screens/SetupWizard'
 import { IconX } from './components/icons'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { cx } from './components/ui'
-
-const NUDGE_M = 0.05
+import { resolveShortcut } from './lib/shortcuts'
 
 function isTyping(t: EventTarget | null) {
   const el = t as HTMLElement | null
@@ -23,6 +22,9 @@ function isTyping(t: EventTarget | null) {
   const tag = el.tagName
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
 }
+
+/** Sihirbaz ya da bir Dialog açık mı (ikisi de role="dialog" aria-modal="true" taşır). */
+const modalOpen = () => !!document.querySelector('[role="dialog"][aria-modal="true"]')
 
 export function App() {
   const ready = useStore((s) => s.ready)
@@ -53,41 +55,36 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const st = useStore.getState()
-      // Geri al / yinele: metin kutusunda değilken (orada tarayıcının kendi geri alması çalışır).
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !isTyping(e.target)) {
-        const k = e.key.toLowerCase()
-        if (k === 'z' && !e.shiftKey) {
+      const action = resolveShortcut(
+        { key: e.key, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, shiftKey: e.shiftKey, typing: isTyping(e.target) },
+        {
+          screen: st.screen,
+          selection: st.selection,
+          listenerSelected: st.selection === LISTENER_ID,
+          modalOpen: st.wizardOpen || modalOpen(),
+        },
+      )
+      if (!action) return
+      switch (action.kind) {
+        case 'undo':
           e.preventDefault()
           st.undo()
-          return
-        }
-        if (k === 'y' || (k === 'z' && e.shiftKey)) {
+          break
+        case 'redo':
           e.preventDefault()
           st.redo()
-          return
-        }
-      }
-      if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey || st.wizardOpen) return
-      if (!st.selection) return
-      if (e.key === 'Delete' && st.selection !== LISTENER_ID) {
-        e.preventDefault()
-        st.removeSpeaker(st.selection)
-        return
-      }
-      if (e.key === 'Escape') {
-        st.select(null)
-        return
-      }
-      const d: Record<string, [number, number]> = {
-        ArrowLeft: [-NUDGE_M, 0],
-        ArrowRight: [NUDGE_M, 0],
-        ArrowUp: [0, -NUDGE_M],
-        ArrowDown: [0, NUDGE_M],
-      }
-      const v = d[e.key]
-      if (v && st.screen === 'room') {
-        e.preventDefault()
-        st.nudgeSelected(v[0], v[1])
+          break
+        case 'delete':
+          e.preventDefault()
+          if (st.selection) st.removeSpeaker(st.selection)
+          break
+        case 'deselect':
+          st.select(null)
+          break
+        case 'nudge':
+          e.preventDefault()
+          st.nudgeSelected(action.dx, action.dy)
+          break
       }
     }
     window.addEventListener('keydown', onKey)

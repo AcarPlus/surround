@@ -9,6 +9,9 @@ import {
   planSpeakers,
   placementRadius,
   standardPosition,
+  mergeKits,
+  outsideSpeakers,
+  previousPlan,
   type DeviceKit,
 } from './setup'
 
@@ -143,6 +146,8 @@ describe('buildSpeakers', () => {
     y: 0.5,
     role: 'left',
     eq: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    eqPreset: 'custom',
+    highPassHz: 150,
   }
 
   it('aynı cihaz/kanal/roldeki hoparlörü korur, bozuk adı düzeltir, yenisini ön ayarla oluşturur', () => {
@@ -158,5 +163,93 @@ describe('buildSpeakers', () => {
     const r = buildSpeakers([], [existing], [{ deviceId: 'spk', latencyMs: 0, bufferMs: 40 }], room)
     expect(r.speakers).toEqual([])
     expect(r.outputs).toEqual([])
+  })
+})
+
+describe('buildSpeakers: sihirbaz yeniden açılınca kit değişikliği', () => {
+  const sp = (id: string, ch: number, role: string, extra: Partial<Speaker> = {}): Speaker => ({
+    id,
+    name: id,
+    outputDeviceId: 'spk',
+    deviceChannel: ch,
+    source: {},
+    delayMs: 2,
+    gainDb: -1,
+    mute: false,
+    x: 0.7,
+    y: 0.9,
+    role,
+    calibratedAt: 'T',
+    ...extra,
+  })
+  const flatPair = [sp('a', 1, 'left', { eqPreset: 'flat' }), sp('b', 2, 'right', { eqPreset: 'flat' })]
+  const build = (k: Partial<DeviceKit>, existing: Speaker[]) =>
+    buildSpeakers(planSpeakers([kit({ deviceId: 'spk', kind: 'pair', ...k })], DEVICES), existing, [], room, {
+      prevPlan: previousPlan(DEVICES, existing),
+    })
+
+  it('Normal → Küçük: kimlik, konum, gecikme, kalibrasyon kalır; ön ayar yeniden uygulanır', () => {
+    const r = build({ pairType: 'small-satellite' }, flatPair)
+    expect(r.speakers[0]).toMatchObject({ id: 'a', x: 0.7, delayMs: 2, calibratedAt: 'T', highPassHz: 150, eqPreset: 'small-satellite' })
+    expect(r.speakers[1]).toMatchObject({ id: 'b', highPassHz: 150 })
+    expect(r.createdIds).toEqual([])
+  })
+
+  it('çift → 2.1 set: bas alıcısı açılır; geri dönünce bas kesme ve bas alıcısı kalkar', () => {
+    const r = build({ kind: 'pair21' }, flatPair)
+    expect(r.speakers.map((s) => [s.id, s.eqPreset, s.bassReceiver])).toEqual([
+      ['a', 'desktop-front', true],
+      ['b', 'desktop-front', true],
+    ])
+    const small = build({ pairType: 'small-satellite' }, flatPair).speakers
+    const back = build({ pairType: 'flat' }, small).speakers
+    expect(back[0]).toMatchObject({ id: 'a', eqPreset: 'flat', highPassHz: undefined, bassReceiver: undefined })
+  })
+
+  it('ön ayar değişmediyse elle yapılmış EQ korunur', () => {
+    const custom = flatPair.map((s) => ({ ...s, eq: [2, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqPreset: 'custom' }))
+    const r = build({}, custom)
+    expect(r.speakers[0].eq).toEqual(custom[0].eq)
+    expect(r.speakers[0].eqPreset).toBe('custom')
+  })
+
+  it('sol/sağ ters: aynı kutu korunur, rol ve ad değişir, karşı tarafa taşınır, ölçüm sıfırlanır', () => {
+    const custom = flatPair.map((s) => ({ ...s, eq: [2, 0, 0, 0, 0, 0, 0, 0, 0, 0], eqPreset: 'custom' }))
+    const r = build({ swap: true }, custom)
+    const [a, b] = r.speakers
+    expect(a).toMatchObject({ id: 'a', deviceChannel: 1, role: 'right', name: 'Ön sağ', source: { FR: 1 }, delayMs: 0, gainDb: 0 })
+    expect(a.calibratedAt).toBeUndefined()
+    expect(a.eq).toEqual(custom[0].eq)
+    expect(a.x).toBeGreaterThan(room.listener.x)
+    expect(b).toMatchObject({ id: 'b', role: 'left', name: 'Ön sol' })
+    expect(r.createdIds).toEqual(['a', 'b'])
+  })
+
+  it('sihirbazın listelemediği cihazdaki hoparlörler olduğu gibi korunur', () => {
+    const ghost: Speaker = { ...sp('g', 1, 'center'), outputDeviceId: 'unplugged' }
+    const candidates = candidateDevices(DEVICES, 'cable')
+    const keep = outsideSpeakers([...flatPair, ghost], candidates)
+    expect(keep.map((s) => s.id)).toEqual(['g'])
+    const plan = planSpeakers([kit({ deviceId: 'spk', kind: 'pair' })], DEVICES)
+    const r = buildSpeakers(plan, [...flatPair, ghost], [{ deviceId: 'unplugged', latencyMs: 7, bufferMs: 40 }], room, { keep })
+    expect(r.speakers.map((s) => s.id)).toEqual(['a', 'b', 'g'])
+    expect(r.speakers[2]).toBe(ghost)
+    expect(r.outputs.find((o) => o.deviceId === 'unplugged')).toEqual({ deviceId: 'unplugged', latencyMs: 7, bufferMs: 40 })
+  })
+})
+
+describe('mergeKits', () => {
+  const candidates = candidateDevices(DEVICES, 'cable')
+  it('ilk açılışta sonradan listelenen cihazlar tahminle gelir', () => {
+    const kits = mergeKits([], candidates, false)
+    expect(kits.map((k) => k.kind)).toEqual(['pair', 'none', 'none'])
+  })
+  it('kurulum varsa yeni cihaz kullanılmıyor başlar, listeden çıkan cihaz gizlenir', () => {
+    const kits = mergeKits([kit({ deviceId: '2nd', kind: 'pair' }), kit({ deviceId: 'gone', kind: 'pair' })], candidates, true)
+    expect(kits.map((k) => [k.deviceId, k.kind])).toEqual([
+      ['2nd', 'pair'],
+      ['spk', 'none'],
+      ['hp', 'none'],
+    ])
   })
 })

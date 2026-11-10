@@ -90,6 +90,12 @@ interface HistoryEntry {
 const HISTORY_MAX = 100
 /** Aynı türden art arda gelen değişiklikler (sürükleme, kaydırıcı) bu süre içinde tek adım sayılır. */
 const COALESCE_MS = 900
+/**
+ * Yalnızca sürekli eylemler (sürükleme, kaydırıcı, sayı alanı) birleştirilir; etiketleri hedefin kimliğini taşır.
+ * Ayrık eylemler (ekle, kopyala, sil, otomatik, profil, kalibrasyon, sihirbaz, düzen …) her zaman ayrı adımdır.
+ */
+const CONTINUOUS_LABEL = /^(Taşı:|Hoparlör ayarı:|Ses ayarı:|Upmix ayarı:|Karışım:|Çıkış ayarı:|Dinleyiciyi taşı$|Oda boyutu$)/
+export const isContinuousLabel = (label: string): boolean => CONTINUOUS_LABEL.test(label)
 
 interface State {
   ready: boolean
@@ -151,6 +157,10 @@ interface State {
   /** Tüm hoparlörleri sırayla çalar (hangisi hangisi?). */
   playTour: () => Promise<void>
   stopTour: () => void
+  /** Bekleyen kaydı hemen diske yazar (backend yapılandırmayı diskten okuyacaksa, ör. kalibrasyondan önce). */
+  flushSave: () => Promise<void>
+  /** Çalışma durumunu motordan yeniden okur (backend motoru kendisi durdurup başlattıktan sonra). */
+  syncRunState: () => Promise<void>
   /** Rol seçer: karışım satırını (ve Subwoofer için bassReceiver'ı) yazar. */
   setRole: (id: string, role: string) => void
   setLowLatency: (v: boolean) => void
@@ -240,11 +250,61 @@ export function describeError(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
+const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/**
+ * Yedek dosyasını doğrular ve eksik isteğe bağlı alanları tamamlar. Geçersizse Türkçe hata metni döner.
+ * Zorunlu: source, room (sayısal boyut ve dinleyici), outputs (cihaz + sayısal gecikme/tampon),
+ * speakers (id, outputDeviceId, deviceChannel, source, x, y).
+ */
+export function checkConfig(raw: unknown): Config | string {
+  const NOT = 'Bu dosya bir Surround yapılandırması değil.'
+  if (!isObj(raw)) return NOT
+  const c = raw as Record<string, unknown>
+  if (!Array.isArray(c.speakers) || !isObj(c.source) || !isObj(c.room) || !Array.isArray(c.outputs)) return NOT
+  const src = c.source
+  if (typeof src.deviceId !== 'string' || typeof src.mode !== 'string') return 'Yedekte ses kaynağı bozuk.'
+  const room = c.room
+  const L = room.listener
+  if (!isNum(room.widthM) || !isNum(room.depthM) || room.widthM <= 0 || room.depthM <= 0) return 'Yedekte oda boyutu bozuk.'
+  if (!isObj(L) || !isNum(L.x) || !isNum(L.y)) return 'Yedekte dinleyici konumu bozuk.'
+  for (const [i, o] of c.outputs.entries()) {
+    if (!isObj(o) || typeof o.deviceId !== 'string' || !isNum(o.latencyMs) || !isNum(o.bufferMs)) {
+      return `Yedekteki ${i + 1}. çıkış kaydı bozuk.`
+    }
+  }
+  const ids = new Set<string>()
+  const speakers: Config['speakers'] = []
+  for (const [i, s] of c.speakers.entries()) {
+    const bad = `Yedekteki ${i + 1}. hoparlör bozuk`
+    if (!isObj(s)) return `${bad}.`
+    if (typeof s.id !== 'string' || !s.id) return `${bad} (kimlik yok).`
+    if (ids.has(s.id)) return `${bad} (kimlik tekrarlanıyor).`
+    ids.add(s.id)
+    if (typeof s.outputDeviceId !== 'string') return `${bad} (çıkış cihazı yok).`
+    if (!isNum(s.deviceChannel) || s.deviceChannel < 1) return `${bad} (kanal numarası geçersiz).`
+    if (!isObj(s.source) || !Object.values(s.source).every(isNum)) return `${bad} (karışım satırı geçersiz).`
+    if (!isNum(s.x) || !isNum(s.y)) return `${bad} (konum geçersiz).`
+    speakers.push({
+      ...(s as unknown as Speaker),
+      name: typeof s.name === 'string' ? s.name : `Hoparlör ${i + 1}`,
+      delayMs: isNum(s.delayMs) ? s.delayMs : 0,
+      gainDb: isNum(s.gainDb) ? s.gainDb : 0,
+      mute: s.mute === true,
+      auto: isObj(s.auto) ? { delay: s.auto.delay !== false, gain: s.auto.gain !== false } : undefined,
+    })
+  }
+  return { ...(c as unknown as Config), speakers }
+}
+
 export const useStore = create<State>()((set, get) => {
   const snapshot = (s: State): Snapshot => Object.fromEntries(HISTORY_KEYS.map((k) => [k, s[k]])) as Snapshot
 
   let lastPush = { key: '', t: 0 }
-  let tourAbort = false
+  /** Her tur kendi numarasıyla çalışır; durdurma ya da yeni tur eski döngüyü geçersiz kılar. */
+  let tourToken = 0
+  let touring = false
   let toastSeq = 0
   let toastTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -280,7 +340,8 @@ export const useStore = create<State>()((set, get) => {
   const commit = (patch: Partial<State>, delayMs = 400, label = 'Değişiklik') => {
     const cur = get()
     const now = Date.now()
-    const coalesce = lastPush.key === label && now - lastPush.t < COALESCE_MS && cur.past.length > 0
+    const coalesce =
+      isContinuousLabel(label) && lastPush.key === label && now - lastPush.t < COALESCE_MS && cur.past.length > 0
     const past = coalesce ? cur.past : [...cur.past, { snap: snapshot(cur), label: label.split(':')[0] }].slice(-HISTORY_MAX)
     lastPush = { key: label, t: now }
     const next = { ...cur, ...patch }
@@ -301,6 +362,24 @@ export const useStore = create<State>()((set, get) => {
     outputs.some((o) => o.deviceId === deviceId) ? outputs : [...outputs, { deviceId, latencyMs: 0, bufferMs: 40 }]
 
   const undoAction: ToastAction = { label: 'Geri al', run: () => get().undo() }
+
+  /** Hoparlör atanabilecek çıkışlar: kaynak cihaz, sanal kablo ve (düşük gecikmede) ağ cihazları hariç. */
+  const renderTargets = (s: State): Device[] =>
+    s.devices.filter(
+      (d) =>
+        d.flow === 'render' &&
+        !(s.lowLatency && d.kind === 'network') &&
+        !(s.source.mode === 'loopback' && d.id === s.source.deviceId) &&
+        !/cable/i.test(d.name),
+    )
+
+  /** Sıradaki cihazlarda ilk boş kanal (`taken`: "cihaz#kanal"). */
+  const firstFree = (devs: Device[], taken: Set<string>): { dev: Device; ch: number } | null => {
+    for (const d of devs) for (let c = 1; c <= d.channels; c++) if (!taken.has(`${d.id}#${c}`)) return { dev: d, ch: c }
+    return null
+  }
+  const takenOf = (speakers: Speaker[]) => new Set(speakers.map((s) => `${s.outputDeviceId}#${s.deviceChannel}`))
+  const CLASH_WARNING = 'Boş kanal kalmadı: iki hoparlör aynı kanalda (Sistem kontrolü uyarır).'
 
   return {
     ready: false,
@@ -386,7 +465,8 @@ export const useStore = create<State>()((set, get) => {
         /* yoksay */
       }
     },
-    setScreen: (screen) => set({ screen }),
+    // Seçim yalnızca Oda ekranında anlamlı (Delete ve ok tuşları orada çalışır).
+    setScreen: (screen) => set(screen === 'room' ? { screen } : { screen, selection: null }),
     select: (selection) => set({ selection }),
 
     async toggleRun() {
@@ -426,15 +506,9 @@ export const useStore = create<State>()((set, get) => {
     },
 
     applyLayout(spec) {
-      const { room, devices, outputs, lowLatency, speakers: existing, auto: oldAuto, source } = get()
+      const { room, outputs, speakers: existing, auto: oldAuto } = get()
       const slots = layoutSlots(spec, room.listener)
-      const renders = devices.filter(
-        (d) =>
-          d.flow === 'render' &&
-          !(lowLatency && d.kind === 'network') &&
-          !(source.mode === 'loopback' && d.id === source.deviceId) &&
-          !/cable/i.test(d.name),
-      )
+      const renders = renderTargets(get())
       if (renders.length === 0 || slots.length === 0) {
         get().showToast('Çıkış cihazı bulunamadı.', 4000, { tone: 'error' })
         return
@@ -447,6 +521,7 @@ export const useStore = create<State>()((set, get) => {
       const free: { dev: Device; ch: number }[] = []
       for (const d of pool) for (let c = 1; c <= d.channels; c++) if (!taken.has(`${d.id}#${c}`)) free.push({ dev: d, ch: c })
       const stamp = Date.now().toString(36)
+      let clashes = 0
       const speakers: Speaker[] = slots.map((slot, i) => {
         const pos = clampToRoom(slot, room)
         const pt = { x: round(pos.x, 3), y: round(pos.y, 3) }
@@ -456,7 +531,13 @@ export const useStore = create<State>()((set, get) => {
         const base: Speaker = prev
           ? { ...prev, name: byRole[i] ? prev.name : slot.name }
           : (() => {
-              const f = free.shift() ?? { dev: pool[pool.length - 1], ch: 1 }
+              // Havuz bitti: diğer cihazlarda boş kanal ara; yoksa çakışmayı kabul et ve uyar.
+              let f = free.shift() ?? firstFree(renders, taken)
+              if (!f) {
+                clashes++
+                f = { dev: pool[pool.length - 1], ch: 1 }
+              }
+              taken.add(`${f.dev.id}#${f.ch}`)
               return {
                 id: `spk-${stamp}-${i}`,
                 name: slot.name,
@@ -491,11 +572,8 @@ export const useStore = create<State>()((set, get) => {
         400,
         `${label} düzeni`,
       )
-      get().showToast(
-        dropped > 0 ? `${label} düzeni uygulandı; ${dropped} hoparlör çıkarıldı.` : `${label} düzeni uygulandı.`,
-        6000,
-        { action: undoAction },
-      )
+      const msg = dropped > 0 ? `${label} düzeni uygulandı; ${dropped} hoparlör çıkarıldı.` : `${label} düzeni uygulandı.`
+      get().showToast(clashes > 0 ? `${msg} ${CLASH_WARNING}` : msg, 6000, { action: undoAction })
     },
 
     applySetup(r) {
@@ -541,7 +619,7 @@ export const useStore = create<State>()((set, get) => {
     },
 
     openWizard: () => set({ wizardOpen: true }),
-    closeWizard: () => set({ wizardOpen: false }),
+    closeWizard: () => set({ wizardOpen: false, selection: null }),
 
     undo() {
       const { past, future } = get()
@@ -608,26 +686,55 @@ export const useStore = create<State>()((set, get) => {
     },
 
     async playTour() {
-      tourAbort = false
-      const list = get().speakers.filter((s) => !s.mute)
-      for (const s of list) {
-        if (tourAbort) break
-        set({ playing: s.id })
-        try {
-          await api.playTone(s.outputDeviceId, s.deviceChannel)
-        } catch (e) {
-          get().showToast(describeError(e), 5000, { tone: 'error' })
-          break
-        }
-        // Test sesi 2 sn sürer; köprü hemen döner, sıradakine geçmeden bekle.
-        await new Promise((r) => setTimeout(r, 2300))
+      // Zaten çalıyorsa ikinci bir tur başlatma: durdur.
+      if (touring) {
+        get().stopTour()
+        return
       }
-      set({ playing: null })
+      const token = ++tourToken
+      touring = true
+      try {
+        const list = get().speakers.filter((s) => !s.mute)
+        for (const s of list) {
+          if (token !== tourToken) break
+          set({ playing: s.id })
+          try {
+            await api.playTone(s.outputDeviceId, s.deviceChannel)
+          } catch (e) {
+            get().showToast(describeError(e), 5000, { tone: 'error' })
+            break
+          }
+          // Test sesi 2 sn sürer; köprü hemen döner, sıradakine geçmeden bekle.
+          await new Promise((r) => setTimeout(r, 2300))
+        }
+      } finally {
+        if (token === tourToken) {
+          touring = false
+          set({ playing: null })
+        }
+      }
     },
 
     stopTour() {
-      tourAbort = true
+      tourToken++
+      touring = false
       set({ playing: null })
+    },
+
+    async flushSave() {
+      clearTimeout(saveTimer)
+      await api.saveConfig(buildConfig(get()))
+    },
+
+    async syncRunState() {
+      try {
+        const status = await api.getStatus()
+        if (get().runState === 'starting') return
+        if (status.length > 0) set({ runState: 'running', status })
+        else if (get().runState === 'running') set({ runState: 'stopped', status: [], engine: null })
+      } catch {
+        /* durum okunamadı: olduğu gibi bırak */
+      }
     },
 
     setRole(id, role) {
@@ -709,7 +816,7 @@ export const useStore = create<State>()((set, get) => {
 
     setAuto(id, patch) {
       const { auto } = get()
-      commit({ auto: { ...auto, [id]: { ...(auto[id] ?? { delay: true, gain: true }), ...patch } } }, 400, 'Otomatik')
+      commit({ auto: { ...auto, [id]: { ...(auto[id] ?? { delay: true, gain: true }), ...patch } } }, 400, `Otomatik:${id}`)
     },
 
     autoAll() {
@@ -722,14 +829,8 @@ export const useStore = create<State>()((set, get) => {
     },
 
     addSpeaker(role) {
-      const { speakers, devices, room, auto, outputs, lowLatency, source } = get()
-      const renders = devices.filter(
-        (d) =>
-          d.flow === 'render' &&
-          !(lowLatency && d.kind === 'network') &&
-          !(source.mode === 'loopback' && d.id === source.deviceId) &&
-          !/cable/i.test(d.name),
-      )
+      const { speakers, room, auto, outputs } = get()
+      const renders = renderTargets(get())
       // Boş kanalı olan ilk cihaz (kullanılan cihazlar önce).
       const ordered = [
         ...renders.filter((d) => speakers.some((s) => s.outputDeviceId === d.id)),
@@ -791,20 +892,35 @@ export const useStore = create<State>()((set, get) => {
     },
 
     duplicateSpeaker(id) {
-      const { speakers, auto, room } = get()
+      const { speakers, auto, room, outputs } = get()
       const s = speakers.find((v) => v.id === id)
       if (!s) return
       const nid = `spk-${Date.now().toString(36)}`
       const p = clampToRoom({ x: s.x + 0.3, y: s.y + 0.3 }, room)
+      // Kopya aynı kanala düşmesin: önce aynı cihazda, sonra kullanılan, sonra diğer cihazlarda boş kanal.
+      const renders = renderTargets(get())
+      const used = (d: Device) => speakers.some((v) => v.outputDeviceId === d.id)
+      const ordered = [
+        ...renders.filter((d) => d.id === s.outputDeviceId),
+        ...renders.filter((d) => d.id !== s.outputDeviceId && used(d)),
+        ...renders.filter((d) => d.id !== s.outputDeviceId && !used(d)),
+      ]
+      const f = firstFree(ordered, takenOf(speakers))
+      const target = f ? { outputDeviceId: f.dev.id, deviceChannel: f.ch } : {}
       commit(
         {
-          speakers: [...speakers, { ...s, id: nid, name: `${s.name} kopya`, x: p.x, y: p.y, calibratedAt: undefined }],
+          speakers: [
+            ...speakers,
+            { ...s, ...target, id: nid, name: `${s.name} kopya`, x: p.x, y: p.y, calibratedAt: undefined },
+          ],
+          outputs: f ? ensureOutput(outputs, f.dev.id) : outputs,
           auto: { ...auto, [nid]: { ...(auto[id] ?? { delay: true, gain: true }) } },
           selection: nid,
         },
         400,
         'Kopyala',
       )
+      if (!f) get().showToast(CLASH_WARNING, 6000)
     },
 
     removeSpeaker(id) {
@@ -940,34 +1056,38 @@ export const useStore = create<State>()((set, get) => {
     exportConfig: () => buildConfig(get()),
 
     importConfig(raw) {
-      const c = raw as Partial<Config> | null
-      if (!c || typeof c !== 'object' || !Array.isArray(c.speakers) || !c.source || !c.room || !Array.isArray(c.outputs)) {
-        return 'Bu dosya bir Surround yapılandırması değil.'
+      try {
+        const checked = checkConfig(raw)
+        if (typeof checked === 'string') return checked
+        const c = checked
+        const auto = Object.fromEntries(c.speakers.map((s) => [s.id, s.auto ?? { delay: true, gain: true }]))
+        const speakers = c.speakers.map(({ auto: _a, ...rest }) => rest)
+        const profiles = normalizeProfiles(c.profiles)
+        commit(
+          {
+            source: c.source,
+            upmix: !!c.upmix,
+            upmixOptions: normalizeUpmixOptions(c.upmixOptions),
+            outputs: c.outputs,
+            speakers,
+            room: c.room,
+            processing: normalizeProcessing(c.processing),
+            profiles,
+            activeProfileId:
+              c.activeProfileId && profiles.some((p) => p.id === c.activeProfileId) ? c.activeProfileId : null,
+            auto,
+            setupDone: true,
+            lastCalibration: c.lastCalibration ?? null,
+            selection: null,
+          },
+          150,
+          'Yedekten geri yükle',
+        )
+        get().showToast(`Yedek yüklendi: ${speakers.length} hoparlör.`, 6000, { action: undoAction })
+        return null
+      } catch (e) {
+        return `Yedek yüklenemedi: ${describeError(e)}`
       }
-      const auto = Object.fromEntries(c.speakers.map((s) => [s.id, s.auto ?? { delay: true, gain: true }]))
-      const speakers = c.speakers.map(({ auto: _a, ...rest }) => rest)
-      const profiles = normalizeProfiles(c.profiles)
-      commit(
-        {
-          source: c.source,
-          upmix: !!c.upmix,
-          upmixOptions: normalizeUpmixOptions(c.upmixOptions),
-          outputs: c.outputs,
-          speakers,
-          room: c.room,
-          processing: normalizeProcessing(c.processing),
-          profiles,
-          activeProfileId: c.activeProfileId && profiles.some((p) => p.id === c.activeProfileId) ? c.activeProfileId : null,
-          auto,
-          setupDone: true,
-          lastCalibration: c.lastCalibration ?? null,
-          selection: null,
-        },
-        150,
-        'Yedekten geri yükle',
-      )
-      get().showToast(`Yedek yüklendi: ${speakers.length} hoparlör.`, 6000, { action: undoAction })
-      return null
     },
 
     showToast(message, ms = 2200, opts = {}) {

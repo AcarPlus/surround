@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import type { Device } from '../api/types'
 import { describeError, useStore } from '../store/useStore'
@@ -10,9 +10,12 @@ import {
   buildSpeakers,
   candidateDevices,
   initialKits,
+  mergeKits,
+  outsideSpeakers,
   planLabel,
   planSpeakers,
   plannedName,
+  previousPlan,
   type DeviceKit,
 } from '../lib/setup'
 import { ROLES } from '../lib/roles'
@@ -40,15 +43,11 @@ export function SetupWizard() {
   const [step, setStep] = useState(0)
   const candidates = useMemo(() => candidateDevices(devices, source.deviceId), [devices, source.deviceId])
   const [kits, setKits] = useState<DeviceKit[]>(() => initialKits(candidates, speakers))
-  // Sihirbaz açıkken takılan yeni cihazlar da listelensin.
-  const allKits = useMemo(() => {
-    const have = new Set(kits.map((k) => k.deviceId))
-    const extra = initialKits(
-      candidates.filter((d) => !have.has(d.id)),
-      [],
-    ).map((k) => ({ ...k, kind: 'none' as const }))
-    return [...kits.filter((k) => candidates.some((d) => d.id === k.deviceId)), ...extra]
-  }, [kits, candidates])
+  // Sihirbaz açıkken takılan (ya da açılışta henüz listelenmemiş) cihazlar da listelensin.
+  const allKits = useMemo(
+    () => mergeKits(kits, candidates, speakers.length > 0 || kits.some((k) => k.kind !== 'none')),
+    [kits, candidates, speakers.length],
+  )
   const plan = useMemo(() => planSpeakers(allKits, devices), [allKits, devices])
   const setKit = (id: string, patch: Partial<DeviceKit>) =>
     setKits((ks) => {
@@ -57,7 +56,14 @@ export function SetupWizard() {
       return base.map((k) => (k.deviceId === id ? { ...k, ...patch } : k))
     })
 
-  const apply = () => applySetup(buildSpeakers(plan, speakers, outputs, room))
+  // Sihirbazın listelemediği cihazlardaki hoparlörler (takılı değil, sanal) silinmez.
+  const outside = useMemo(() => outsideSpeakers(speakers, candidates), [speakers, candidates])
+  const apply = () =>
+    applySetup(
+      buildSpeakers(plan, speakers, outputs, room, { prevPlan: previousPlan(devices, speakers), keep: outside }),
+    )
+  // Sihirbaz kapanınca başlattığı "sırayla çal" da dursun.
+  useEffect(() => () => useStore.getState().stopTour(), [])
   const finish = () => {
     closeWizard()
     setScreen('home')
@@ -138,6 +144,11 @@ export function SetupWizard() {
                   {plan.length ? plan.map((p) => p.name).join(' · ') : 'Henüz hoparlör seçilmedi.'}
                 </span>
               </Card>
+              {outside.length > 0 && (
+                <p className="mt-2 text-xs text-muted" title="Bu hoparlörlerin cihazı listede yok (takılı değil ya da sanal); oldukları gibi kalır.">
+                  korunacak: {outside.map((s) => s.name).join(', ')}
+                </p>
+              )}
             </div>
           )}
 

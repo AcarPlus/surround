@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { checkHealth, type HealthItem } from '../lib/health'
 import { countLayout, formatLayout } from '../lib/layout'
@@ -10,6 +10,8 @@ import { IconCheck, IconInfo, IconVolume, IconWarn } from '../components/icons'
 
 export function HomeScreen() {
   const s = useStore()
+  // Bu ekrandan başlatılan "sırayla çal" ekrandan çıkınca dursun.
+  useEffect(() => () => useStore.getState().stopTour(), [])
   const items = useMemo(
     () =>
       checkHealth({

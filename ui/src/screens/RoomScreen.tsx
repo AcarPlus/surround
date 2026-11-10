@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useStore, type LayoutPreview } from '../store/useStore'
 import { countLayout, formatLayout, parseLayout, type LayoutSpec } from '../lib/layout'
 import { ROLES, effectiveRole } from '../lib/roles'
@@ -21,6 +21,8 @@ export function RoomScreen() {
   const openWizard = useStore((s) => s.openWizard)
   const playTour = useStore((s) => s.playTour)
   const stopTour = useStore((s) => s.stopTour)
+  // Bu ekrandan başlatılan "sırayla çal" ekrandan çıkınca dursun.
+  useEffect(() => () => useStore.getState().stopTour(), [])
 
   const current = useMemo(() => formatLayout(countLayout(speakers)), [speakers])
   const [pending, setPending] = useState<{ spec: LayoutSpec; label: string; preview: LayoutPreview } | null>(null)

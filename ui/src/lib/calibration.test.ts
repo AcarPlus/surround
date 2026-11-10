@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CalibrationResult, Speaker } from '../api/types'
-import { calibrationPatches, computeCalibration } from './calibration'
+import { calibrationPatches, calibrationPercent, computeCalibration } from './calibration'
 
 const sp = (id: string, extra: Partial<Speaker> = {}): Speaker => ({
   id,
@@ -81,5 +81,38 @@ describe('computeCalibration', () => {
     const p = calibrationPatches(rows, 'T')
     expect(Object.keys(p)).toEqual(['a'])
     expect(p.a).toEqual({ delayMs: 0, gainDb: 0, calibratedAt: 'T' })
+  })
+})
+
+describe('çıkış gecikmesi payı', () => {
+  it('motorun eklediği (en büyük − kendi) çıkış gecikmesi önerilen gecikmeden düşülür', () => {
+    // b, 30 ms gecikmeli bir çıkışta; motor a'ya 30 ms ekler. b 4,5 ms geç ulaşmış (gecikmesi ölçüme dahil).
+    const speakers = [sp('a'), sp('b', { outputDeviceId: 'slow' })]
+    const outputs = [
+      { deviceId: 'd', latencyMs: 0, bufferMs: 40 },
+      { deviceId: 'slow', latencyMs: 30, bufferMs: 40 },
+    ]
+    const rows = computeCalibration(result([m('a', 0, 0), m('b', 4.5, 0)]), speakers, { outputs })
+    // Toplam hedef: a +4,5 ms. Motor a'ya zaten 30 ms ekliyor → b'yi 25,5 ms geciktir, a 0.
+    expect(rows.map((r) => r.delayMs)).toEqual([0, 25.5])
+  })
+
+  it('çıkış gecikmesi yoksa önceki sonuçla aynı', () => {
+    const speakers = [sp('a'), sp('b')]
+    const outputs = [{ deviceId: 'd', latencyMs: 30, bufferMs: 40 }]
+    const rows = computeCalibration(result([m('a', 0, 0), m('b', 4.5, 0)]), speakers, { outputs })
+    expect(rows.map((r) => r.delayMs)).toEqual([4.5, 0])
+  })
+})
+
+describe('calibrationPercent', () => {
+  const p = (phase: 'preparing' | 'noise' | 'measuring' | 'analyzing' | 'done', index: number) => ({ phase, index, total: 4, message: '' })
+  it('ölçüm 1 tabanlı index ile 0–85 %, çözümleme 85–100 %', () => {
+    expect(calibrationPercent(p('measuring', 1))).toBeCloseTo(85 * 0.125)
+    expect(calibrationPercent(p('measuring', 4))).toBeCloseTo(85 * 0.875)
+    expect(calibrationPercent(p('analyzing', 1))).toBeCloseTo(85 + 15 * 0.125)
+    expect(calibrationPercent(p('analyzing', 4))).toBeLessThan(100)
+    expect(calibrationPercent(p('done', 4))).toBe(100)
+    expect(calibrationPercent(null)).toBeGreaterThan(0)
   })
 })

@@ -1,14 +1,24 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { CalibrationProgress, CalibrationResult } from '../api/types'
 import { describeError, useStore } from '../store/useStore'
-import { calibrationPatches, computeCalibration, isSubwoofer, msToMeters, type LevelTarget } from '../lib/calibration'
+import {
+  calibrationPatches,
+  calibrationPercent,
+  computeCalibration,
+  isSubwoofer,
+  msToMeters,
+  type LevelTarget,
+} from '../lib/calibration'
 import { fmt, fmtSigned } from '../lib/format'
 import { RoomCanvas } from '../components/RoomCanvas'
 import { Badge, Button, Card, Field, NumberField, ScreenHeader, SectionTitle, Segmented, Select, Switch, cx } from '../components/ui'
 import { IconCheck, IconMic, IconVolume, IconWarn } from '../components/icons'
 
 type Phase = 'setup' | 'running' | 'result'
+
+/** Backend'in kullanıcı iptalinde döndürdüğü metin (hata sayılmaz). */
+const CANCELLED = 'Kalibrasyon iptal edildi.'
 
 const LEVELS = [
   { value: '-30', label: 'Kısık' },
@@ -19,6 +29,8 @@ const LEVELS = [
 export function CalibrationScreen() {
   const devices = useStore((s) => s.devices)
   const speakers = useStore((s) => s.speakers)
+  const outputs = useStore((s) => s.outputs)
+  const source = useStore((s) => s.source)
   const runState = useStore((s) => s.runState)
   const lastCalibration = useStore((s) => s.lastCalibration)
   const applyCalibration = useStore((s) => s.applyCalibration)
@@ -31,7 +43,11 @@ export function CalibrationScreen() {
   const [loopbackId, setLoopbackId] = useState('')
   const [level, setLevel] = useState('-20')
   const [repeats, setRepeats] = useState('2')
-  const [chosen, setChosen] = useState<Set<string>>(() => new Set(speakers.filter((s) => !s.mute).map((s) => s.id)))
+  // Loopback kaynağında, kaynak cihazdaki hoparlörler ölçülemez (backend tüm ölçümü reddeder).
+  const onSource = (sp: { outputDeviceId: string }) => source.mode === 'loopback' && sp.outputDeviceId === source.deviceId
+  const [chosen, setChosen] = useState<Set<string>>(
+    () => new Set(speakers.filter((s) => !s.mute && !onSource(s)).map((s) => s.id)),
+  )
   const [refId, setRefId] = useState(() => speakers.find((s) => !s.mute && !isSubwoofer(s))?.id ?? speakers[0]?.id ?? '')
   const [advanced, setAdvanced] = useState(false)
 
@@ -53,9 +69,19 @@ export function CalibrationScreen() {
       }),
     [],
   )
-  useEffect(() => () => useStore.setState({ playing: null }), [])
+  // Ölçüm sürerken ekrandan çıkılırsa iptal et: aksi halde sonuç kaybolur ve sonraki başlatma "zaten sürüyor" der.
+  const runningRef = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      useStore.setState({ playing: null })
+      if (runningRef.current) void api.cancelCalibration().catch(() => {})
+    }
+  }, [])
 
-  const list = speakers.filter((s) => chosen.has(s.id))
+  const list = speakers.filter((s) => chosen.has(s.id) && !onSource(s))
   const ref = list.some((s) => s.id === refId) ? refId : (list.find((s) => !isSubwoofer(s))?.id ?? list[0]?.id)
   const renders = devices.filter((d) => d.flow === 'render')
   const effectiveMic = loopback ? loopbackId || renders[0]?.id : micId
@@ -66,7 +92,10 @@ export function CalibrationScreen() {
     setResult(null)
     setExcluded(new Set())
     setProgress({ phase: 'preparing', index: 0, total: list.length, message: 'Hazırlanıyor…' })
+    runningRef.current = true
     try {
+      // Backend yapılandırmayı diskten okur: bekleyen kaydı önce yaz.
+      await useStore.getState().flushSave()
       const r = await api.calibrate({
         micDeviceId: effectiveMic!,
         micLoopback: loopback || undefined,
@@ -76,19 +105,26 @@ export function CalibrationScreen() {
         repeats: Number(repeats),
         levelDb: Number(level),
       })
+      if (!mounted.current) return
       setResult(r)
       setPhase('result')
     } catch (e) {
+      if (!mounted.current) return
       setPhase('setup')
-      showToast(describeError(e), 7000, { tone: 'error' })
+      const msg = describeError(e)
+      if (msg === CANCELLED) showToast(msg, 3000)
+      else showToast(msg, 7000, { tone: 'error' })
     } finally {
+      runningRef.current = false
       useStore.setState({ playing: null })
+      // Backend ölçümden sonra motoru yeniden başlatır; başarısız olduysa üst çubuk eski durumu göstermesin.
+      void useStore.getState().syncRunState()
     }
   }
 
   const rows = useMemo(
-    () => (result ? computeCalibration(result, speakers, { target, excluded }) : []),
-    [result, speakers, target, excluded],
+    () => (result ? computeCalibration(result, speakers, { target, excluded, outputs }) : []),
+    [result, speakers, target, excluded, outputs],
   )
 
   if (speakers.length === 0) {
@@ -158,7 +194,8 @@ export function CalibrationScreen() {
                     <input
                       type="checkbox"
                       className="h-4 w-4 accent-[rgb(var(--accent))]"
-                      checked={chosen.has(s.id)}
+                      checked={chosen.has(s.id) && !onSource(s)}
+                      disabled={onSource(s)}
                       aria-label={`${s.name} ölçülsün`}
                       onChange={(e) => {
                         const n = new Set(chosen)
@@ -167,7 +204,14 @@ export function CalibrationScreen() {
                         setChosen(n)
                       }}
                     />
-                    <span className={cx('flex-1 text-[13px]', s.mute && 'text-faint')}>{s.name}</span>
+                    <span className={cx('flex-1 text-[13px]', (s.mute || onSource(s)) && 'text-faint')}>
+                      {s.name}
+                      {onSource(s) && (
+                        <span className="block text-xs text-faint">
+                          Ses kaynağıyla aynı cihazda: ölçülemez (kaynağı VB-Cable yap ya da hoparlörü başka cihaza taşı).
+                        </span>
+                      )}
+                    </span>
                     {isSubwoofer(s) && <Badge>bas bandı</Badge>}
                     {s.calibratedAt && <Badge tone="ok">ölçülmüş</Badge>}
                     <label className="flex items-center gap-1.5 text-xs text-muted">
@@ -176,7 +220,7 @@ export function CalibrationScreen() {
                         name="ref"
                         className="accent-[rgb(var(--accent))]"
                         checked={ref === s.id}
-                        disabled={!chosen.has(s.id)}
+                        disabled={!chosen.has(s.id) || onSource(s)}
                         onChange={() => setRefId(s.id)}
                       />
                       referans
@@ -258,11 +302,15 @@ export function CalibrationScreen() {
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-raised">
               <div
                 className="h-full rounded-full bg-accent transition-[width] duration-500"
-                style={{ width: `${progress && progress.total ? Math.min(100, ((progress.index + (progress.phase === 'done' ? 0 : 0.5)) / progress.total) * 100) : 4}%` }}
+                style={{ width: `${calibrationPercent(progress)}%` }}
               />
             </div>
             <p className="num mt-2 text-xs text-muted">
-              {progress?.phase === 'measuring' ? `${progress.index + 1} / ${progress.total}` : ''}
+              {progress?.phase === 'measuring'
+                ? `${progress.index} / ${progress.total}`
+                : progress?.phase === 'analyzing'
+                  ? `Çözümleniyor ${progress.index} / ${progress.total}`
+                  : ''}
             </p>
             <p className="mt-4 text-[13px] text-muted">Lütfen sessiz kal ve mikrofonu oynatma.</p>
             <Button className="mt-4" variant="danger" onClick={() => void api.cancelCalibration()}>

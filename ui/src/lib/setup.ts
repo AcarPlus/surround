@@ -147,6 +147,20 @@ export function initialKits(candidates: Device[], speakers: Speaker[]): DeviceKi
   })
 }
 
+/**
+ * Sihirbaz açıkken listeye yeni giren (ya da açılışta henüz listelenmemiş) cihazların kitlerini ekler; listeden
+ * çıkan cihazların kitlerini gizler. Kullanıcının bir kurulumu varsa (`configured`) yeni cihaz "kullanılmıyor"
+ * başlar; yoksa ilk açılış tahmini (ön çift, çok kanallı) uygulanır.
+ */
+export function mergeKits(kits: DeviceKit[], candidates: Device[], configured: boolean): DeviceKit[] {
+  const have = new Set(kits.map((k) => k.deviceId))
+  const extra = initialKits(
+    candidates.filter((d) => !have.has(d.id)),
+    [],
+  ).map((k) => (configured ? { ...k, kind: 'none' as const } : k))
+  return [...kits.filter((k) => candidates.some((d) => d.id === k.deviceId)), ...extra]
+}
+
 /** Sihirbazın ürettiği tek bir hoparlör tanımı (henüz konumsuz). */
 export interface PlannedSpeaker {
   deviceId: string
@@ -239,26 +253,119 @@ export function standardPosition(role: string, room: Room, hasSides: boolean): P
 export interface BuildResult {
   speakers: Speaker[]
   outputs: Output[]
-  /** Yeni oluşturulan hoparlörler (otomatik gecikme/kazanç açık başlar). */
+  /** Yeni oluşturulan ya da rolü değişen hoparlörler (otomatik gecikme/kazanç açık başlar). */
   createdIds: string[]
 }
 
+/** Mevcut hoparlörlerin sihirbaz karşılığı (yeniden açılışta "ön ayar değişti mi?" karşılaştırması için). */
+export function previousPlan(devices: Device[], speakers: Speaker[]): PlannedSpeaker[] {
+  const kits = devices.flatMap((d) => {
+    const k = kitFromSpeakers(d, speakers)
+    return k ? [k] : []
+  })
+  return planSpeakers(kits, devices)
+}
+
+/** Sihirbazın kapsamadığı cihazlardaki (takılı değil, sanal, kaynak) hoparlörler: dokunulmadan korunur. */
+export function outsideSpeakers(speakers: Speaker[], candidates: Device[]): Speaker[] {
+  return speakers.filter((s) => !candidates.some((d) => d.id === s.outputDeviceId))
+}
+
+/** Hoparlörde kayıtlı ön ayar yoksa (ör. elle EQ = 'custom') alanlardan çıkarılan ön ayar. */
+function impliedPreset(sp: Speaker): string {
+  if (sp.eqPreset && speakerPresetPatch(sp.eqPreset)) return sp.eqPreset
+  const role = effectiveRole(sp)
+  if (role === ROLE_SUB) return 'subwoofer'
+  if (sp.bassReceiver) return 'desktop-front'
+  if ((sp.highPassHz ?? 0) > 0) return 'small-satellite'
+  return role === 'center' ? 'center' : 'flat'
+}
+
+/** Rolün kaba yeri (taraf + bölge); bilinmeyen (özel) rolde null. Yer değişmezse hoparlör taşınmaz. */
+function rolePlace(role: string): string | null {
+  const def = roleDef(role)
+  if (!def) return null
+  if (role === ROLE_SUB) return 'sub'
+  const a = roleAngle(role, false)
+  const side = a < 0 ? 'L' : a > 0 ? 'R' : 'C'
+  const abs = Math.abs(a)
+  const zone = abs <= 45 ? 'front' : abs <= 100 ? 'side' : 'back'
+  return `${def.elevated ? 'top-' : ''}${zone}-${side}`
+}
+
+export interface BuildOptions {
+  /** Sihirbaz açılmadan önceki plan (bkz. `previousPlan`); ön ayarın değişip değişmediğini söyler. */
+  prevPlan?: PlannedSpeaker[]
+  /** Olduğu gibi sona eklenecek hoparlörler (bkz. `outsideSpeakers`). */
+  keep?: Speaker[]
+}
+
 /**
- * Planı hoparlörlere çevirir. Aynı cihaz + kanal + roldeki mevcut hoparlör korunur (kimlik, konum, EQ,
- * gecikme/kazanç, kalibrasyon); ad bozuksa (�) yenilenir. Diğerleri standart konumla yeni oluşturulur.
+ * Planı hoparlörlere çevirir. Aynı cihaz + kanaldaki mevcut hoparlör korunur (kimlik, ad, konum, EQ, gecikme/kazanç,
+ * kalibrasyon); ad bozuksa (�) yenilenir.
+ * - Rol değişirse (ters takılı, çiftin yeri, kanal rolü): rol, karışım ve ad yeni role göre yazılır; gecikme/kazanç
+ *   ve kalibrasyon sıfırlanır (otomatik açılır); taraf/bölge değiştiyse rolün standart konumuna taşınır.
+ * - Planın ön ayarı öncekinden farklıysa (Normal → Küçük, çift → 2.1 set …) ön ayar yeniden uygulanır;
+ *   aynıysa elle yapılmış EQ korunur.
+ * Diğerleri standart konumla yeni oluşturulur.
  */
-export function buildSpeakers(plan: PlannedSpeaker[], existing: Speaker[], outputs: Output[], room: Room): BuildResult {
-  const hasSides = plan.some((p) => p.role === 'side-left' || p.role === 'side-right')
+export function buildSpeakers(
+  plan: PlannedSpeaker[],
+  existing: Speaker[],
+  outputs: Output[],
+  room: Room,
+  opts: BuildOptions = {},
+): BuildResult {
+  const keep = opts.keep ?? []
+  const hasSides =
+    plan.some((p) => p.role === 'side-left' || p.role === 'side-right') ||
+    keep.some((s) => ['side-left', 'side-right'].includes(effectiveRole(s)))
   const stamp = Date.now().toString(36)
   const createdIds: string[] = []
+  const usedPrev = new Set<string>()
+  const keepIds = new Set(keep.map((s) => s.id))
+  const presetOf = (sp: Speaker): string =>
+    opts.prevPlan?.find((q) => q.deviceId === sp.outputDeviceId && q.channel === sp.deviceChannel)?.preset ??
+    impliedPreset(sp)
+  /** Ön ayarı baştan uygular: önceki bas kesme / bas alıcısı ayarı kalmasın. */
+  const withPreset = (sp: Speaker, preset: string, role: string): Speaker => {
+    const patch = speakerPresetPatch(preset)
+    if (!patch) return sp
+    const base: Speaker = { ...sp, highPassHz: undefined, bassReceiver: roleDef(role)?.bassReceiver || undefined }
+    return { ...base, ...patch }
+  }
+
   const speakers = plan.map((p, i): Speaker => {
-    const prev = existing.find(
-      (s) => s.outputDeviceId === p.deviceId && s.deviceChannel === p.channel && effectiveRole(s) === p.role,
+    const same = existing.filter(
+      (s) =>
+        s.outputDeviceId === p.deviceId && s.deviceChannel === p.channel && !usedPrev.has(s.id) && !keepIds.has(s.id),
     )
+    const prev = same.find((s) => effectiveRole(s) === p.role) ?? same[0]
     const def = roleDef(p.role)
     if (prev) {
-      const name = prev.name.includes('�') || !prev.name.trim() ? p.name : prev.name
-      return { ...prev, name, role: p.role, source: def ? { ...def.source } : prev.source }
+      usedPrev.add(prev.id)
+      const oldRole = effectiveRole(prev)
+      const roleChanged = oldRole !== p.role
+      let sp: Speaker = { ...prev, role: p.role, source: def ? { ...def.source } : prev.source }
+      if (def?.elevated) sp.elevated = true
+      else delete sp.elevated
+      if (roleChanged) {
+        sp.name = p.name
+        sp.delayMs = 0
+        sp.gainDb = 0
+        delete sp.calibratedAt
+        createdIds.push(sp.id)
+        const before = rolePlace(oldRole)
+        if (before !== null && before !== rolePlace(p.role)) {
+          const pos = standardPosition(p.role, room, hasSides)
+          sp.x = pos.x
+          sp.y = pos.y
+        }
+      } else if (prev.name.includes('�') || !prev.name.trim()) {
+        sp.name = p.name
+      }
+      if (presetOf(prev) !== p.preset) sp = withPreset(sp, p.preset, p.role)
+      return sp
     }
     const id = `spk-${stamp}-${i}`
     createdIds.push(id)
@@ -277,12 +384,12 @@ export function buildSpeakers(plan: PlannedSpeaker[], existing: Speaker[], outpu
       role: p.role,
       ...(def?.elevated ? { elevated: true } : {}),
     }
-    const preset = speakerPresetPatch(p.preset)
-    return preset ? { ...sp, ...preset } : sp
+    return withPreset(sp, p.preset, p.role)
   })
-  const used = [...new Set(speakers.map((s) => s.outputDeviceId))]
+  const all = [...speakers, ...keep]
+  const used = [...new Set(all.map((s) => s.outputDeviceId))]
   const outs = used.map((id) => outputs.find((o) => o.deviceId === id) ?? { deviceId: id, latencyMs: 0, bufferMs: 40 })
-  return { speakers, outputs: outs, createdIds }
+  return { speakers: all, outputs: outs, createdIds }
 }
 
 /** "5.1", "4.0", "2.1.2" gibi kısa özet. */
