@@ -245,6 +245,18 @@ export interface EngineInfo {
 }
 
 /**
+ * Motorun çalışma durumu (`engineState` olayı). `waiting`: bir cihaz çıkarıldı / biçimi değişti / akış koptu; motor durdu
+ * ve gereken cihazlar geri gelince kayıtlı yapılandırmayla kendiliğinden yeniden başlar (Durdur beklemeyi bitirir).
+ */
+export interface EngineState {
+  state: 'running' | 'waiting' | 'stopped'
+  /** Eksik cihazların adları (yalnızca `waiting`). */
+  missing: string[]
+  /** Eksik cihaz yoksa bekleme nedeni (akış koptu, biçim değişti, yeniden başlatma hatası). */
+  message?: string | null
+}
+
+/**
  * Profil: tek tıkla uygulanan ses işleme + upmix takımı (Film, Oyun, Müzik, kullanıcı profilleri).
  * Config kökünde `profiles` olarak saklanır; motor bilinmeyen kök alanları olduğu gibi korur.
  */

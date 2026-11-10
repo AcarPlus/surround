@@ -39,6 +39,8 @@ export interface HealthInput {
   lowLatency: boolean
   /** Hiç kalibrasyon yapılmadıysa öneri gösterilir. */
   calibrated: boolean
+  /** Motor bir cihaz değişikliğiyle durdu ve bekliyor (runState 'waiting'): eksik cihaz adları ve neden. */
+  waiting?: { missing: string[]; message?: string | null } | null
 }
 
 const has = (sp: Speaker, ch: LogicalChannel) => (sp.source[ch] ?? 0) > 0
@@ -64,6 +66,21 @@ export function checkHealth(h: HealthInput): HealthItem[] {
       fix: { id: 'open-setup', label: 'Sihirbazı başlat' },
     })
     return items
+  }
+
+  // Cihaz bekleniyor (motor kendiliğinden yeniden başlayacak)
+  if (h.waiting) {
+    const { missing, message } = h.waiting
+    items.push({
+      id: 'waiting-devices',
+      level: 'warn',
+      title: missing.length > 0 ? `Cihaz bekleniyor: ${missing.join(', ')}` : 'Motor yeniden başlatılmayı bekliyor',
+      detail:
+        (missing.length > 0
+          ? 'Cihaz çıkarıldı veya devre dışı kaldı; geri gelince motor kayıtlı ayarlarla kendiliğinden yeniden başlar.'
+          : `${message ?? 'Ses akışı kesildi.'} Motor birazdan kendiliğinden yeniden başlar.`) +
+        ' Beklemeyi bitirmek için Durdur’a bas.',
+    })
   }
 
   // Kaynak

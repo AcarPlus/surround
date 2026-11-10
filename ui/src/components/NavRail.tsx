@@ -29,6 +29,7 @@ function useProblemCount(): { n: number; error: boolean } {
     status: s.status,
     lowLatency: s.lowLatency,
     calibrated: true,
+    waiting: s.runState === 'waiting' ? { missing: s.waitingFor, message: s.waitMessage } : null,
   })
   const bad = items.filter((i) => i.level !== 'info')
   return { n: bad.length, error: bad.some((i) => i.level === 'error') }

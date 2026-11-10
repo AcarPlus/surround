@@ -7,6 +7,7 @@ import {
   type Config,
   type Device,
   type EngineInfo,
+  type EngineState,
   type LevelFrame,
   type SinkStatus,
 } from './types'
@@ -16,7 +17,7 @@ import {
  *
  *   JS -> C#: { id, method, params: unknown[] }
  *   C# -> JS: { id, result } | { id, error: { message, errors? } }
- *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'calibration', data }
+ *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'engineState' | 'calibration', data }
  */
 
 interface WebViewHost {
@@ -43,7 +44,14 @@ export class BridgeError extends Error {
   }
 }
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void }
+/** Eksik/bozuk alanlara karşı: bilinmeyen durum `stopped`, `missing` her zaman dizi. */
+function normalizeEngineState(d: any): EngineState {
+  const state = d?.state === 'running' || d?.state === 'waiting' ? d.state : 'stopped'
+  const missing = Array.isArray(d?.missing) ? d.missing.map(String) : []
+  return typeof d?.message === 'string' ? { state, missing, message: d.message } : { state, missing }
+}
+
+type Pending ={ resolve: (v: unknown) => void; reject: (e: Error) => void }
 
 export function createBridgeApi(): SurroundApi {
   const host = window.chrome!.webview!
@@ -52,6 +60,7 @@ export function createBridgeApi(): SurroundApi {
   const levelListeners = new Set<(l: LevelFrame) => void>()
   const errorListeners = new Set<(m: string) => void>()
   const engineListeners = new Set<(i: EngineInfo) => void>()
+  const stateListeners = new Set<(s: EngineState) => void>()
   const calibrationListeners = new Set<(p: CalibrationProgress) => void>()
   let nextId = 1
 
@@ -79,6 +88,11 @@ export function createBridgeApi(): SurroundApi {
         case 'engineError':
           errorListeners.forEach((cb) => cb(String(msg.data)))
           break
+        case 'engineState': {
+          const s = normalizeEngineState(msg.data)
+          stateListeners.forEach((cb) => cb(s))
+          break
+        }
         case 'calibration':
           calibrationListeners.forEach((cb) => cb(msg.data as CalibrationProgress))
           break
@@ -128,6 +142,8 @@ export function createBridgeApi(): SurroundApi {
     onLevels: (cb) => subscribe(levelListeners, cb),
     onEngine: (cb) => subscribe(engineListeners, cb),
     onEngineError: (cb) => subscribe(errorListeners, cb),
+    getEngineState: async () => normalizeEngineState(await call<unknown>('getEngineState')),
+    onEngineState: (cb) => subscribe(stateListeners, cb),
     calibrate: (request) => call<CalibrationResult>('calibrate', request),
     cancelCalibration: () => call<void>('cancelCalibration'),
     onCalibration: (cb) => subscribe(calibrationListeners, cb),

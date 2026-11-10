@@ -8,7 +8,7 @@ namespace Surround.Desktop.Bridge;
 /// JSON-RPC over WebView2 messages.
 ///   page -> host: { id, method, params: [] }
 ///   host -> page: { id, result } | { id, error: { message, errors } }
-///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "calibration", data }
+///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "engineState" | "calibration", data }
 /// </summary>
 public sealed class BridgeHost : IDisposable
 {
@@ -35,7 +35,10 @@ public sealed class BridgeHost : IDisposable
         _backend.EngineError += OnEngineError;
         _backend.CalibrationProgress += OnCalibration;
         _backend.RunningChanged += OnRunningChanged;
+        _backend.StateChanged += OnEngineState;
     }
+
+    private void OnEngineState(EngineStateDto state) => PushEvent("engineState", state);
 
     private static readonly EngineInfoDto Off = new("off", 0, 0, 0);
 
@@ -130,6 +133,7 @@ public sealed class BridgeHost : IDisposable
         _backend.EngineError -= OnEngineError;
         _backend.CalibrationProgress -= OnCalibration;
         _backend.RunningChanged -= OnRunningChanged;
+        _backend.StateChanged -= OnEngineState;
         try { _web.WebMessageReceived -= OnMessage; } catch { }
     }
 }

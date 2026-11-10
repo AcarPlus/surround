@@ -34,10 +34,11 @@ public sealed class TrayIcon : IDisposable
         SetRunning(false);
     }
 
-    public void SetRunning(bool running)
+    /// <param name="waiting">Stopped by a device change, restarts on its own (Durdur cancels it).</param>
+    public void SetRunning(bool running, bool waiting = false)
     {
         _running = running;
-        _icon.Text = running ? "Surround — çalışıyor" : "Surround — durdu";
+        _icon.Text = waiting ? "Surround — cihaz bekleniyor" : running ? "Surround — çalışıyor" : "Surround — durdu";
         _toggle.Text = running ? "Durdur" : "Başlat";
     }
 

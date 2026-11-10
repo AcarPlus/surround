@@ -7,13 +7,13 @@ köprüsünü, yoksa (`npm run dev`, tarayıcı) `ui/src/api/mock.ts` sahte veri
 ## Köprü protokolü (WebView2)
 JSON-RPC, `postMessage` / `WebMessageReceived` üzerinden. Sayfa -> C#: `{ id, method, params: [] }` (konumsal argümanlar).
 C# -> sayfa: `{ id, result }` ya da `{ id, error: { message, errors?: string[] } }`; itilen olaylar:
-`{ event: "status" | "levels" | "engine" | "engineError" | "calibration", data }`. C# tarafı: `src/Surround.App/Bridge`.
+`{ event: "status" | "levels" | "engine" | "engineError" | "engineState" | "calibration", data }`. C# tarafı: `src/Surround.App/Bridge`.
 `saveConfig` her zaman diske yazar; doğrulama hatası varsa (boş oda hariç) `errors` ile reddeder, çalışan motor
 mühendislik alanları değiştiyse yeniden başlatılır (oda/konum gibi arayüz alanları yeniden başlatmaz).
 
 ## Tipler (`ui/src/api/types.ts`)
 Motor yapılandırmasını yansıtır: `Source`, `Output`, `Speaker`, `Device`, `SinkStatus`, `Room`,
-`Config` (= source, upmix, upmixOptions, outputs, speakers, room, processing), `EngineInfo` ve `LogicalChannel` (FL FR FC LFE BL BR SL SR TFL TFR TBL TBR; üst şeritler için bkz. docs/duzen.md).
+`Config` (= source, upmix, upmixOptions, outputs, speakers, room, processing), `EngineInfo`, `EngineState` ve `LogicalChannel` (FL FR FC LFE BL BR SL SR TFL TFR TBL TBR; üst şeritler için bkz. docs/duzen.md).
 Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, "ön" planda yukarıdadır.
 `deviceChannel` 1 tabanlıdır.
 
@@ -29,6 +29,7 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 | `onLevels(cb)` | Mantıksal kanal tepe seviyeleri (dBFS, `LevelFrame`: kanal adı → dB nesnesi), ~20 Hz; motorda upmix ve genel işleme sonrası, kanal katlamadan önce ölçülür. Biçim aynı, artık 12 anahtar (FL..SR + TFL TFR TBL TBR); hiçbir hoparlörün kullanmadığı üst şerit -90 gösterir |
 | `onEngine(cb)` | `EngineInfo` (`upmix: "off" \| "stereo" \| "native"`, `sourceChannels`, `sourceRate`, `upmixLatencyMs`), durumla aynı sıklıkta; her duruşta (kalibrasyonun durdurması ve başarısız yeniden başlatma dahil) `"off"` (`sourceRate: 0`) ve boş `status` |
 | `onEngineError(cb)` | Çalışma sırasında motor hataları (akış kopması, test sesi hatası vb.) |
+| `getEngineState()` / `onEngineState(cb)` | Çalışma durumu `EngineState` = `{ state: "running" \| "waiting" \| "stopped", missing: string[], message?: string }` (`engineState` olayı). Olay her geçişte (Başlat, Durdur, cihaz bekleme, otomatik yeniden başlama) ve bekleme sırasında eksik listesi/neden değişince gelir; kalibrasyonun geçici durdurması `running` sayılır. `missing`: eksik cihazların adları (yalnızca `waiting`); `message` yalnızca eksik cihaz dışındaki bir nedenle beklerken gelir. Ayrıntı: aşağıda "Cihaz değişince" |
 
 | `getAppSettings()` | Uygulama ayarları (`app.json`, motor yapılandırmasından ayrı): `{ switchDefaultDevice, startWithWindows, startEngineOnLaunch, minimizeToTray }` (hepsi boolean; varsayılan `true, false, false, true`). Dahili `restore*` alanları dönmez |
 | `calibrate(request)` | Mikrofonla hoparlör ölçümü (uzun sürer, ~2,4 sn × tekrar × hoparlör + 3 sn); bitince `CalibrationResult` döner. Ayrıntı: `docs/kalibrasyon.md` |
@@ -78,6 +79,26 @@ diğerlerinde 0. `message` (hoparlör) yalnızca uyarı varsa gelir. Referansın
   değerleri geometriden hesaplanıp `Speaker` içine yazılır; yani motor her zaman nihai sayıyı görür.
 - Hesap: `delay = (dMax - d) / 343 * 1000` ms, `gain = 20*log10(d / dMax)` dB (`ui/src/lib/geometry.ts`).
 - Önizleme: adrese `?nocable` eklenirse mock VB-Cable'sız çalışır (Kaynak ekranındaki uyarıyı görmek için).
+  `?bekle`: Başlat'tan 5 sn sonra bir çıkış cihazı "çıkarılır" (`waiting`), 5 sn sonra geri gelir (`running`).
+
+## Cihaz değişince (otomatik kurtarma)
+Motor çalışırken bir cihaz çıkarılır/devre dışı kalırsa, kaynağın ya da bir çıkışın Windows biçimi değişirse (ör. VB-Cable 7.1 yapıldı)
+veya bir yakalama/oynatma akışı koparsa (`AUDCLNT_E_DEVICE_INVALIDATED` vb.) motor durdurulur ve `waiting` durumuna geçilir;
+gereken tüm cihazlar ~1 sn kesintisiz yerinde olunca kayıtlı yapılandırmayla (`config.json`, Başlat'ın kullandığı) kendiliğinden
+yeniden başlar ve `running` gelir.
+- Gereken cihazlar: kaynak + en az bir hoparlörü yönlendirilen çıkışlar (loopback'te kaynak cihazdaki hoparlörler sayılmaz).
+  Çalışırken motorun açtığı cihazlar, beklerken kayıtlı yapılandırmanınkiler izlenir: beklerken eksik cihazın hoparlörleri silinirse
+  (`saveConfig`) kalanlarla yeniden başlar. Eksik çıkışı atlayıp kalanlarla çalışmaya devam etme (kısmi çalışma) yoktur.
+- Kaynak: Windows uç nokta bildirimleri (durum, ekleme/çıkarma, `PKEY_AudioEngine_DeviceFormat`; varsayılan cihaz değişimi yok sayılır)
+  ve akış hataları. Bildirimler yalnızca not alınır; değerlendirme ve motor işlemleri başlat/durdur/`saveConfig`/kalibrasyonla aynı
+  kilit altında, motor iş parçacığında yapılır. Eksik cihaz varken bildirim kaçarsa diye 3 sn'de bir yeniden bakılır. Aynı biçimi
+  bildiren olay yeniden başlatmaz.
+- Yeniden başlatma başarısız olursa (doğrulama hatası, cihaz meşgul) `waiting` sürer, `message` hatayı söyler ve bekleme 2, 4, 8 … 30 sn'ye
+  uzar; otomatik başlatılan motor 10 sn içinde yine koparsa da bekleme uzar. Cihaz gerçekten gidip gelince bekleme yine ~1 sn'dir.
+- Beklerken varsayılan çıkış cihazı koruması devrede kalır (Windows varsayılanı kaynakta kalır); Durdur beklemeyi bitirir ve varsayılanı
+  her zamanki gibi geri yükler. Beklerken `start()` bir şey yapmaz. Bekleme başlarken `engine` `"off"` ve boş `status` gelir;
+  akış koptuysa ayrıca `engineError` gelir. Tepsi "Surround — cihaz bekleniyor" gösterir ve menüsü "Durdur"dur.
+- Açılışta (`startEngineOnLaunch`) cihaz eksikse motor beklemeye geçmez, eskisi gibi başlatılamadı balonu çıkar.
 
 ## Uygulama davranışı (masaüstü kabuğu)
 - **Varsayılan çıkış cihazı** (`switchDefaultDevice`): kaynak `loopback` ise motor başlayınca (ve kaynak değişerek yeniden başlayınca)
