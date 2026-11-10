@@ -87,6 +87,8 @@ export function SettingsScreen() {
           ))}
         </Card>
 
+        <SetupCard />
+
         <Card className="p-4">
           <SectionTitle>Hakkında</SectionTitle>
           <p className="text-[13px] font-medium">Surround</p>
@@ -94,6 +96,62 @@ export function SettingsScreen() {
         </Card>
       </div>
     </div>
+  )
+}
+
+/* ---------- Kurulum ve yedek ---------- */
+
+function SetupCard() {
+  const openWizard = useStore((s) => s.openWizard)
+  const exportConfig = useStore((s) => s.exportConfig)
+  const importConfig = useStore((s) => s.importConfig)
+  const showToast = useStore((s) => s.showToast)
+  const file = useRef<HTMLInputElement>(null)
+
+  const download = () => {
+    const blob = new Blob([JSON.stringify(exportConfig(), null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `surround-yedek-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  const upload = async (f: File) => {
+    try {
+      const err = importConfig(JSON.parse(await f.text()))
+      if (err) showToast(err, 5000, { tone: 'error' })
+    } catch {
+      showToast('Dosya okunamadı (geçerli bir JSON değil).', 5000, { tone: 'error' })
+    }
+  }
+
+  return (
+    <Card className="p-4">
+      <SectionTitle>Kurulum ve yedek</SectionTitle>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button variant="primary" onClick={openWizard}>
+          Kurulum sihirbazını aç
+        </Button>
+        <Button onClick={download}>Yedeği indir</Button>
+        <Button onClick={() => file.current?.click()}>Yedekten yükle…</Button>
+        <input
+          ref={file}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void upload(f)
+            e.target.value = ''
+          }}
+        />
+      </div>
+      <p className="mt-2 text-xs text-muted">
+        Yedek; hoparlörleri, odayı, kalibrasyonu, ses ayarlarını ve profilleri içerir. Yüklemek Ctrl+Z ile geri alınabilir.
+      </p>
+    </Card>
   )
 }
 

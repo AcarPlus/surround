@@ -7,3 +7,6 @@ dist/
 contents/
 *.wav
 artifacts/
+
+# Claude Code yerel çalışma ağaçları
+.claude/worktrees/

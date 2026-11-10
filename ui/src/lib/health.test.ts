@@ -1,0 +1,104 @@
+import { describe, expect, it } from 'vitest'
+import { defaultProcessing, defaultUpmixOptions, type Device, type Speaker } from '../api/types'
+import { checkHealth, type HealthInput } from './health'
+
+const dev = (id: string, name: string, channels = 2): Device => ({
+  id,
+  name,
+  kind: 'local',
+  flow: 'render',
+  channels,
+  sampleRate: 48000,
+  isDefault: false,
+})
+const sp = (id: string, ch: keyof Speaker['source'], extra: Partial<Speaker> = {}): Speaker => ({
+  id,
+  name: id,
+  outputDeviceId: 'spk',
+  deviceChannel: 1,
+  source: { [ch]: 1 },
+  delayMs: 0,
+  gainDb: 0,
+  mute: false,
+  x: 0,
+  y: 0,
+  ...extra,
+})
+
+const base = (over: Partial<HealthInput> = {}): HealthInput => ({
+  devices: [dev('spk', 'Hoparlör'), dev('2nd', '2nd output'), dev('cable', 'CABLE Input', 8)],
+  source: { deviceId: 'cable', mode: 'loopback' },
+  speakers: [
+    sp('FL', 'FL', { deviceChannel: 1 }),
+    sp('FR', 'FR', { deviceChannel: 2 }),
+    sp('BL', 'BL', { outputDeviceId: '2nd', deviceChannel: 1 }),
+    sp('BR', 'BR', { outputDeviceId: '2nd', deviceChannel: 2 }),
+  ],
+  upmix: true,
+  upmixOptions: defaultUpmixOptions(),
+  processing: defaultProcessing(),
+  running: false,
+  status: [],
+  lowLatency: false,
+  calibrated: true,
+  ...over,
+})
+
+const ids = (h: HealthInput) => checkHealth(h).map((i) => i.id)
+
+describe('checkHealth', () => {
+  it('sağlıklı 4.0 kurulumunda yalnızca LFE bilgisi', () => {
+    expect(ids(base())).toEqual(['lfe-nowhere'])
+  })
+
+  it('hoparlör yoksa sihirbazı önerir', () => {
+    const items = checkHealth(base({ speakers: [] }))
+    expect(items).toHaveLength(1)
+    expect(items[0].fix?.id).toBe('open-setup')
+  })
+
+  it('tek taraflı surround (yankı şikâyeti) uyarısı', () => {
+    const h = base()
+    h.speakers = h.speakers.filter((s) => s.id !== 'BL')
+    const item = checkHealth(h).find((i) => i.id === 'surround-unbalanced')!
+    expect(item.title).toContain('sol')
+  })
+
+  it('kanal çakışması, eksik cihaz ve geri besleme hataları', () => {
+    const h = base()
+    h.speakers = [
+      ...h.speakers,
+      sp('X', 'FC', { deviceChannel: 1 }),
+      sp('Y', 'FC', { outputDeviceId: 'gone' }),
+      sp('Z', 'FC', { outputDeviceId: 'cable', deviceChannel: 3 }),
+    ]
+    const r = ids(h)
+    expect(r).toContain('clash-X')
+    expect(r).toContain('dev-missing-Y')
+    expect(r).toContain('feedback-Z')
+    expect(checkHealth(h)[0].level).toBe('error')
+  })
+
+  it('bas kesilip alıcı yoksa ve kaynak sorunları', () => {
+    const h = base({ source: { deviceId: 'spk', mode: 'loopback' } })
+    h.speakers = h.speakers.map((s) => (s.id.startsWith('B') ? { ...s, highPassHz: 150 } : s))
+    const r = ids(h)
+    expect(r).toContain('bass-lost')
+    expect(r).toContain('source-not-cable')
+    h.devices = h.devices.map((d) => (d.id === 'cable' ? { ...d, channels: 2 } : d))
+    h.source = { deviceId: 'cable', mode: 'loopback' }
+    expect(ids(h)).toContain('cable-2ch')
+  })
+
+  it('çalışırken kesinti ve kalibrasyon önerisi', () => {
+    const r = ids(
+      base({
+        running: true,
+        calibrated: false,
+        status: [{ deviceId: '2nd', fillMs: 1, corrPpm: 0, underruns: 9, overruns: 0 }],
+      }),
+    )
+    expect(r).toContain('underrun-2nd')
+    expect(r).toContain('not-calibrated')
+  })
+})

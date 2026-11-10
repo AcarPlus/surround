@@ -20,7 +20,6 @@ import {
   Card,
   Chip,
   Field,
-  ScreenHeader,
   SectionTitle,
   Segmented,
   Select,
@@ -30,6 +29,7 @@ import {
 import { IconCheck, IconWarn } from '../components/icons'
 import { fmt, fmtSigned } from '../lib/format'
 import { upmixStateLabel } from '../lib/upmix'
+import { findCable } from '../lib/health'
 
 const MIN_DB = -60
 
@@ -46,97 +46,81 @@ function useUsedLanes(): Set<LogicalChannel> {
 const emptyFrame = (): LevelFrame =>
   Object.fromEntries(LOGICAL_CHANNELS.map((c) => [c, -90])) as LevelFrame
 
-export function SourceScreen() {
+/** Kaynak seçimi (Bağlantı ekranı). */
+export function SourcePanel() {
   const devices = useStore((s) => s.devices)
   const source = useStore((s) => s.source)
-  const upmix = useStore((s) => s.upmix)
   const setSource = useStore((s) => s.setSource)
-  const setUpmix = useStore((s) => s.setUpmix)
 
   const flow = source.mode === 'capture' ? 'capture' : 'render'
   const options = devices.filter((d) => d.flow === flow)
   const current = devices.find((d) => d.id === source.deviceId)
-  const cable = findCable(devices)
-  const cableSelected = !!cable && source.mode === 'loopback' && source.deviceId === cable.id
   const selectedIsCable = !!current && /cable/i.test(current.name)
   const twoChannel = selectedIsCable && current.channels <= 2
 
   return (
-    <div className="h-full overflow-y-auto p-5">
-      <ScreenHeader title="Kaynak" sub="Sesin yakalandığı cihaz ve kanal seviyeleri." />
+    <Card className="space-y-4 self-start p-4">
+      <SectionTitle>Giriş</SectionTitle>
+      <Field label="Mod">
+        <Segmented
+          value={source.mode}
+          onChange={(mode) => setSource({ mode })}
+          options={[
+            { value: 'loopback', label: 'Loopback' },
+            { value: 'capture', label: 'Yakalama' },
+          ]}
+        />
+      </Field>
+      <p className="-mt-2 text-xs text-faint">
+        {source.mode === 'loopback'
+          ? 'Bir çıkış cihazına giden sistem sesini dinler (önerilen: CABLE Input).'
+          : 'Bir kayıt (giriş) cihazından okur.'}
+      </p>
+      <Field label="Kaynak cihaz">
+        <Select ariaLabel="Kaynak cihaz" value={source.deviceId} onChange={(v) => setSource({ deviceId: v })}>
+          {options.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name} ({d.channels} kn){d.isDefault ? ' · varsayılan' : ''}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {current && (
+        <p className="num text-xs text-muted">
+          {current.channels} kanal · {(current.sampleRate / 1000).toString().replace('.', ',')} kHz
+        </p>
+      )}
+      {twoChannel && (
+        <p className="flex items-start gap-1.5 text-xs text-warn">
+          <IconWarn className="mt-px shrink-0" />
+          Windows’ta 7.1 olarak yapılandırılmamış — yukarıdaki 3. adım.
+        </p>
+      )}
+    </Card>
+  )
+}
 
-      <CableGuide
-        cable={cable}
-        cableSelected={cableSelected}
-        twoChannel={twoChannel}
-        onSelect={() => cable && setSource({ mode: 'loopback', deviceId: cable.id })}
-      />
-
-      <div className="grid grid-cols-1 gap-4 min-[1100px]:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
-        <Card className="space-y-4 self-start p-4">
-          <SectionTitle>Giriş</SectionTitle>
-          <Field label="Mod">
-            <Segmented
-              value={source.mode}
-              onChange={(mode) => setSource({ mode })}
-              options={[
-                { value: 'loopback', label: 'Loopback' },
-                { value: 'capture', label: 'Yakalama' },
-              ]}
-            />
-          </Field>
-          <p className="-mt-2 text-xs text-faint">
-            {source.mode === 'loopback'
-              ? 'Bir çıkış cihazına giden sistem sesini dinler.'
-              : 'Bir kayıt (giriş) cihazından, örn. VB-Cable, okur.'}
-          </p>
-          <Field label="Kaynak cihaz">
-            <Select ariaLabel="Kaynak cihaz" value={source.deviceId} onChange={(v) => setSource({ deviceId: v })}>
-              {options.map((d) => (
-                <option key={d.id} value={d.id}>
-                  {d.name} ({d.channels} kn){d.isDefault ? ' · varsayılan' : ''}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {current && (
-            <p className="num text-xs text-muted">
-              {current.channels} kanal · {(current.sampleRate / 1000).toString().replace('.', ',')} kHz
-            </p>
-          )}
-          {twoChannel && (
-            <p className="flex items-start gap-1.5 text-xs text-warn">
-              <IconWarn className="mt-px shrink-0" />
-              Windows’ta 7.1 olarak yapılandırılmamış — yukarıdaki 3. adım.
-            </p>
-          )}
-
-          <div className="border-t border-line pt-4">
-            <label className="flex items-start justify-between gap-3">
-              <span>
-                <span className="block text-[13px] font-medium">Upmix</span>
-                <span className="mt-0.5 block text-xs text-muted">
-                  Stereo sesten orta, LFE ve arka/yan kanallar üretilir. 7.1 kaynakta içerik stereo olduğunda kendiliğinden
-                  devreye girer, gerçek çok kanallı ses gelince yerel kanallara döner.
-                </span>
-              </span>
-              <Switch checked={upmix} onChange={setUpmix} label="Upmix" />
-            </label>
-            <UpmixStateBadge />
-            {upmix && <UpmixControls />}
-          </div>
-        </Card>
-
-        <Card className="p-4">
-          <Meters />
-        </Card>
-      </div>
-    </div>
+/** VB-Cable kurulum rehberi; kablo zaten doğru kuruluysa daraltılmış tek satır. */
+export function CableSetup() {
+  const devices = useStore((s) => s.devices)
+  const source = useStore((s) => s.source)
+  const setSource = useStore((s) => s.setSource)
+  const current = devices.find((d) => d.id === source.deviceId)
+  const cable = findCable(devices)
+  const cableSelected = !!cable && source.mode === 'loopback' && source.deviceId === cable.id
+  const twoChannel = !!current && /cable/i.test(current.name) && current.channels <= 2
+  return (
+    <CableGuide
+      cable={cable}
+      cableSelected={cableSelected}
+      twoChannel={twoChannel}
+      onSelect={() => cable && setSource({ mode: 'loopback', deviceId: cable.id })}
+    />
   )
 }
 
 /** Motorun bildirdiği anlık upmix durumu (yalnızca çalışırken). */
-function UpmixStateBadge() {
+export function UpmixStateBadge() {
   const engine = useStore((s) => s.engine)
   const runState = useStore((s) => s.runState)
   if (runState !== 'running' || !engine) return null
@@ -152,7 +136,7 @@ function UpmixStateBadge() {
   )
 }
 
-function UpmixControls() {
+export function UpmixControls() {
   const o = useStore((s) => s.upmixOptions)
   const set = useStore((s) => s.setUpmixOptions)
   const used = useUsedLanes()
@@ -221,16 +205,6 @@ function UpmixControls() {
       </label>
     </div>
   )
-}
-
-/**
- * VB-Cable'ın oynatma (render) ucu: adında CABLE geçen, tercihen "16ch" olmayan cihaz.
- * "CABLE Input" hoparlör ucudur ve Yapılandır ile 7.1 olur; "CABLE In 16ch" Line Out ucudur,
- * Windows'ta Yapılandır düğmesi devre dışıdır.
- */
-function findCable(devices: Device[]): Device | undefined {
-  const renders = devices.filter((d) => d.flow === 'render' && /cable/i.test(d.name))
-  return renders.find((d) => !/16ch/i.test(d.name)) ?? renders[0]
 }
 
 function CableGuide({
@@ -313,11 +287,29 @@ function CableGuide({
       done: false,
       title: (
         <>
-          Ön hoparlörleri <b className="font-semibold">Hoparlör (Realtek)</b> cihazına ekle (Cihazlar ekranı).
+          Hoparlörlerini <b className="font-semibold">kurulum sihirbazı</b> ile tanıt (hangi cihaza ne bağlı).
         </>
       ),
     },
   ]
+
+  const [expanded, setExpanded] = useState(false)
+  if (cableSelected && multichannel && !expanded) {
+    return (
+      <Card className="mb-4 flex items-center gap-3 p-3.5">
+        <IconCheck className="shrink-0 text-ok" />
+        <p className="min-w-0 flex-1 text-[13px]">
+          <span className="font-semibold">VB-Cable hazır.</span>{' '}
+          <span className="text-muted">
+            {cable!.name} · {cable!.channels} kanal; Windows sesi tüm hoparlörlere Surround üzerinden gider.
+          </span>
+        </p>
+        <Button size="sm" variant="ghost" onClick={() => setExpanded(true)}>
+          Adımları göster
+        </Button>
+      </Card>
+    )
+  }
 
   return (
     <Card className="mb-4 p-4">
@@ -390,7 +382,7 @@ function CableGuide({
   )
 }
 
-function Meters() {
+export function Meters() {
   const runState = useStore((s) => s.runState)
   const [levels, setLevels] = useState<LevelFrame>(emptyFrame)
   const peaks = useRef<Record<string, { v: number; t: number }>>({})

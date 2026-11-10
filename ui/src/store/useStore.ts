@@ -21,9 +21,11 @@ import {
   defaultUpmixOptions,
   normalizeUpmixOptions,
 } from '../api/types'
-import { clamp, clampToRoom, computeAuto, round, type PresetId } from '../lib/geometry'
+import { clamp, clampToRoom, computeAuto, round } from '../lib/geometry'
 import { assignExisting, layoutSlots, type LayoutSpec } from '../lib/layout'
 import { ROLE_CUSTOM_MANUAL, ROLE_CUSTOM_MAP, computeMapSource, roleDef, rolePatch } from '../lib/roles'
+import { plannedName, standardPosition, type BuildResult } from '../lib/setup'
+import { findCable, type FixId } from '../lib/health'
 import { matchSoundPreset, soundPresetPatch } from '../lib/presets'
 import {
   builtinProfile,
@@ -35,9 +37,8 @@ import {
   snapshotState,
 } from '../lib/profiles'
 
-export type Screen = 'room' | 'devices' | 'source' | 'sound' | 'calibration' | 'settings'
+export type Screen = 'home' | 'room' | 'sound' | 'calibration' | 'connection' | 'settings'
 export type Theme = 'dark' | 'light'
-export type PresetChoice = PresetId | 'custom'
 export type RunState = 'stopped' | 'starting' | 'running'
 export const LISTENER_ID = 'listener'
 
@@ -45,6 +46,50 @@ export interface AutoFlags {
   delay: boolean
   gain: boolean
 }
+
+export interface ToastAction {
+  label: string
+  run: () => void
+}
+
+export interface Toast {
+  id: number
+  message: string
+  tone?: 'error'
+  action?: ToastAction
+}
+
+/** Düzen şablonu önizlemesi: hangi hoparlör korunur, eklenir, çıkarılır. */
+export interface LayoutPreview {
+  kept: string[]
+  added: string[]
+  removed: string[]
+}
+
+/** Geri alınabilir yapılandırma alanları. */
+const HISTORY_KEYS = [
+  'source',
+  'upmix',
+  'upmixOptions',
+  'outputs',
+  'speakers',
+  'room',
+  'processing',
+  'profiles',
+  'activeProfileId',
+  'auto',
+  'setupDone',
+  'lastCalibration',
+] as const
+type HistoryKey = (typeof HISTORY_KEYS)[number]
+type Snapshot = Pick<State, HistoryKey>
+interface HistoryEntry {
+  snap: Snapshot
+  label: string
+}
+const HISTORY_MAX = 100
+/** Aynı türden art arda gelen değişiklikler (sürükleme, kaydırıcı) bu süre içinde tek adım sayılır. */
+const COALESCE_MS = 900
 
 interface State {
   ready: boolean
@@ -62,8 +107,15 @@ interface State {
   activeProfileId: string | null
   /** Hoparlör başına gecikme/kazanç otomatik mi (yalnızca arayüz durumu). */
   auto: Record<string, AutoFlags>
+  /** Kurulum sihirbazı en az bir kez tamamlandı (config'te saklanır). */
+  setupDone: boolean
+  lastCalibration: NonNullable<Config['lastCalibration']> | null
 
-  preset: PresetChoice
+  wizardOpen: boolean
+  /** Test sesi çalan hoparlör (haritada vurgulanır). */
+  playing: string | null
+  past: HistoryEntry[]
+  future: HistoryEntry[]
   lowLatency: boolean
   theme: Theme
   screen: Screen
@@ -73,7 +125,7 @@ interface State {
   status: SinkStatus[]
   /** Çalışırken motorun bildirdiği durum (upmix durumu vb.); dururken null. */
   engine: EngineInfo | null
-  toast: string | null
+  toast: Toast | null
 
   init: () => Promise<void>
   /** Cihaz listesini yeniden okur (Windows'ta kanal sayısı/varsayılan değişince ekran güncellensin). */
@@ -82,9 +134,23 @@ interface State {
   setScreen: (s: Screen) => void
   select: (id: string | null) => void
   toggleRun: () => Promise<void>
-  setPreset: (p: PresetChoice) => void
+  /** Düzen şablonu uygulanırsa ne olacağı (onay penceresi için). */
+  previewLayout: (spec: LayoutSpec) => LayoutPreview
   /** X.Y.Z düzenini uygular; mevcut hoparlörlerin cihaz/EQ/bas ayarları rol, sonra konum sırasıyla korunur. */
   applyLayout: (spec: LayoutSpec) => void
+  /** Kurulum sihirbazının sonucunu tek adımda uygular (geri alınabilir). */
+  applySetup: (r: BuildResult) => void
+  /** Kalibrasyon yamalarını uygular; değişen değerlerin "Otomatik" bayrağı kapanır. */
+  applyCalibration: (patches: Record<string, Partial<Speaker>>, micDeviceId: string, at: string) => void
+  openWizard: () => void
+  closeWizard: () => void
+  undo: () => void
+  redo: () => void
+  /** Sistem kontrolündeki "düzelt" düğmeleri. */
+  fixHealth: (id: FixId, arg?: string) => void
+  /** Tüm hoparlörleri sırayla çalar (hangisi hangisi?). */
+  playTour: () => Promise<void>
+  stopTour: () => void
   /** Rol seçer: karışım satırını (ve Subwoofer için bassReceiver'ı) yazar. */
   setRole: (id: string, role: string) => void
   setLowLatency: (v: boolean) => void
@@ -96,10 +162,11 @@ interface State {
   setMix: (id: string, ch: LogicalChannel, gain: number) => void
   setAuto: (id: string, patch: Partial<AutoFlags>) => void
   autoAll: () => void
-  addSpeaker: () => void
+  /** Hoparlör ekler; rol verilirse karışım satırı ve standart konum ondan gelir. */
+  addSpeaker: (role?: string) => void
+  duplicateSpeaker: (id: string) => void
   removeSpeaker: (id: string) => void
   setOutput: (deviceId: string, patch: Partial<Output>) => void
-  addOutput: (deviceId: string) => void
   setSource: (patch: Partial<Source>) => void
   setUpmix: (v: boolean) => void
   /** Upmix ayrıntıları; seviyeler ve LFE canlı uygulanır (kısa gecikmeli kayıt), mod değişimi motoru yeniden başlatır. */
@@ -119,7 +186,12 @@ interface State {
   /** Yerleşik profili varsayılanına döndürür; etkinse hemen uygular. */
   resetBuiltinProfile: (id: string) => void
   playTone: (id: string) => Promise<void>
-  showToast: (msg: string, ms?: number) => void
+  /** Kaydedilecek yapılandırma belgesi (yedek dışa aktarma için). */
+  exportConfig: () => Config
+  /** Yedekten geri yükler (geri alınabilir). Geçersizse hata metni döner. */
+  importConfig: (raw: unknown) => string | null
+  showToast: (msg: string, ms?: number, opts?: { action?: ToastAction; tone?: 'error' }) => void
+  dismissToast: () => void
 }
 
 const initialTheme = (): Theme => {
@@ -159,7 +231,7 @@ function recalc(speakers: Speaker[], listener: Point, auto: Record<string, AutoF
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 
 /** Hata mesajını kullanıcıya gösterilecek tek satıra çevirir (köprü hataları satır listesi taşıyabilir). */
-function describeError(e: unknown): string {
+export function describeError(e: unknown): string {
   const errors = (e as { errors?: unknown })?.errors
   if (Array.isArray(errors) && errors.length > 0) {
     const first = String(errors[0])
@@ -169,35 +241,66 @@ function describeError(e: unknown): string {
 }
 
 export const useStore = create<State>()((set, get) => {
-  /** Yapılandırmayı değiştiren her eylem buradan geçer: yeniden hesapla + gecikmeli kaydet. */
-  const commit = (patch: Partial<State>, delayMs = 400) => {
-    const cur = get()
-    const next = { ...cur, ...patch }
-    const speakers = recalc(next.speakers, next.room.listener, next.auto)
-    set({ ...patch, speakers })
-    clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => {
-      api.saveConfig(buildConfig(get())).catch((e) => get().showToast(describeError(e), 6000))
-    }, delayMs)
-  }
+  const snapshot = (s: State): Snapshot => Object.fromEntries(HISTORY_KEYS.map((k) => [k, s[k]])) as Snapshot
 
-  /** Kaydedilecek belge: hoparlörlerin `auto` bayrakları da içinde taşınır. */
+  let lastPush = { key: '', t: 0 }
+  let tourAbort = false
+  let toastSeq = 0
+  let toastTimer: ReturnType<typeof setTimeout> | undefined
+
+  /**
+   * Kaydedilecek belge: hoparlörlerin `auto` bayrakları da içinde taşınır. Hiçbir hoparlörün kullanmadığı
+   * çıkışlar yazılmaz (eski sürümler kaldırılan cihazları listede bırakıyordu).
+   */
   const buildConfig = (s: State): Config => ({
     source: s.source,
     upmix: s.upmix,
     upmixOptions: s.upmixOptions,
-    outputs: s.outputs,
+    outputs: s.outputs.filter((o) => s.speakers.some((sp) => sp.outputDeviceId === o.deviceId)),
     speakers: s.speakers.map((sp) => ({ ...sp, auto: s.auto[sp.id] ?? { delay: true, gain: true } })),
     room: s.room,
     processing: s.processing,
     profiles: s.profiles,
     ...(s.activeProfileId ? { activeProfileId: s.activeProfileId } : {}),
+    ...(s.setupDone ? { setupDone: true } : {}),
+    ...(s.lastCalibration ? { lastCalibration: s.lastCalibration } : {}),
   })
 
+  const scheduleSave = (delayMs: number) => {
+    clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      api.saveConfig(buildConfig(get())).catch((e) => get().showToast(describeError(e), 6000, { tone: 'error' }))
+    }, delayMs)
+  }
+
+  /**
+   * Yapılandırmayı değiştiren her eylem buradan geçer: geçmişe yaz + yeniden hesapla + gecikmeli kaydet.
+   * `label` geri al ipucunda görünür; aynı `label` ile art arda (sürükleme) gelen değişiklikler tek adımdır.
+   */
+  const commit = (patch: Partial<State>, delayMs = 400, label = 'Değişiklik') => {
+    const cur = get()
+    const now = Date.now()
+    const coalesce = lastPush.key === label && now - lastPush.t < COALESCE_MS && cur.past.length > 0
+    const past = coalesce ? cur.past : [...cur.past, { snap: snapshot(cur), label: label.split(':')[0] }].slice(-HISTORY_MAX)
+    lastPush = { key: label, t: now }
+    const next = { ...cur, ...patch }
+    const speakers = recalc(next.speakers, next.room.listener, next.auto)
+    set({ ...patch, speakers, past, future: [] })
+    scheduleSave(delayMs)
+  }
+
+  const restore = (snap: Snapshot) => {
+    set({ ...snap, speakers: recalc(snap.speakers, snap.room.listener, snap.auto) })
+    lastPush = { key: '', t: 0 }
+    const sel = get().selection
+    if (sel && sel !== LISTENER_ID && !get().speakers.some((s) => s.id === sel)) set({ selection: null })
+    scheduleSave(150)
+  }
+
   const ensureOutput = (outputs: Output[], deviceId: string): Output[] =>
-    outputs.some((o) => o.deviceId === deviceId)
-      ? outputs
-      : [...outputs, { deviceId, latencyMs: 0, bufferMs: 40 }]
+    outputs.some((o) => o.deviceId === deviceId) ? outputs : [...outputs, { deviceId, latencyMs: 0, bufferMs: 40 }]
+
+  const undoAction: ToastAction = { label: 'Geri al', run: () => get().undo() }
 
   return {
     ready: false,
@@ -212,11 +315,16 @@ export const useStore = create<State>()((set, get) => {
     profiles: normalizeProfiles(undefined),
     activeProfileId: null,
     auto: {},
+    setupDone: false,
+    lastCalibration: null,
 
-    preset: 'custom',
+    wizardOpen: false,
+    playing: null,
+    past: [],
+    future: [],
     lowLatency: false,
     theme: initialTheme(),
-    screen: 'room',
+    screen: 'home',
     selection: null,
     runState: 'stopped',
     status: [],
@@ -225,9 +333,7 @@ export const useStore = create<State>()((set, get) => {
 
     async init() {
       const [devices, cfg] = await Promise.all([api.listDevices(), api.getConfig()])
-      const auto = Object.fromEntries(
-        cfg.speakers.map((s) => [s.id, s.auto ?? { delay: true, gain: true }]),
-      )
+      const auto = Object.fromEntries(cfg.speakers.map((s) => [s.id, s.auto ?? { delay: true, gain: true }]))
       const speakers = cfg.speakers.map(({ auto: _auto, ...rest }) => rest)
       const profiles = normalizeProfiles(cfg.profiles)
       set({
@@ -240,14 +346,19 @@ export const useStore = create<State>()((set, get) => {
         room: cfg.room,
         processing: normalizeProcessing(cfg.processing),
         profiles,
-        activeProfileId: cfg.activeProfileId && profiles.some((p) => p.id === cfg.activeProfileId) ? cfg.activeProfileId : null,
+        activeProfileId:
+          cfg.activeProfileId && profiles.some((p) => p.id === cfg.activeProfileId) ? cfg.activeProfileId : null,
         auto,
-        preset: speakers.length === 0 ? 'custom' : '5.1',
+        setupDone: !!cfg.setupDone || speakers.length > 0,
+        lastCalibration: cfg.lastCalibration ?? null,
+        wizardOpen: speakers.length === 0 && !cfg.setupDone,
+        past: [],
+        future: [],
         ready: true,
       })
       api.onStatus((status) => set({ status }))
       api.onEngine((info) => set({ engine: info.sourceRate > 0 ? info : null }))
-      api.onEngineError((msg) => get().showToast(msg, 7000))
+      api.onEngineError((msg) => get().showToast(msg, 7000, { tone: 'error' }))
     },
 
     async refreshDevices() {
@@ -285,7 +396,7 @@ export const useStore = create<State>()((set, get) => {
         try {
           await api.stop()
         } catch (e) {
-          get().showToast(describeError(e), 6000)
+          get().showToast(describeError(e), 6000, { tone: 'error' })
         }
         set({ runState: 'stopped', status: [], engine: null })
         return
@@ -298,25 +409,34 @@ export const useStore = create<State>()((set, get) => {
         set({ runState: 'running' })
       } catch (e) {
         set({ runState: 'stopped', status: [] })
-        get().showToast(describeError(e), 7000)
+        get().showToast(describeError(e), 7000, { tone: 'error' })
       }
     },
 
-    setPreset(preset) {
-      if (preset === 'custom') {
-        set({ preset })
-        return
+    previewLayout(spec) {
+      const { room, speakers } = get()
+      const slots = layoutSlots(spec, room.listener)
+      const { matches } = assignExisting(slots, speakers)
+      const keptIds = new Set(matches.flatMap((m) => (m ? [m.id] : [])))
+      return {
+        kept: matches.flatMap((m) => (m ? [m.name] : [])),
+        added: slots.filter((_, i) => !matches[i]).map((s) => s.name),
+        removed: speakers.filter((s) => !keptIds.has(s.id)).map((s) => s.name),
       }
-      const [floor, sub] = preset.split('.').map(Number)
-      get().applyLayout({ floor, sub, height: 0 })
     },
 
     applyLayout(spec) {
-      const { room, devices, outputs, lowLatency, speakers: existing, auto: oldAuto } = get()
+      const { room, devices, outputs, lowLatency, speakers: existing, auto: oldAuto, source } = get()
       const slots = layoutSlots(spec, room.listener)
-      const renders = devices.filter((d) => d.flow === 'render' && !(lowLatency && d.kind === 'network'))
+      const renders = devices.filter(
+        (d) =>
+          d.flow === 'render' &&
+          !(lowLatency && d.kind === 'network') &&
+          !(source.mode === 'loopback' && d.id === source.deviceId) &&
+          !/cable/i.test(d.name),
+      )
       if (renders.length === 0 || slots.length === 0) {
-        get().showToast('Çıkış cihazı bulunamadı.')
+        get().showToast('Çıkış cihazı bulunamadı.', 4000, { tone: 'error' })
         return
       }
       const { matches, byRole, dropped } = assignExisting(slots, existing)
@@ -360,22 +480,163 @@ export const useStore = create<State>()((set, get) => {
       })
       let outs = outputs
       for (const s of speakers) outs = ensureOutput(outs, s.outputDeviceId)
-      const label = `${spec.floor}.${spec.sub}`
-      commit({
-        speakers,
-        outputs: outs,
-        preset: spec.height === 0 && (label === '2.0' || label === '5.1' || label === '7.1') ? (label as PresetId) : 'custom',
-        selection: null,
-        auto: Object.fromEntries(speakers.map((s) => [s.id, oldAuto[s.id] ?? { delay: true, gain: true }])),
-      })
-      if (dropped > 0) get().showToast(`${dropped} eski hoparlör yeni düzene sığmadı, çıkarıldı.`, 4000)
+      const label = `${spec.floor}.${spec.sub}${spec.height ? `.${spec.height}` : ''}`
+      commit(
+        {
+          speakers,
+          outputs: outs,
+          selection: null,
+          auto: Object.fromEntries(speakers.map((s) => [s.id, oldAuto[s.id] ?? { delay: true, gain: true }])),
+        },
+        400,
+        `${label} düzeni`,
+      )
+      get().showToast(
+        dropped > 0 ? `${label} düzeni uygulandı; ${dropped} hoparlör çıkarıldı.` : `${label} düzeni uygulandı.`,
+        6000,
+        { action: undoAction },
+      )
+    },
+
+    applySetup(r) {
+      const { auto } = get()
+      const created = new Set(r.createdIds)
+      commit(
+        {
+          speakers: r.speakers,
+          outputs: r.outputs,
+          auto: Object.fromEntries(
+            r.speakers.map((s) => [
+              s.id,
+              created.has(s.id) ? { delay: true, gain: true } : (auto[s.id] ?? { delay: true, gain: true }),
+            ]),
+          ),
+          selection: null,
+          setupDone: true,
+        },
+        150,
+        'Kurulum sihirbazı',
+      )
+      get().showToast(`Kurulum tamam: ${r.speakers.length} hoparlör.`, 6000, { action: undoAction })
+    },
+
+    applyCalibration(patches, micDeviceId, at) {
+      const { speakers, auto } = get()
+      const nextAuto = { ...auto }
+      for (const [id, p] of Object.entries(patches)) {
+        const a = auto[id] ?? { delay: true, gain: true }
+        nextAuto[id] = { delay: 'delayMs' in p ? false : a.delay, gain: 'gainDb' in p ? false : a.gain }
+      }
+      const n = Object.keys(patches).length
+      commit(
+        {
+          speakers: speakers.map((s) => (patches[s.id] ? { ...s, ...patches[s.id] } : s)),
+          auto: nextAuto,
+          lastCalibration: { at, micDeviceId, speakers: n },
+        },
+        150,
+        'Kalibrasyon',
+      )
+      get().showToast(`Kalibrasyon uygulandı (${n} hoparlör).`, 6000, { action: undoAction })
+    },
+
+    openWizard: () => set({ wizardOpen: true }),
+    closeWizard: () => set({ wizardOpen: false }),
+
+    undo() {
+      const { past, future } = get()
+      const e = past[past.length - 1]
+      if (!e) return
+      set({ past: past.slice(0, -1), future: [...future, { snap: snapshot(get()), label: e.label }] })
+      restore(e.snap)
+      get().showToast(`Geri alındı: ${e.label}`, 2500)
+    },
+
+    redo() {
+      const { past, future } = get()
+      const e = future[future.length - 1]
+      if (!e) return
+      set({ future: future.slice(0, -1), past: [...past, { snap: snapshot(get()), label: e.label }] })
+      restore(e.snap)
+      get().showToast(`Yinelendi: ${e.label}`, 2500)
+    },
+
+    fixHealth(id, arg) {
+      const st = get()
+      switch (id) {
+        case 'open-setup':
+          st.openWizard()
+          break
+        case 'open-calibration':
+          st.setScreen('calibration')
+          break
+        case 'open-sound-panel':
+          api.openSoundPanel().catch((e) => st.showToast(describeError(e), 6000, { tone: 'error' }))
+          break
+        case 'select-cable': {
+          const cable = findCable(st.devices)
+          if (cable) st.setSource({ mode: 'loopback', deviceId: cable.id })
+          break
+        }
+        case 'add-bass-receiver': {
+          // Bas kesmesiz ön hoparlörler (2.1 setin uyduları) kesilen bası alır.
+          const plain = st.speakers.filter((s) => !s.mute && !(s.highPassHz ?? 0))
+          const fronts = plain.filter((s) => (s.source.FL ?? 0) > 0 || (s.source.FR ?? 0) > 0)
+          const ids = new Set((fronts.length ? fronts : plain).map((s) => s.id))
+          if (ids.size === 0) break
+          commit({ speakers: st.speakers.map((s) => (ids.has(s.id) ? { ...s, bassReceiver: true } : s)) }, 400, 'Bas alıcısı')
+          break
+        }
+        case 'select-speaker':
+          if (arg) {
+            set({ selection: arg })
+            st.setScreen('room')
+          }
+          break
+        case 'raise-buffer': {
+          const o = st.outputs.find((v) => v.deviceId === arg)
+          if (o) st.setOutput(o.deviceId, { bufferMs: Math.min(400, o.bufferMs + 20) })
+          break
+        }
+        case 'unmute-all':
+          commit({ speakers: st.speakers.map((s) => (s.mute ? { ...s, mute: false } : s)) }, 400, 'Sessizi kaldır')
+          break
+        case 'enable-upmix':
+          st.setUpmix(true)
+          break
+      }
+    },
+
+    async playTour() {
+      tourAbort = false
+      const list = get().speakers.filter((s) => !s.mute)
+      for (const s of list) {
+        if (tourAbort) break
+        set({ playing: s.id })
+        try {
+          await api.playTone(s.outputDeviceId, s.deviceChannel)
+        } catch (e) {
+          get().showToast(describeError(e), 5000, { tone: 'error' })
+          break
+        }
+        // Test sesi 2 sn sürer; köprü hemen döner, sıradakine geçmeden bekle.
+        await new Promise((r) => setTimeout(r, 2300))
+      }
+      set({ playing: null })
+    },
+
+    stopTour() {
+      tourAbort = true
+      set({ playing: null })
     },
 
     setRole(id, role) {
       const { speakers, room } = get()
-      commit({
-        speakers: speakers.map((s) => (s.id === id ? { ...s, ...rolePatch(s, role, room.listener) } : s)),
-      })
+      commit(
+        { speakers: speakers.map((s) => (s.id === id ? { ...s, ...rolePatch(s, role, room.listener) } : s)) },
+        400,
+        'Rol',
+      )
     },
 
     setLowLatency: (lowLatency) => set({ lowLatency }),
@@ -389,25 +650,19 @@ export const useStore = create<State>()((set, get) => {
         depthM: d,
         listener: clampToRoom(room.listener, { widthM: w, depthM: d }),
       }
-      commit({
-        room: room2,
-        speakers: speakers.map((s) => ({ ...s, ...clampToRoom(s, room2) })),
-      })
+      commit({ room: room2, speakers: speakers.map((s) => ({ ...s, ...clampToRoom(s, room2) })) }, 400, 'Oda boyutu')
     },
 
     moveListener(x, y) {
       const { room } = get()
       const p = clampToRoom({ x: round(x, 2), y: round(y, 2) }, room)
-      commit({ room: { ...room, listener: p } })
+      commit({ room: { ...room, listener: p } }, 400, 'Dinleyiciyi taşı')
     },
 
     moveSpeaker(id, x, y) {
       const { room, speakers } = get()
       const p = clampToRoom({ x: round(x, 2), y: round(y, 2) }, room)
-      commit({
-        speakers: speakers.map((s) => (s.id === id ? { ...s, ...p } : s)),
-        preset: 'custom',
-      })
+      commit({ speakers: speakers.map((s) => (s.id === id ? { ...s, ...p } : s)) }, 400, `Taşı:${id}`)
     },
 
     nudgeSelected(dx, dy) {
@@ -427,81 +682,151 @@ export const useStore = create<State>()((set, get) => {
       if (patch.outputDeviceId) outs = ensureOutput(outs, patch.outputDeviceId)
       // EQ sürüklemesi canlı uygulanır; kayıt sıklığını sınırla.
       const live = 'eq' in patch || 'eqPreset' in patch
-      commit({ speakers: speakers.map((s) => (s.id === id ? { ...s, ...patch } : s)), outputs: outs }, live ? 150 : 400)
+      const key = Object.keys(patch).sort().join(',')
+      commit(
+        { speakers: speakers.map((s) => (s.id === id ? { ...s, ...patch } : s)), outputs: outs },
+        live ? 150 : 400,
+        `Hoparlör ayarı:${id}:${key}`,
+      )
     },
 
     setMix(id, ch, gain) {
       const { speakers } = get()
-      commit({
-        speakers: speakers.map((s) => {
-          if (s.id !== id) return s
-          const source = { ...s.source }
-          if (gain <= 0) delete source[ch]
-          else source[ch] = round(clamp(gain, 0, 1), 2)
-          return { ...s, source, role: ROLE_CUSTOM_MANUAL }
-        }),
-      })
+      commit(
+        {
+          speakers: speakers.map((s) => {
+            if (s.id !== id) return s
+            const source = { ...s.source }
+            if (gain <= 0) delete source[ch]
+            else source[ch] = round(clamp(gain, 0, 1), 2)
+            return { ...s, source, role: ROLE_CUSTOM_MANUAL }
+          }),
+        },
+        400,
+        `Karışım:${id}:${ch}`,
+      )
     },
 
     setAuto(id, patch) {
       const { auto } = get()
-      commit({ auto: { ...auto, [id]: { ...(auto[id] ?? { delay: true, gain: true }), ...patch } } })
+      commit({ auto: { ...auto, [id]: { ...(auto[id] ?? { delay: true, gain: true }), ...patch } } }, 400, 'Otomatik')
     },
 
     autoAll() {
       const { speakers } = get()
-      commit({ auto: Object.fromEntries(speakers.map((s) => [s.id, { delay: true, gain: true }])) })
+      commit(
+        { auto: Object.fromEntries(speakers.map((s) => [s.id, { delay: true, gain: true }])) },
+        400,
+        'Tümünü otomatikle',
+      )
     },
 
-    addSpeaker() {
-      const { speakers, devices, room, auto, outputs, lowLatency } = get()
-      const dev = devices.find((d) => d.flow === 'render' && !(lowLatency && d.kind === 'network'))
-      if (!dev) return
-      const usedCh = new Set(speakers.filter((s) => s.outputDeviceId === dev.id).map((s) => s.deviceChannel))
+    addSpeaker(role) {
+      const { speakers, devices, room, auto, outputs, lowLatency, source } = get()
+      const renders = devices.filter(
+        (d) =>
+          d.flow === 'render' &&
+          !(lowLatency && d.kind === 'network') &&
+          !(source.mode === 'loopback' && d.id === source.deviceId) &&
+          !/cable/i.test(d.name),
+      )
+      // Boş kanalı olan ilk cihaz (kullanılan cihazlar önce).
+      const ordered = [
+        ...renders.filter((d) => speakers.some((s) => s.outputDeviceId === d.id)),
+        ...renders.filter((d) => !speakers.some((s) => s.outputDeviceId === d.id)),
+      ]
+      let dev: Device | undefined = ordered[0]
       let ch = 1
-      while (usedCh.has(ch) && ch < dev.channels) ch++
-      const usedLogical = new Set(speakers.flatMap((s) => Object.keys(s.source)))
-      const logical = LOGICAL_CHANNELS.find((c) => !isHeightChannel(c) && !usedLogical.has(c))
+      for (const d of ordered) {
+        const used = new Set(speakers.filter((s) => s.outputDeviceId === d.id).map((s) => s.deviceChannel))
+        const free = Array.from({ length: d.channels }, (_, i) => i + 1).find((c) => !used.has(c))
+        if (free) {
+          dev = d
+          ch = free
+          break
+        }
+      }
+      if (!dev) {
+        get().showToast('Çıkış cihazı bulunamadı.', 4000, { tone: 'error' })
+        return
+      }
       const id = `spk-${Date.now().toString(36)}`
-      const p = clampToRoom({ x: room.listener.x + 1, y: room.listener.y - 1 }, room)
+      const def = role ? roleDef(role) : undefined
+      let src: Speaker['source']
+      if (def) src = { ...def.source }
+      else {
+        const usedLogical = new Set(speakers.flatMap((s) => Object.keys(s.source)))
+        const logical = LOGICAL_CHANNELS.find((c) => !isHeightChannel(c) && !usedLogical.has(c))
+        src = logical ? { [logical]: 1 } : {}
+      }
+      const hasSides = speakers.some((s) => (s.source.SL ?? 0) > 0 || (s.source.SR ?? 0) > 0)
+      const p = def
+        ? standardPosition(def.id, room, hasSides)
+        : clampToRoom({ x: room.listener.x + 1, y: room.listener.y - 1 }, room)
       const sp: Speaker = {
         id,
-        name: `Hoparlör ${speakers.length + 1}`,
+        name: def ? plannedName(def.id) : `Hoparlör ${speakers.length + 1}`,
         outputDeviceId: dev.id,
         deviceChannel: ch,
-        source: logical ? { [logical]: 1 } : {},
+        source: src,
         delayMs: 0,
         gainDb: 0,
         mute: false,
         x: p.x,
         y: p.y,
+        ...(def ? { role: def.id } : {}),
+        ...(def?.elevated ? { elevated: true } : {}),
+        ...(def?.bassReceiver ? { bassReceiver: true } : {}),
       }
-      commit({
-        speakers: [...speakers, sp],
-        auto: { ...auto, [id]: { delay: true, gain: true } },
-        outputs: ensureOutput(outputs, dev.id),
-        selection: id,
-        preset: 'custom',
-      })
+      commit(
+        {
+          speakers: [...speakers, sp],
+          auto: { ...auto, [id]: { delay: true, gain: true } },
+          outputs: ensureOutput(outputs, dev.id),
+          selection: id,
+        },
+        400,
+        'Hoparlör ekle',
+      )
+    },
+
+    duplicateSpeaker(id) {
+      const { speakers, auto, room } = get()
+      const s = speakers.find((v) => v.id === id)
+      if (!s) return
+      const nid = `spk-${Date.now().toString(36)}`
+      const p = clampToRoom({ x: s.x + 0.3, y: s.y + 0.3 }, room)
+      commit(
+        {
+          speakers: [...speakers, { ...s, id: nid, name: `${s.name} kopya`, x: p.x, y: p.y, calibratedAt: undefined }],
+          auto: { ...auto, [nid]: { ...(auto[id] ?? { delay: true, gain: true }) } },
+          selection: nid,
+        },
+        400,
+        'Kopyala',
+      )
     },
 
     removeSpeaker(id) {
       const { speakers, auto, selection } = get()
+      const s = speakers.find((v) => v.id === id)
+      if (!s) return
       const rest = { ...auto }
       delete rest[id]
-      commit({
-        speakers: speakers.filter((s) => s.id !== id),
-        auto: rest,
-        selection: selection === id ? null : selection,
-        preset: 'custom',
-      })
+      commit(
+        { speakers: speakers.filter((v) => v.id !== id), auto: rest, selection: selection === id ? null : selection },
+        400,
+        `Sil: ${s.name}`,
+      )
+      get().showToast(`“${s.name}” silindi.`, 6000, { action: undoAction })
     },
 
     setOutput(deviceId, patch) {
-      commit({ outputs: get().outputs.map((o) => (o.deviceId === deviceId ? { ...o, ...patch } : o)) })
-    },
-    addOutput(deviceId) {
-      commit({ outputs: ensureOutput(get().outputs, deviceId) })
+      commit(
+        { outputs: get().outputs.map((o) => (o.deviceId === deviceId ? { ...o, ...patch } : o)) },
+        400,
+        `Çıkış ayarı:${deviceId}:${Object.keys(patch).join(',')}`,
+      )
     },
 
     setSource(patch) {
@@ -511,17 +836,18 @@ export const useStore = create<State>()((set, get) => {
       const flow = next.mode === 'capture' ? 'capture' : 'render'
       const cur = devices.find((d) => d.id === next.deviceId)
       if (!cur || cur.flow !== flow) {
-        const fallback = devices.find((d) => d.flow === flow && (flow === 'capture' || d.isDefault)) ??
+        const fallback =
+          devices.find((d) => d.flow === flow && (flow === 'capture' || d.isDefault)) ??
           devices.find((d) => d.flow === flow)
         next.deviceId = fallback?.id ?? ''
       }
-      commit({ source: next })
+      commit({ source: next }, 400, 'Kaynak')
     },
-    setUpmix: (upmix) => commit({ upmix }),
+    setUpmix: (upmix) => commit({ upmix }, 400, 'Upmix'),
     setUpmixOptions(patch) {
       const next = normalizeUpmixOptions({ ...get().upmixOptions, ...patch })
       // Seviye kaydırıcıları canlı uygulanır; kayıt sıklığı ses işleme kaydırıcılarıyla aynı.
-      commit({ upmixOptions: next }, 'mode' in patch ? 400 : 150)
+      commit({ upmixOptions: next }, 'mode' in patch ? 400 : 150, `Upmix ayarı:${Object.keys(patch).join(',')}`)
     },
 
     setProcessing(patch) {
@@ -533,26 +859,31 @@ export const useStore = create<State>()((set, get) => {
         preset: patch.preset ?? cur.preset,
       }
       if (changesSound && patch.preset === undefined) next.preset = matchSoundPreset(next)
-      commit({ processing: next }, 150)
+      commit({ processing: next }, 150, `Ses ayarı:${Object.keys(patch).join(',')}`)
     },
 
     applySoundPreset(id) {
       const patch = soundPresetPatch(id)
-      if (patch) commit({ processing: { ...get().processing, ...patch } }, 150)
+      if (patch) commit({ processing: { ...get().processing, ...patch } }, 150, 'Ses ön ayarı')
     },
 
     selectProfile(id) {
       const p = get().profiles.find((v) => v.id === id)
       if (!p) return
-      commit({ ...profilePatch(p), activeProfileId: id }, 150)
+      commit({ ...profilePatch(p), activeProfileId: id }, 150, `Profil: ${p.name}`)
     },
 
     saveCurrentAsProfile(name) {
       const clean = cleanProfileName(name)
       if (!clean) return false
       const { profiles, processing, upmix, upmixOptions } = get()
-      const profile: Profile = { id: newProfileId(), name: clean, builtin: false, ...snapshotState({ processing, upmix, upmixOptions }) }
-      commit({ profiles: [...profiles, profile], activeProfileId: profile.id })
+      const profile: Profile = {
+        id: newProfileId(),
+        name: clean,
+        builtin: false,
+        ...snapshotState({ processing, upmix, upmixOptions }),
+      }
+      commit({ profiles: [...profiles, profile], activeProfileId: profile.id }, 400, 'Profil kaydet')
       return true
     },
 
@@ -560,20 +891,24 @@ export const useStore = create<State>()((set, get) => {
       const { profiles, activeProfileId, processing, upmix, upmixOptions } = get()
       if (!activeProfileId) return
       const snap = snapshotState({ processing, upmix, upmixOptions })
-      commit({ profiles: profiles.map((p) => (p.id === activeProfileId ? { ...p, ...snap } : p)) })
+      commit({ profiles: profiles.map((p) => (p.id === activeProfileId ? { ...p, ...snap } : p)) }, 400, 'Profili güncelle')
     },
 
     renameProfile(id, name) {
       const clean = cleanProfileName(name)
       const { profiles } = get()
       if (!clean || !profiles.some((p) => p.id === id && !p.builtin)) return
-      commit({ profiles: profiles.map((p) => (p.id === id ? { ...p, name: clean } : p)) })
+      commit({ profiles: profiles.map((p) => (p.id === id ? { ...p, name: clean } : p)) }, 400, 'Profil adı')
     },
 
     deleteProfile(id) {
       const { profiles, activeProfileId } = get()
       if (!profiles.some((p) => p.id === id && !p.builtin)) return
-      commit({ profiles: profiles.filter((p) => p.id !== id), activeProfileId: activeProfileId === id ? null : activeProfileId })
+      commit(
+        { profiles: profiles.filter((p) => p.id !== id), activeProfileId: activeProfileId === id ? null : activeProfileId },
+        400,
+        'Profil sil',
+      )
     },
 
     resetBuiltinProfile(id) {
@@ -581,26 +916,70 @@ export const useStore = create<State>()((set, get) => {
       const { profiles, activeProfileId } = get()
       if (!def || !profiles.some((p) => p.id === id)) return
       const next = profiles.map((p) => (p.id === id ? def : p))
-      commit(activeProfileId === id ? { profiles: next, ...profilePatch(def) } : { profiles: next }, 150)
+      commit(
+        activeProfileId === id ? { profiles: next, ...profilePatch(def) } : { profiles: next },
+        150,
+        'Profili sıfırla',
+      )
     },
 
     async playTone(id) {
       const s = get().speakers.find((v) => v.id === id)
       if (!s) return
-      get().showToast(`Test sesi: ${s.name} (kanal ${s.deviceChannel})`)
+      set({ playing: id })
       try {
         await api.playTone(s.outputDeviceId, s.deviceChannel)
+        await new Promise((r) => setTimeout(r, 1500))
       } catch (e) {
-        get().showToast(describeError(e), 6000)
+        get().showToast(describeError(e), 6000, { tone: 'error' })
+      } finally {
+        if (get().playing === id) set({ playing: null })
       }
     },
 
-    showToast(msg, ms = 2200) {
-      set({ toast: msg })
-      setTimeout(() => {
-        if (get().toast === msg) set({ toast: null })
+    exportConfig: () => buildConfig(get()),
+
+    importConfig(raw) {
+      const c = raw as Partial<Config> | null
+      if (!c || typeof c !== 'object' || !Array.isArray(c.speakers) || !c.source || !c.room || !Array.isArray(c.outputs)) {
+        return 'Bu dosya bir Surround yapılandırması değil.'
+      }
+      const auto = Object.fromEntries(c.speakers.map((s) => [s.id, s.auto ?? { delay: true, gain: true }]))
+      const speakers = c.speakers.map(({ auto: _a, ...rest }) => rest)
+      const profiles = normalizeProfiles(c.profiles)
+      commit(
+        {
+          source: c.source,
+          upmix: !!c.upmix,
+          upmixOptions: normalizeUpmixOptions(c.upmixOptions),
+          outputs: c.outputs,
+          speakers,
+          room: c.room,
+          processing: normalizeProcessing(c.processing),
+          profiles,
+          activeProfileId: c.activeProfileId && profiles.some((p) => p.id === c.activeProfileId) ? c.activeProfileId : null,
+          auto,
+          setupDone: true,
+          lastCalibration: c.lastCalibration ?? null,
+          selection: null,
+        },
+        150,
+        'Yedekten geri yükle',
+      )
+      get().showToast(`Yedek yüklendi: ${speakers.length} hoparlör.`, 6000, { action: undoAction })
+      return null
+    },
+
+    showToast(message, ms = 2200, opts = {}) {
+      const id = ++toastSeq
+      set({ toast: { id, message, ...opts } })
+      clearTimeout(toastTimer)
+      toastTimer = setTimeout(() => {
+        if (get().toast?.id === id) set({ toast: null })
       }, ms)
     },
+
+    dismissToast: () => set({ toast: null }),
   }
 })
 

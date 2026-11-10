@@ -6,6 +6,8 @@ import {
   defaultProcessing,
   defaultUpmixOptions,
   type AppSettings,
+  type CalibrationProgress,
+  type CalibrationResult,
   type Config,
   type EngineInfo,
   type Device,
@@ -19,7 +21,23 @@ import { computeAuto, presetLayout, round } from '../lib/geometry'
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 const rand = (a: number, b: number) => a + Math.random() * (b - a)
 
+const query = (k: string) => typeof location !== 'undefined' && new URLSearchParams(location.search).has(k)
+
+/** Önizleme: ?masaustu -> tipik masaüstü kurulumu (iki Realtek çıkışı + VB-Cable + kulaklık mikrofonu). */
+const DESKTOP = query('masaustu')
+
 function buildDevices(): Device[] {
+  if (DESKTOP) {
+    return [
+      { id: 'rt-spk', name: 'Hoparlör (Realtek(R) Audio)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
+      { id: 'rt-2nd', name: 'Realtek HD Audio 2nd output (Realtek(R) Audio)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
+      { id: 'usb-hs', name: 'Kulaklık (USBZH11S-ENC)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
+      { id: 'cable-in', name: 'CABLE Input (VB-Audio Virtual Cable)', kind: 'multichannel', flow: 'render', channels: 8, sampleRate: 48000, isDefault: true },
+      { id: 'cable-16', name: 'CABLE In 16ch (VB-Audio Virtual Cable)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
+      { id: 'usb-mic', name: 'Mikrofon (USBZH11S-ENC)', kind: 'local', flow: 'capture', channels: 1, sampleRate: 48000, isDefault: true },
+      { id: 'cable-out', name: 'CABLE Output (VB-Audio Virtual Cable)', kind: 'multichannel', flow: 'capture', channels: 8, sampleRate: 48000, isDefault: false },
+    ]
+  }
   const devices: Device[] = [
     { id: 'realtek-spk', name: 'Hoparlör (Realtek)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: true },
     { id: 'usb-headset', name: 'Kulaklık (USB)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
@@ -41,6 +59,17 @@ function buildDevices(): Device[] {
 }
 
 function initialConfig(): Config {
+  if (query('bos') || DESKTOP) {
+    return {
+      source: { deviceId: DESKTOP ? 'cable-in' : 'realtek-spk', mode: 'loopback' },
+      upmix: true,
+      upmixOptions: defaultUpmixOptions(),
+      outputs: [],
+      speakers: [],
+      room: { widthM: 4, depthM: 3.5, listener: { x: 2, y: 2 } },
+      processing: defaultProcessing(),
+    }
+  }
   const room = { widthM: 5, depthM: 4.5, listener: { x: 2.5, y: 2.3 } }
   const map: Record<string, { dev: string; ch: number; name: string }> = {
     FL: { dev: 'realtek-spk', ch: 1, name: 'Ön sol' },
@@ -95,6 +124,8 @@ export function createMockApi(): SurroundApi {
   const statusListeners = new Set<(s: SinkStatus[]) => void>()
   const levelListeners = new Set<(l: LevelFrame) => void>()
   const engineListeners = new Set<(i: EngineInfo) => void>()
+  const calibrationListeners = new Set<(p: CalibrationProgress) => void>()
+  let calibrationAbort: (() => void) | null = null
   let startedAt = 0
 
   /** Upmix durumu: 2 kanallı kaynakta hep stereo; çok kanallıda ~6 sn'de bir stereo/yerel arasında gidip gelir. */
@@ -221,6 +252,66 @@ export function createMockApi(): SurroundApi {
     },
     onEngineError() {
       return () => {}
+    },
+    calibrate(req) {
+      // Ölçümü odadaki konumdan taklit eder: varış = mesafe/343 + cihaza özgü gecikme, seviye = mesafe kaybı + cihaz farkı.
+      const speakers = req.speakerIds.map((id) => config.speakers.find((s) => s.id === id))
+      if (speakers.some((s) => !s)) return Promise.reject(new Error('Bilinmeyen hoparlör.'))
+      const ref = config.speakers.find((s) => s.id === (req.referenceSpeakerId ?? req.speakerIds[0]))!
+      const L = config.room.listener
+      const devLat = (id: string) => (id.length * 7) % 11 // cihaz başına sabit, 0..10 ms
+      const devLvl = (id: string) => -((id.length * 5) % 7) // 0..-6 dB
+      const path = (s: Speaker) => Math.hypot(s.x - L.x, s.y - L.y)
+      const arrival = (s: Speaker) => (path(s) / 343) * 1000 + devLat(s.outputDeviceId)
+      const level = (s: Speaker) => -20 * Math.log10(Math.max(0.3, path(s))) + devLvl(s.outputDeviceId)
+      const emit = (p: CalibrationProgress) => calibrationListeners.forEach((cb) => cb(p))
+      const total = speakers.length
+      return new Promise<CalibrationResult>((resolve, reject) => {
+        let step = -2
+        const timer = setInterval(() => {
+          step++
+          if (step === -1) return emit({ phase: 'noise', index: 0, total, message: 'Ortam gürültüsü ölçülüyor…' })
+          if (step < total) {
+            const s = speakers[step]!
+            return emit({ phase: 'measuring', speakerId: s.id, index: step, total, message: `${s.name} ölçülüyor…` })
+          }
+          clearInterval(timer)
+          calibrationAbort = null
+          emit({ phase: 'done', index: total, total, message: 'Bitti.' })
+          resolve({
+            referenceSpeakerId: ref.id,
+            micDeviceId: req.micDeviceId,
+            noiseFloorDb: -62,
+            micClipped: false,
+            speakers: speakers.map((s, i) => {
+              const weak = query('zayif') && i === total - 1
+              return {
+                speakerId: s!.id,
+                ok: !weak,
+                arrivalMs: round(arrival(s!) - arrival(ref) + rand(-0.03, 0.03), 3),
+                levelDb: round(level(s!) - level(ref) + rand(-0.2, 0.2), 2),
+                snrDb: weak ? 8 : round(rand(28, 40), 1),
+                spreadMs: round(rand(0.01, 0.06), 3),
+                lowBand: !!req.lowBandSpeakerIds?.includes(s!.id),
+                ...(weak ? { message: 'Sinyal çok zayıf (SNR 8 dB).' } : {}),
+              }
+            }),
+          })
+        }, 700)
+        emit({ phase: 'preparing', index: 0, total, message: 'Hazırlanıyor…' })
+        calibrationAbort = () => {
+          clearInterval(timer)
+          calibrationAbort = null
+          reject(new Error('Kalibrasyon iptal edildi.'))
+        }
+      })
+    },
+    async cancelCalibration() {
+      calibrationAbort?.()
+    },
+    onCalibration(cb) {
+      calibrationListeners.add(cb)
+      return () => calibrationListeners.delete(cb)
     },
   }
 }

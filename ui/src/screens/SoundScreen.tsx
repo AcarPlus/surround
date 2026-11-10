@@ -4,6 +4,33 @@ import { BigSlider, Button, Card, Chip, ScreenHeader, SectionTitle, Switch, cx }
 import { EqEditor } from '../components/EqEditor'
 import { CUSTOM_ID, CUSTOM_LABEL, SOUND_PRESETS } from '../lib/presets'
 import { fmtSigned } from '../lib/format'
+import { UpmixControls, UpmixStateBadge } from './SourcePanels'
+
+/** Upmix: stereo sesten çevresel kanal üretimi (önceden Kaynak ekranındaydı). */
+function SurroundCard() {
+  const upmix = useStore((s) => s.upmix)
+  const setUpmix = useStore((s) => s.setUpmix)
+  return (
+    <Card className="p-4">
+      <label className="flex items-start justify-between gap-3">
+        <span>
+          <span className="block text-[14px] font-semibold">Stereo sesi çevresel yap (upmix)</span>
+          <span className="mt-0.5 block text-xs text-muted">
+            Stereo içerikten orta, sub ve arka/yan kanallar üretilir. Gerçek 5.1/7.1 ses gelince kendiliğinden yerel kanallara
+            döner.
+          </span>
+        </span>
+        <Switch checked={upmix} onChange={setUpmix} label="Upmix" />
+      </label>
+      <UpmixStateBadge />
+      {upmix && (
+        <div className="max-w-[640px]">
+          <UpmixControls />
+        </div>
+      )}
+    </Card>
+  )
+}
 
 export function SoundScreen() {
   const p = useStore((s) => s.processing)
@@ -16,7 +43,7 @@ export function SoundScreen() {
     <div className="h-full overflow-y-auto p-5">
       <ScreenHeader
         title="Ses"
-        sub="Tüm çıkışlara uygulanan ses işleme: ön ayar seç, istersen ince ayar yap."
+        sub="Çevresel ses ve tüm çıkışlara uygulanan ses işleme. Profil (üst çubuk) bunların hepsini tek tıkla değiştirir."
         right={
           <label className="flex items-center gap-2.5 text-[13px] font-medium">
             Ses işleme
@@ -25,7 +52,9 @@ export function SoundScreen() {
         }
       />
 
-      <div className={cx('space-y-4 transition-opacity', off && 'opacity-50')}>
+      <SurroundCard />
+
+      <div className={cx('mt-4 space-y-4 transition-opacity', off && 'opacity-50')}>
         <Card className="p-4">
           <SectionTitle
             right={

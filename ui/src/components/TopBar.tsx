@@ -1,14 +1,7 @@
-import { useStore, type PresetChoice } from '../store/useStore'
-import { Segmented, Switch, Tip, cx } from './ui'
+import { useStore } from '../store/useStore'
+import { cx } from './ui'
 import { ProfileMenu } from './ProfileMenu'
-import { IconMoon, IconPlay, IconStop, IconSun } from './icons'
-
-const PRESETS: { value: PresetChoice; label: string }[] = [
-  { value: '2.0', label: '2.0' },
-  { value: '5.1', label: '5.1' },
-  { value: '7.1', label: '7.1' },
-  { value: 'custom', label: 'Özel' },
-]
+import { IconMoon, IconPlay, IconRedo, IconStop, IconSun, IconUndo } from './icons'
 
 function StatusPill() {
   const runState = useStore((s) => s.runState)
@@ -34,28 +27,58 @@ function StatusPill() {
     }
   }
   return (
-    <span
-      role="status"
-      className={cx('inline-flex h-7 items-center gap-2 whitespace-nowrap rounded-full border px-3 text-xs font-medium', tone)}
-    >
+    <span role="status" className={cx('inline-flex h-7 items-center gap-2 whitespace-nowrap rounded-full border px-3 text-xs font-medium', tone)}>
       <span className={cx('h-1.5 w-1.5 rounded-full', dot)} />
       {text}
     </span>
   )
 }
 
-export function TopBar() {
+export function RunButton({ big }: { big?: boolean }) {
   const runState = useStore((s) => s.runState)
   const toggleRun = useStore((s) => s.toggleRun)
-  const preset = useStore((s) => s.preset)
-  const setPreset = useStore((s) => s.setPreset)
-  const lowLatency = useStore((s) => s.lowLatency)
-  const setLowLatency = useStore((s) => s.setLowLatency)
-  const theme = useStore((s) => s.theme)
-  const setTheme = useStore((s) => s.setTheme)
-
   const running = runState === 'running'
   const starting = runState === 'starting'
+  return (
+    <button
+      onClick={() => void toggleRun()}
+      disabled={starting}
+      className={cx(
+        'inline-flex items-center justify-center gap-2 rounded-md border font-semibold transition-colors',
+        big ? 'h-12 min-w-[180px] px-6 text-[15px]' : 'h-9 min-w-[124px] px-4 text-sm',
+        running ? 'border-err/60 bg-err/10 text-err hover:bg-err/20' : 'border-accent bg-accent text-accent-fg hover:brightness-110',
+        starting && 'opacity-60',
+      )}
+    >
+      {running ? <IconStop width={big ? 16 : 14} height={big ? 16 : 14} /> : <IconPlay width={big ? 16 : 14} height={big ? 16 : 14} />}
+      {starting ? 'Başlıyor…' : running ? 'Durdur' : 'Başlat'}
+    </button>
+  )
+}
+
+function IconButton({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className="flex h-8 w-8 items-center justify-center rounded border border-line-strong text-muted hover:text-fg disabled:opacity-35 disabled:hover:text-muted"
+    >
+      {children}
+    </button>
+  )
+}
+
+export function TopBar() {
+  const theme = useStore((s) => s.theme)
+  const setTheme = useStore((s) => s.setTheme)
+  const undo = useStore((s) => s.undo)
+  const redo = useStore((s) => s.redo)
+  const past = useStore((s) => s.past)
+  const future = useStore((s) => s.future)
+  const lastUndo = past[past.length - 1]?.label
+  const lastRedo = future[future.length - 1]?.label
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-line bg-surface px-4">
@@ -68,45 +91,23 @@ export function TopBar() {
         <span className="text-[15px] font-semibold tracking-tight">Surround</span>
       </div>
 
-      <button
-        onClick={() => void toggleRun()}
-        disabled={starting}
-        className={cx(
-          'inline-flex h-9 min-w-[124px] items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold transition-colors',
-          running
-            ? 'border-err/60 bg-err/10 text-err hover:bg-err/20'
-            : 'border-accent bg-accent text-accent-fg hover:brightness-110',
-          starting && 'opacity-60',
-        )}
-      >
-        {running ? <IconStop width={14} height={14} /> : <IconPlay width={14} height={14} />}
-        {starting ? 'Başlıyor…' : running ? 'Durdur' : 'Başlat'}
-      </button>
-
+      <RunButton />
       <ProfileMenu />
 
-      <div className="flex items-center gap-2">
-        <span className="hidden text-xs text-faint xl:inline">Düzen</span>
-        <Segmented value={preset} options={PRESETS} onChange={setPreset} />
+      <div className="flex items-center gap-1.5">
+        <IconButton label={lastUndo ? `Geri al: ${lastUndo} (Ctrl+Z)` : 'Geri alınacak değişiklik yok'} onClick={undo} disabled={!lastUndo}>
+          <IconUndo />
+        </IconButton>
+        <IconButton label={lastRedo ? `Yinele: ${lastRedo} (Ctrl+Y)` : 'Yinelenecek değişiklik yok'} onClick={redo} disabled={!lastRedo}>
+          <IconRedo />
+        </IconButton>
       </div>
-
-      <Tip text="Bluetooth/ağ cihazlarını devre dışı bırakır">
-        <label className="flex cursor-pointer items-center gap-2 text-[13px] text-muted">
-          <Switch checked={lowLatency} onChange={setLowLatency} label="Düşük gecikme" />
-          <span className="whitespace-nowrap">Düşük gecikme</span>
-        </label>
-      </Tip>
 
       <div className="ml-auto flex items-center gap-3">
         <StatusPill />
-        <button
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          aria-label={theme === 'dark' ? 'Açık temaya geç' : 'Koyu temaya geç'}
-          title={theme === 'dark' ? 'Açık tema' : 'Koyu tema'}
-          className="flex h-8 w-8 items-center justify-center rounded border border-line-strong text-muted hover:text-fg"
-        >
+        <IconButton label={theme === 'dark' ? 'Açık temaya geç' : 'Koyu temaya geç'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
           {theme === 'dark' ? <IconSun /> : <IconMoon />}
-        </button>
+        </IconButton>
       </div>
     </header>
   )

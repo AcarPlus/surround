@@ -2,12 +2,12 @@ import { useStore } from '../store/useStore'
 import type { Device, DeviceKind, SinkStatus } from '../api/types'
 import { deviceColorVar } from '../lib/colors'
 import { fmt, fmtRate, fmtSigned } from '../lib/format'
-import { Badge, Button, Card, Field, NumberField, ScreenHeader, SectionTitle, cx } from '../components/ui'
-import { IconPlus } from '../components/icons'
+import { Badge, Card, Field, NumberField, SectionTitle, cx } from '../components/ui'
 
 const KIND: Record<DeviceKind, string> = { local: 'Yerel', network: 'Ağ', multichannel: 'Çok kanallı' }
 
-export function DevicesScreen() {
+/** Çıkış cihazları: tampon/gecikme ayarı ve canlı durum (Bağlantı ekranı). */
+export function OutputsPanel() {
   const devices = useStore((s) => s.devices)
   const outputs = useStore((s) => s.outputs)
   const speakers = useStore((s) => s.speakers)
@@ -15,19 +15,17 @@ export function DevicesScreen() {
   const runState = useStore((s) => s.runState)
   const lowLatency = useStore((s) => s.lowLatency)
   const setOutput = useStore((s) => s.setOutput)
-  const addOutput = useStore((s) => s.addOutput)
   const select = useStore((s) => s.select)
   const setScreen = useStore((s) => s.setScreen)
 
   const used = outputs
+    .filter((o) => speakers.some((s) => s.outputDeviceId === o.deviceId))
     .map((o) => ({ out: o, dev: devices.find((d) => d.id === o.deviceId) }))
     .filter((x): x is { out: typeof x.out; dev: Device } => !!x.dev)
-  const unused = devices.filter((d) => d.flow === 'render' && !outputs.some((o) => o.deviceId === d.id))
 
   return (
-    <div className="h-full overflow-y-auto p-5">
-      <ScreenHeader title="Cihazlar" sub="Çıkış cihazlarının tampon ayarları ve canlı durumu." />
-
+    <div>
+      {used.length === 0 && <p className="text-[13px] text-muted">Henüz hoparlör atanmış çıkış cihazı yok.</p>}
       <div className="grid grid-cols-1 gap-4 min-[1100px]:grid-cols-2">
         {used.map(({ out, dev }) => {
           const st = status.find((s) => s.deviceId === dev.id)
@@ -53,7 +51,7 @@ export function DevicesScreen() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Gecikme (latencyMs)">
+                  <Field label="Ek gecikme">
                     <NumberField
                       ariaLabel={`${dev.name} gecikme`}
                       value={out.latencyMs}
@@ -65,7 +63,7 @@ export function DevicesScreen() {
                       onChange={(v) => setOutput(dev.id, { latencyMs: v })}
                     />
                   </Field>
-                  <Field label="Tampon (bufferMs)">
+                  <Field label="Tampon">
                     <NumberField
                       ariaLabel={`${dev.name} tampon`}
                       value={out.bufferMs}
@@ -112,19 +110,6 @@ export function DevicesScreen() {
         })}
       </div>
 
-      {unused.length > 0 && (
-        <div className="mt-6">
-          <SectionTitle>Kullanılmayan çıkış cihazları</SectionTitle>
-          <div className="flex flex-wrap gap-2">
-            {unused.map((d) => (
-              <Button key={d.id} size="sm" onClick={() => addOutput(d.id)}>
-                <IconPlus /> {d.name}
-                <span className="num text-faint">{d.channels}k</span>
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   )
 }

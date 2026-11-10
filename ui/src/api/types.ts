@@ -93,6 +93,8 @@ export interface Speaker {
   role?: string
   /** Üst (tavan/yükseklik) hoparlörü; "Özel (haritadan)" rolünde üst şeritleri seçtirir. Motor yok sayar. */
   elevated?: boolean
+  /** Yalnızca arayüz: gecikme/kazanç mikrofon ölçümünden geldiyse ölçüm zamanı (ISO). Motor yok sayar. */
+  calibratedAt?: string
 }
 
 export type DeviceKind = 'local' | 'network' | 'multichannel'
@@ -278,6 +280,61 @@ export interface Config {
   profiles?: Profile[]
   /** Etkin profilin kimliği; yoksa profil seçili değil. */
   activeProfileId?: string
+  /** Yalnızca arayüz: kurulum sihirbazı tamamlandı mı (ilk açılış ekranı için). */
+  setupDone?: boolean
+  /** Yalnızca arayüz: son kalibrasyon özeti. */
+  lastCalibration?: { at: string; micDeviceId: string; speakers: number }
+}
+
+/* ---------- Mikrofonla kalibrasyon (docs/kalibrasyon.md) ---------- */
+
+export interface CalibrationRequest {
+  /** Kayıt (capture) cihazı; `micLoopback` ise bir çıkış cihazının loopback'i (deneme amaçlı). */
+  micDeviceId: string
+  micLoopback?: boolean
+  speakerIds: string[]
+  /** Zaman ve seviye referansı; yoksa ilk hoparlör. */
+  referenceSpeakerId?: string
+  /** Bas bandında ölçülecek hoparlörler (subwoofer). */
+  lowBandSpeakerIds?: string[]
+  /** Her hoparlör kaç kez ölçülsün (medyan alınır). */
+  repeats?: number
+  /** Süpürme tepe seviyesi, dBFS. */
+  levelDb?: number
+}
+
+export type CalibrationPhase = 'preparing' | 'noise' | 'measuring' | 'analyzing' | 'done'
+
+export interface CalibrationProgress {
+  phase: CalibrationPhase
+  speakerId?: string
+  index: number
+  total: number
+  message: string
+}
+
+export interface SpeakerMeasurement {
+  speakerId: string
+  /** Varış bulundu ve sinyal yeterince güçlü. */
+  ok: boolean
+  /** Referans hoparlöre göre varış (ms); hoparlörün kendi gecikmesi hariç. */
+  arrivalMs: number
+  /** Referansa göre seviye (dB); hoparlörün kendi kazancı hariç. */
+  levelDb: number
+  snrDb: number
+  /** Tekrarlar arası en büyük fark (ms). */
+  spreadMs: number
+  /** Bas bandında ölçüldü (zamanlama daha az güvenilir). */
+  lowBand: boolean
+  message?: string
+}
+
+export interface CalibrationResult {
+  referenceSpeakerId: string
+  micDeviceId: string
+  noiseFloorDb: number
+  micClipped: boolean
+  speakers: SpeakerMeasurement[]
 }
 
 /** Kaynak kanal seviyeleri, dBFS (-90 .. 0). Eski motorlarda üst şeritler eksik olabilir; okurken `?? -90` kullan. */

@@ -1,12 +1,22 @@
 import type { SurroundApi } from './client'
-import { defaultAppSettings, type AppSettings, type Config, type Device, type EngineInfo, type LevelFrame, type SinkStatus } from './types'
+import {
+  defaultAppSettings,
+  type AppSettings,
+  type CalibrationProgress,
+  type CalibrationResult,
+  type Config,
+  type Device,
+  type EngineInfo,
+  type LevelFrame,
+  type SinkStatus,
+} from './types'
 
 /**
  * WebView2 köprüsü: `window.chrome.webview` üzerinden C# tarafıyla (Surround.App/Bridge) JSON-RPC.
  *
  *   JS -> C#: { id, method, params: unknown[] }
  *   C# -> JS: { id, result } | { id, error: { message, errors? } }
- *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError', data }
+ *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'calibration', data }
  */
 
 interface WebViewHost {
@@ -42,6 +52,7 @@ export function createBridgeApi(): SurroundApi {
   const levelListeners = new Set<(l: LevelFrame) => void>()
   const errorListeners = new Set<(m: string) => void>()
   const engineListeners = new Set<(i: EngineInfo) => void>()
+  const calibrationListeners = new Set<(p: CalibrationProgress) => void>()
   let nextId = 1
 
   host.addEventListener('message', (e) => {
@@ -67,6 +78,9 @@ export function createBridgeApi(): SurroundApi {
           break
         case 'engineError':
           errorListeners.forEach((cb) => cb(String(msg.data)))
+          break
+        case 'calibration':
+          calibrationListeners.forEach((cb) => cb(msg.data as CalibrationProgress))
           break
       }
       return
@@ -114,5 +128,8 @@ export function createBridgeApi(): SurroundApi {
     onLevels: (cb) => subscribe(levelListeners, cb),
     onEngine: (cb) => subscribe(engineListeners, cb),
     onEngineError: (cb) => subscribe(errorListeners, cb),
+    calibrate: (request) => call<CalibrationResult>('calibrate', request),
+    cancelCalibration: () => call<void>('cancelCalibration'),
+    onCalibration: (cb) => subscribe(calibrationListeners, cb),
   }
 }

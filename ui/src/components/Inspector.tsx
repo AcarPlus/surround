@@ -1,14 +1,7 @@
 import { useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import { CHANNEL_LABELS, HEIGHT_CHANNELS, LOGICAL_CHANNELS, flatEq, type Speaker } from '../api/types'
 import { EqEditor } from './EqEditor'
-import {
-  CUSTOM_ID,
-  CUSTOM_LABEL,
-  SPEAKER_PRESETS,
-  speakerPresetPatch,
-  speakerPresetValue,
-} from '../lib/presets'
+import { CUSTOM_ID, CUSTOM_LABEL, SPEAKER_PRESETS, speakerPresetPatch, speakerPresetValue } from '../lib/presets'
 import { LISTENER_ID, selectSpeaker, useStore } from '../store/useStore'
 import { computeAuto } from '../lib/geometry'
 import {
@@ -22,25 +15,16 @@ import {
 } from '../lib/roles'
 import { deviceColorVar } from '../lib/colors'
 import { fmt } from '../lib/format'
-import { Badge, Button, Field, NumberField, SectionTitle, Select, Switch, cx } from './ui'
-import { IconTrash, IconVolume, IconWarn } from './icons'
+import { Badge, Button, Field, NumberField, SectionTitle, Segmented, Select, Switch, cx } from './ui'
+import { IconCopy, IconTrash, IconVolume, IconWarn } from './icons'
 
 export function Inspector() {
   const selection = useStore((s) => s.selection)
   return (
     <aside className="w-[300px] shrink-0 overflow-y-auto border-l border-line bg-surface">
-      <AnimatePresence mode="wait" initial={false}>
-        <motion.div
-          key={selection ?? 'none'}
-          initial={{ opacity: 0, x: 6 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.12 }}
-          className="p-4"
-        >
-          {selection === LISTENER_ID ? <ListenerPanel /> : selection ? <SpeakerPanel /> : <EmptyPanel />}
-        </motion.div>
-      </AnimatePresence>
+      <div key={selection ?? 'none'} className="screen-in p-4">
+        {selection === LISTENER_ID ? <ListenerPanel /> : selection ? <SpeakerPanel /> : <EmptyPanel />}
+      </div>
     </aside>
   )
 }
@@ -59,8 +43,8 @@ function EmptyPanel() {
         <KV k="Dinleyici" v={`${fmt(room.listener.x)}, ${fmt(room.listener.y)}`} />
       </dl>
       <p className="text-[13px] leading-relaxed text-muted">
-        Ayarlarını görmek için odada bir hoparlör seç. Sürükleyerek taşıyabilir, ok tuşlarıyla 5 cm
-        kaydırabilir, Delete ile silebilirsin.
+        Ayarlarını görmek için odada bir hoparlör seç. Sürükleyerek taşıyabilir, ok tuşlarıyla 5 cm kaydırabilir, Delete
+        ile silebilirsin. Her değişiklik Ctrl+Z ile geri alınır.
       </p>
     </div>
   )
@@ -77,10 +61,22 @@ function ListenerPanel() {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="X (m)">
-          <NumberField value={room.listener.x} min={0} max={room.widthM} step={0.05} onChange={(v) => move(v, room.listener.y)} />
+          <NumberField
+            value={room.listener.x}
+            min={0}
+            max={room.widthM}
+            step={0.05}
+            onChange={(v) => move(v, room.listener.y)}
+          />
         </Field>
         <Field label="Y (m)">
-          <NumberField value={room.listener.y} min={0} max={room.depthM} step={0.05} onChange={(v) => move(room.listener.x, v)} />
+          <NumberField
+            value={room.listener.y}
+            min={0}
+            max={room.depthM}
+            step={0.05}
+            onChange={(v) => move(room.listener.x, v)}
+          />
         </Field>
       </div>
     </div>
@@ -99,8 +95,10 @@ function SpeakerPanel() {
   const setRole = useStore((s) => s.setRole)
   const setAuto = useStore((s) => s.setAuto)
   const removeSpeaker = useStore((s) => s.removeSpeaker)
+  const duplicateSpeaker = useStore((s) => s.duplicateSpeaker)
   const playTone = useStore((s) => s.playTone)
-  const [playing, setPlaying] = useState(false)
+  const playing = useStore((s) => s.playing === s.selection)
+  const [tab, setTab] = useState<'general' | 'sound' | 'advanced'>('general')
 
   if (!sp) return null
   const dev = devices.find((d) => d.id === sp.outputDeviceId)
@@ -114,11 +112,7 @@ function SpeakerPanel() {
     (o) => o.id !== sp.id && o.outputDeviceId === sp.outputDeviceId && o.deviceChannel === sp.deviceChannel,
   )
 
-  const test = async () => {
-    setPlaying(true)
-    await playTone(sp.id)
-    setPlaying(false)
-  }
+  const test = () => void playTone(sp.id)
 
   return (
     <div className="space-y-5">
@@ -143,7 +137,18 @@ function SpeakerPanel() {
         </div>
       </div>
 
-      <RoleSection sp={sp} onRole={(r) => setRole(sp.id, r)} />
+      <Segmented
+        size="sm"
+        value={tab}
+        onChange={setTab}
+        options={[
+          { value: 'general', label: 'Genel' },
+          { value: 'sound', label: 'Ses' },
+          { value: 'advanced', label: 'Gelişmiş' },
+        ]}
+      />
+
+      {tab === 'general' && <RoleSection sp={sp} onRole={(r) => setRole(sp.id, r)} />}
 
       {disabled && (
         <div className="flex gap-2 rounded border border-warn/40 bg-warn/10 p-2 text-xs text-warn">
@@ -152,138 +157,158 @@ function SpeakerPanel() {
         </div>
       )}
 
-      <section>
-        <SectionTitle>Çıkış</SectionTitle>
-        <div className="space-y-3">
-          <Field label="Cihaz">
-            <Select
-              ariaLabel="Çıkış cihazı"
-              value={sp.outputDeviceId}
-              onChange={(v) => {
-                const nd = devices.find((x) => x.id === v)
-                updateSpeaker(sp.id, {
-                  outputDeviceId: v,
-                  deviceChannel: Math.min(sp.deviceChannel, nd?.channels ?? 1),
-                })
-              }}
-            >
-              {renders.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name} ({r.channels} kn)
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Cihaz kanalı" hint={clash ? 'Başka hoparlörle çakışıyor' : undefined}>
-            <Select
-              ariaLabel="Cihaz kanalı"
-              value={sp.deviceChannel}
-              onChange={(v) => updateSpeaker(sp.id, { deviceChannel: Number(v) })}
-              className={cx(clash && 'border-warn')}
-            >
-              {Array.from({ length: dev?.channels ?? 2 }, (_, i) => (
-                <option key={i} value={i + 1}>
-                  Kanal {i + 1}
-                </option>
-              ))}
-            </Select>
-          </Field>
-        </div>
-      </section>
-
-      <section>
-        <SectionTitle>Kanal karışımı</SectionTitle>
-        {fromMap && (
-          <p className="mb-2 text-xs text-faint">
-            Konumdan hesaplanıyor: dinleyiciye göre <span className="num">{fmt(angleFromListener(sp, room.listener), 0)}°</span>
-            {sp.elevated ? ', üst şeritler' : ''}. Elle değiştirmek için rolü “{CUSTOM_MANUAL_LABEL}” yap.
-          </p>
-        )}
-        <div className="space-y-1">
-          {LOGICAL_CHANNELS.map((ch) => {
-            const v = sp.source[ch] ?? 0
-            const first = ch === HEIGHT_CHANNELS[0]
-            return (
-              <div key={ch} className={cx('flex items-center gap-2', first && 'mt-2 border-t border-line pt-2')}>
-                <span
-                  title={CHANNEL_LABELS[ch]}
-                  className={cx('num w-8 text-xs', v > 0 ? 'text-fg' : 'text-faint')}
-                >
-                  {ch}
-                </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={v}
-                  disabled={fromMap}
-                  aria-label={`${ch} kazancı`}
-                  style={{ ['--fill' as string]: `${v * 100}%` }}
-                  onChange={(e) => setMix(sp.id, ch, Number(e.target.value))}
-                />
-                <NumberField
-                  ariaLabel={`${ch} değeri`}
-                  className="w-[58px]"
-                  value={v}
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  disabled={fromMap}
-                  onChange={(n) => setMix(sp.id, ch, n)}
-                />
-              </div>
-            )
-          })}
-        </div>
-      </section>
-
-      <EqBassSection sp={sp} />
-
-      <section>
-        <SectionTitle
-          right={<Badge tone={a.delay && a.gain ? 'accent' : 'neutral'}>{a.delay && a.gain ? 'Otomatik' : 'Elle'}</Badge>}
-        >
-          Zamanlama ve seviye
-        </SectionTitle>
-        <div className="space-y-3">
-          <AutoRow
-            label="Gecikme"
-            auto={a.delay}
-            onAuto={(v) => setAuto(sp.id, { delay: v })}
-            value={sp.delayMs}
-            unit="ms"
-            min={0}
-            max={500}
-            step={0.1}
-            onChange={(v) => updateSpeaker(sp.id, { delayMs: v })}
-          />
-          <AutoRow
-            label="Kazanç"
-            auto={a.gain}
-            onAuto={(v) => setAuto(sp.id, { gain: v })}
-            value={sp.gainDb}
-            unit="dB"
-            min={-60}
-            max={12}
-            step={0.5}
-            decimals={1}
-            onChange={(v) => updateSpeaker(sp.id, { gainDb: v })}
-          />
-          <p className="text-xs text-faint">
-            Otomatik: en uzak hoparlör <span className="num">{fmt(dMax)} m</span> referans alınır;
-            gecikme = (dMax − d) / 343 m/s, kazanç = 20·log₁₀(d / dMax).
-          </p>
-          <label className="flex items-center justify-between pt-1 text-[13px]">
+      {tab === 'general' && (
+        <section>
+          <SectionTitle>Çıkış</SectionTitle>
+          <div className="space-y-3">
+            <Field label="Cihaz">
+              <Select
+                ariaLabel="Çıkış cihazı"
+                value={sp.outputDeviceId}
+                onChange={(v) => {
+                  const nd = devices.find((x) => x.id === v)
+                  updateSpeaker(sp.id, {
+                    outputDeviceId: v,
+                    deviceChannel: Math.min(sp.deviceChannel, nd?.channels ?? 1),
+                  })
+                }}
+              >
+                {renders.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} ({r.channels} kn)
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Cihaz kanalı" hint={clash ? 'Başka hoparlörle çakışıyor' : undefined}>
+              <Select
+                ariaLabel="Cihaz kanalı"
+                value={sp.deviceChannel}
+                onChange={(v) => updateSpeaker(sp.id, { deviceChannel: Number(v) })}
+                className={cx(clash && 'border-warn')}
+              >
+                {Array.from({ length: dev?.channels ?? 2 }, (_, i) => (
+                  <option key={i} value={i + 1}>
+                    Kanal {i + 1}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <label className="mt-3 flex items-center justify-between text-[13px]">
             Sessize al
             <Switch checked={sp.mute} onChange={(v) => updateSpeaker(sp.id, { mute: v })} label="Sessize al" />
           </label>
-        </div>
-      </section>
+        </section>
+      )}
+
+      {tab === 'sound' && <EqBassSection sp={sp} />}
+
+      {tab === 'advanced' && (
+        <section>
+          <SectionTitle>Kanal karışımı</SectionTitle>
+          {fromMap && (
+            <p className="mb-2 text-xs text-faint">
+              Konumdan hesaplanıyor: dinleyiciye göre{' '}
+              <span className="num">{fmt(angleFromListener(sp, room.listener), 0)}°</span>
+              {sp.elevated ? ', üst şeritler' : ''}. Elle değiştirmek için rolü “{CUSTOM_MANUAL_LABEL}” yap.
+            </p>
+          )}
+          <div className="space-y-1">
+            {LOGICAL_CHANNELS.map((ch) => {
+              const v = sp.source[ch] ?? 0
+              const first = ch === HEIGHT_CHANNELS[0]
+              return (
+                <div key={ch} className={cx('flex items-center gap-2', first && 'mt-2 border-t border-line pt-2')}>
+                  <span title={CHANNEL_LABELS[ch]} className={cx('num w-8 text-xs', v > 0 ? 'text-fg' : 'text-faint')}>
+                    {ch}
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={v}
+                    disabled={fromMap}
+                    aria-label={`${ch} kazancı`}
+                    style={{ ['--fill' as string]: `${v * 100}%` }}
+                    onChange={(e) => setMix(sp.id, ch, Number(e.target.value))}
+                  />
+                  <NumberField
+                    ariaLabel={`${ch} değeri`}
+                    className="w-[58px]"
+                    value={v}
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    disabled={fromMap}
+                    onChange={(n) => setMix(sp.id, ch, n)}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
+      {tab === 'advanced' && (
+        <section>
+          <SectionTitle
+            right={
+              sp.calibratedAt && !a.delay ? (
+                <Badge tone="ok" className="whitespace-nowrap">
+                  Ölçüldü · {new Date(sp.calibratedAt).toLocaleDateString('tr-TR')}
+                </Badge>
+              ) : (
+                <Badge tone={a.delay && a.gain ? 'accent' : 'neutral'}>
+                  {a.delay && a.gain ? 'Mesafeden' : 'Elle'}
+                </Badge>
+              )
+            }
+          >
+            Zamanlama ve seviye
+          </SectionTitle>
+          <div className="space-y-3">
+            <AutoRow
+              label="Gecikme"
+              auto={a.delay}
+              onAuto={(v) => {
+                setAuto(sp.id, { delay: v })
+                if (v && sp.calibratedAt) updateSpeaker(sp.id, { calibratedAt: undefined })
+              }}
+              value={sp.delayMs}
+              unit="ms"
+              min={0}
+              max={500}
+              step={0.1}
+              onChange={(v) => updateSpeaker(sp.id, { delayMs: v })}
+            />
+            <AutoRow
+              label="Kazanç"
+              auto={a.gain}
+              onAuto={(v) => setAuto(sp.id, { gain: v })}
+              value={sp.gainDb}
+              unit="dB"
+              min={-60}
+              max={12}
+              step={0.5}
+              decimals={1}
+              onChange={(v) => updateSpeaker(sp.id, { gainDb: v })}
+            />
+            <p className="text-xs text-faint">
+              Otomatik: en uzak hoparlör <span className="num">{fmt(dMax)} m</span> referans alınır; gecikme = (dMax −
+              d) / 343 m/s, kazanç = 20·log₁₀(d / dMax). Kalibrasyon bunları ölçerek değiştirir.
+            </p>
+          </div>
+        </section>
+      )}
 
       <div className="flex gap-2 border-t border-line pt-4">
         <Button className="flex-1" onClick={test} disabled={playing}>
           <IconVolume /> {playing ? 'Çalıyor…' : 'Test sesi'}
+        </Button>
+        <Button onClick={() => duplicateSpeaker(sp.id)} aria-label="Hoparlörü kopyala" title="Kopyala">
+          <IconCopy />
         </Button>
         <Button variant="danger" onClick={() => removeSpeaker(sp.id)} aria-label="Hoparlörü sil" title="Sil (Delete)">
           <IconTrash /> Sil
@@ -321,7 +346,11 @@ function RoleSection({ sp, onRole }: { sp: Speaker; onRole: (role: string) => vo
       {role === ROLE_CUSTOM_MAP && (
         <label className="mt-2.5 flex items-center justify-between gap-3 text-[13px]">
           Üst hoparlör (tavan / yükseklik)
-          <Switch checked={!!sp.elevated} onChange={(v) => updateSpeaker(sp.id, { elevated: v || undefined })} label="Üst hoparlör" />
+          <Switch
+            checked={!!sp.elevated}
+            onChange={(v) => updateSpeaker(sp.id, { elevated: v || undefined })}
+            label="Üst hoparlör"
+          />
         </label>
       )}
     </section>
@@ -383,7 +412,12 @@ function EqBassSection({ sp }: { sp: Speaker }) {
           <Select
             ariaLabel="Küçük hoparlör bas kesme"
             value={hp}
-            onChange={(v) => updateSpeaker(sp.id, { highPassHz: Number(v) || undefined, ...(Number(v) ? { bassReceiver: undefined } : {}) })}
+            onChange={(v) =>
+              updateSpeaker(sp.id, {
+                highPassHz: Number(v) || undefined,
+                ...(Number(v) ? { bassReceiver: undefined } : {}),
+              })
+            }
           >
             <option value={0}>Kapalı</option>
             {hp > 0 && !HIGH_PASS_OPTIONS.includes(hp) && <option value={hp}>{hp} Hz</option>}
@@ -400,7 +434,9 @@ function EqBassSection({ sp }: { sp: Speaker }) {
             Bas alıcısı (dahili sub / subwoofer)
             <Switch
               checked={!!sp.bassReceiver}
-              onChange={(v) => updateSpeaker(sp.id, { bassReceiver: v || undefined, ...(v ? { highPassHz: undefined } : {}) })}
+              onChange={(v) =>
+                updateSpeaker(sp.id, { bassReceiver: v || undefined, ...(v ? { highPassHz: undefined } : {}) })
+              }
               label="Bas alıcısı"
             />
           </label>

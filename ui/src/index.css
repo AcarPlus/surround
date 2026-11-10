@@ -139,6 +139,41 @@ svg text {
   user-select: none;
 }
 
+/* Ekran geçişi */
+@keyframes screen-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.screen-in {
+  animation: screen-in 120ms ease-out;
+}
+
+/* Test sesi çalan hoparlörün halkası */
+@keyframes ping {
+  from {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+.ping {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ping 1s ease-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ping {
+    animation: none;
+  }
+}
+
 /* Büyük kaydırıcı (Ses ekranı) */
 input[type='range'].big-range {
   height: 24px;

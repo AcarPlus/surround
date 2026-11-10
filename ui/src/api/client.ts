@@ -1,4 +1,14 @@
-import type { AppSettings, Config, Device, EngineInfo, LevelFrame, SinkStatus } from './types'
+import type {
+  AppSettings,
+  CalibrationProgress,
+  CalibrationRequest,
+  CalibrationResult,
+  Config,
+  Device,
+  EngineInfo,
+  LevelFrame,
+  SinkStatus,
+} from './types'
 import { createMockApi } from './mock'
 import { createBridgeApi, hasBridge } from './bridge'
 
@@ -28,6 +38,13 @@ export interface SurroundApi {
   onEngine(cb: (info: EngineInfo) => void): () => void
   /** Çalışma sırasında motorun bildirdiği hatalar (yakalama/oynatma akışı kopması vb.). */
   onEngineError(cb: (message: string) => void): () => void
+  /**
+   * Mikrofonla ölçüm (docs/kalibrasyon.md). Uzun sürer; motor çalışıyorsa backend durdurup sonra yeniden başlatır.
+   * İptal edilirse "Kalibrasyon iptal edildi." ile reddeder.
+   */
+  calibrate(request: CalibrationRequest): Promise<CalibrationResult>
+  cancelCalibration(): Promise<void>
+  onCalibration(cb: (p: CalibrationProgress) => void): () => void
 }
 
 export const api: SurroundApi = hasBridge() ? createBridgeApi() : createMockApi()
