@@ -5,8 +5,8 @@ import { describeError, useStore } from '../store/useStore'
 import { calibrationPatches, computeCalibration, isSubwoofer, msToMeters, type LevelTarget } from '../lib/calibration'
 import { fmt, fmtSigned } from '../lib/format'
 import { RoomCanvas } from '../components/RoomCanvas'
-import { Badge, Button, Card, Field, ScreenHeader, SectionTitle, Segmented, Select, Switch, cx } from '../components/ui'
-import { IconCheck, IconMic, IconWarn } from '../components/icons'
+import { Badge, Button, Card, Field, NumberField, ScreenHeader, SectionTitle, Segmented, Select, Switch, cx } from '../components/ui'
+import { IconCheck, IconMic, IconVolume, IconWarn } from '../components/icons'
 
 type Phase = 'setup' | 'running' | 'result'
 
@@ -245,6 +245,7 @@ export function CalibrationScreen() {
                 <p className="mt-2 text-xs text-muted">Ses motoru ölçüm sırasında durdurulur, sonra yeniden başlatılır.</p>
               )}
             </Card>
+            <EarLevelCard />
           </div>
         </div>
       )}
@@ -393,6 +394,59 @@ export function CalibrationScreen() {
         </div>
       )}
     </div>
+  )
+}
+
+/** Mikrofon yoksa ya da ölçüm güvenilmezse: her hoparlörü çalıp kazancını kulakla ayarla. */
+function EarLevelCard() {
+  const speakers = useStore((s) => s.speakers)
+  const auto = useStore((s) => s.auto)
+  const playing = useStore((s) => s.playing)
+  const playTone = useStore((s) => s.playTone)
+  const updateSpeaker = useStore((s) => s.updateSpeaker)
+  const setAuto = useStore((s) => s.setAuto)
+  const [open, setOpen] = useState(false)
+  return (
+    <Card className="p-4">
+      <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => setOpen((v) => !v)}>
+        <span>
+          <span className="block text-[13px] font-semibold">Mikrofon yok mu? Kulakla eşitle</span>
+          <span className="block text-xs text-muted">Her hoparlörü çal, hepsi aynı yükseklikte duyulana kadar kazancı ayarla.</span>
+        </span>
+        <span className="text-muted">{open ? '▾' : '▸'}</span>
+      </button>
+      {open && (
+        <ul className="mt-3 space-y-1.5">
+          {speakers.map((s) => (
+            <li key={s.id} className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void playTone(s.id)}
+                className={cx('rounded p-1 text-muted hover:text-fg', playing === s.id && 'text-accent')}
+                aria-label={`${s.name} test sesi`}
+              >
+                <IconVolume />
+              </button>
+              <span className="min-w-0 flex-1 truncate text-[13px]">{s.name}</span>
+              <NumberField
+                ariaLabel={`${s.name} kazanç`}
+                className="w-[92px]"
+                value={s.gainDb}
+                min={-30}
+                max={6}
+                step={0.5}
+                decimals={1}
+                unit="dB"
+                onChange={(v) => {
+                  if (auto[s.id]?.gain !== false) setAuto(s.id, { gain: false })
+                  updateSpeaker(s.id, { gainDb: v })
+                }}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
   )
 }
 

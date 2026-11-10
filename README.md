@@ -5,7 +5,8 @@ istenen kanallarına dağıtan çok hoparlörlü surround motoru. Hoparlör baş
 ayrı cihazlar arasındaki saat kayması (drift) yeniden örnekleme ile telafi edilir.
 
 Durum: ses motoru + komut satırı + testler + masaüstü uygulaması (WPF/WebView2 kabuğu, Velopack kurulum paketi).
-Gecikme değerleri şimdilik elle girilir.
+Kurulum sihirbazı hoparlörleri "hangi cihaza ne bağlı" sorusuyla tanıtır; gecikme ve seviye mesafeden hesaplanır ya da
+mikrofonla ölçülür (Kalibrasyon). Ekranlar ve arayüz davranışı: `docs/arayuz.md`.
 
 ## Masaüstü uygulaması
 
@@ -37,7 +38,7 @@ Uygulama tek kopya çalışır: ikinci kez açılırsa var olan pencere öne gel
 (`Program.cs` içinde Velopack `UpdateManager` için işaretli bir TODO var).
 
 İlk açılışta kaynak, varsayılan oynatma cihazının loopback'i olur; hoparlör yoktur (geri besleme koruması yüzünden).
-Hoparlörleri arayüzden ekleyin.
+Hoparlör yoksa kurulum sihirbazı kendiliğinden açılır.
 
 ### Geliştirme modu
 
