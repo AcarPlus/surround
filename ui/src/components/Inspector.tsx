@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CHANNEL_LABELS, HEIGHT_CHANNELS, LOGICAL_CHANNELS, flatEq, type Speaker } from '../api/types'
+import { CHANNEL_LABELS, HEIGHT_CHANNELS, LOGICAL_CHANNELS, flatEq, isHighLatencyKind, type Speaker } from '../api/types'
 import { EqEditor } from './EqEditor'
 import { CUSTOM_ID, CUSTOM_LABEL, SPEAKER_PRESETS, speakerPresetPatch, speakerPresetValue } from '../lib/presets'
 import { LISTENER_ID, selectSpeaker, useStore } from '../store/useStore'
@@ -106,7 +106,7 @@ function SpeakerPanel() {
   const a = auto[sp.id] ?? { delay: true, gain: true }
   const { dMax, byId } = computeAuto(speakers, room.listener)
   const d = byId[sp.id]?.distance ?? 0
-  const disabled = lowLatency && dev?.kind === 'network'
+  const disabled = lowLatency && isHighLatencyKind(dev?.kind)
   const fromMap = sp.role === ROLE_CUSTOM_MAP
   const clash = speakers.some(
     (o) => o.id !== sp.id && o.outputDeviceId === sp.outputDeviceId && o.deviceChannel === sp.deviceChannel,

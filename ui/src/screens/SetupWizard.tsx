@@ -60,7 +60,7 @@ export function SetupWizard() {
   const outside = useMemo(() => outsideSpeakers(speakers, candidates), [speakers, candidates])
   const apply = () =>
     applySetup(
-      buildSpeakers(plan, speakers, outputs, room, { prevPlan: previousPlan(devices, speakers), keep: outside }),
+      buildSpeakers(plan, speakers, outputs, room, { prevPlan: previousPlan(devices, speakers), keep: outside, devices }),
     )
   // Sihirbaz kapanınca başlattığı "sırayla çal" da dursun.
   useEffect(() => () => useStore.getState().stopTour(), [])
@@ -336,6 +336,12 @@ function DeviceKitCard({ device, kit, onChange }: { device: Device; kit: DeviceK
             <p className="num text-xs text-muted">
               {device.channels} kanal{device.isDefault ? ' · Windows varsayılanı' : ''}
             </p>
+            {device.kind === 'bluetooth' && (
+              <p className="mt-1.5 text-xs text-muted">
+                <Badge tone="warn">Bluetooth</Badge> ~150–250 ms gecikme; kalibrasyon ölçer ve diğer hoparlörleri ona göre bekletir.
+                {device.handsFree && ' Hands-Free (HFP) uç noktası: düşük kalite, mono.'}
+              </p>
+            )}
           </div>
           <div className="flex shrink-0 gap-1.5">
             {device.channels >= 2 ? (

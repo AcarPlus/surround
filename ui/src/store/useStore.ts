@@ -20,6 +20,7 @@ import {
   type UpmixOptions,
   defaultUpmixOptions,
   normalizeUpmixOptions,
+  isHighLatencyKind,
 } from '../api/types'
 import { clamp, clampToRoom, computeAuto, round } from '../lib/geometry'
 import { assignExisting, layoutSlots, type LayoutSpec } from '../lib/layout'
@@ -368,7 +369,7 @@ export const useStore = create<State>()((set, get) => {
     s.devices.filter(
       (d) =>
         d.flow === 'render' &&
-        !(s.lowLatency && d.kind === 'network') &&
+        !(s.lowLatency && isHighLatencyKind(d.kind)) &&
         !(s.source.mode === 'loopback' && d.id === s.source.deviceId) &&
         !/cable/i.test(d.name),
     )

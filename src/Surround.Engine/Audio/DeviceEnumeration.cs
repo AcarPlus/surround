@@ -3,7 +3,31 @@ using Surround.Engine.Config;
 
 namespace Surround.Engine.Audio;
 
-public sealed record DeviceInfo(string Id, string Name, DeviceFlow Flow, string State, int SampleRate, int Channels, bool IsDefault);
+public sealed record DeviceInfo(string Id, string Name, DeviceFlow Flow, string State, int SampleRate, int Channels, bool IsDefault,
+    bool Bluetooth = false, bool HandsFree = false);
+
+/// <summary>Bluetooth uç noktası sınıflandırması (saf mantık; birim testlenir).</summary>
+public static class DeviceClassifier
+{
+    /// <summary>
+    /// Bluetooth mu / Hands-Free (HFP, düşük kalite mono) mu? Önce numaralandırıcı adı (BTHENUM, BTHLEDevice, BTHHFENUM),
+    /// yoksa ad sezgisi (Bluetooth, Hands-Free, AG Audio).
+    /// </summary>
+    public static (bool Bluetooth, bool HandsFree) Classify(string? enumeratorName, string? friendlyName)
+    {
+        var en = enumeratorName ?? "";
+        var name = friendlyName ?? "";
+        bool hands = name.Contains("Hands-Free", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Handsfree", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Hands Free", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("AG Audio", StringComparison.OrdinalIgnoreCase)
+            || en.Equals("BTHHFENUM", StringComparison.OrdinalIgnoreCase);
+        bool bt = en.StartsWith("BTH", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Bluetooth", StringComparison.OrdinalIgnoreCase)
+            || hands;
+        return (bt, bt && hands);
+    }
+}
 
 public static class DeviceEnumeration
 {
@@ -42,9 +66,18 @@ public static class DeviceEnumeration
             }
             catch { /* device busy or exclusive-only */ }
         }
+        string? enumerator = null;
+        try
+        {
+            // PKEY_Device_EnumeratorName {a45c254e-df1c-4efd-8020-67d146a850e0},24
+            var key = new PropertyKey(new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), 24);
+            if (dev.Properties.Contains(key)) enumerator = dev.Properties[key].Value as string;
+        }
+        catch { /* property store unavailable */ }
+        var (bt, hf) = DeviceClassifier.Classify(enumerator, dev.FriendlyName);
         return new DeviceInfo(dev.ID, dev.FriendlyName,
             dev.DataFlow == DataFlow.Render ? DeviceFlow.Render : DeviceFlow.Capture,
-            dev.State.ToString(), rate, ch, defaultId != null && dev.ID == defaultId);
+            dev.State.ToString(), rate, ch, defaultId != null && dev.ID == defaultId, bt, hf);
     }
 }
 

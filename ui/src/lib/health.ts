@@ -1,4 +1,4 @@
-import type { Device, LogicalChannel, Processing, SinkStatus, Source, Speaker, UpmixOptions } from '../api/types'
+import { isHighLatencyKind, type Device, type LogicalChannel, type Processing, type SinkStatus, type Source, type Speaker, type UpmixOptions } from '../api/types'
 import { ROLE_SUB, effectiveRole } from './roles'
 
 /**
@@ -130,12 +130,12 @@ export function checkHealth(h: HealthInput): HealthItem[] {
         fix: { id: 'select-speaker', label: 'Hoparlörü aç', arg: s.id },
       })
     }
-    if (h.lowLatency && d?.kind === 'network') {
+    if (h.lowLatency && isHighLatencyKind(d?.kind)) {
       items.push({
         id: `lowlat-${s.id}`,
         level: 'info',
         title: `${s.name} devre dışı`,
-        detail: 'Düşük gecikme modunda ağ cihazları çalmaz.',
+        detail: 'Düşük gecikme modunda ağ ve Bluetooth cihazları çalmaz.',
       })
     }
   }
@@ -243,6 +243,30 @@ export function checkHealth(h: HealthInput): HealthItem[] {
         })
       }
     }
+  }
+
+  const btDevs = [...new Set(active.map((s) => s.outputDeviceId))]
+    .map((id) => devices.find((d) => d.id === id))
+    .filter((d): d is Device => !!d && d.kind === 'bluetooth')
+  for (const d of btDevs) {
+    if (d.handsFree) {
+      items.push({
+        id: `bt-hfp-${d.id}`,
+        level: 'warn',
+        title: `${d.name}: Hands-Free uç noktası`,
+        detail: 'Bluetooth Hands-Free (HFP) profili düşük kalitelidir ve mono çalar. Müzik için Stereo / A2DP uç noktasını seç.',
+        fix: { id: 'open-setup', label: 'Cihazı değiştir' },
+      })
+    }
+  }
+  if (btDevs.length > 0 && !h.calibrated) {
+    items.push({
+      id: 'bt-latency',
+      level: 'info',
+      title: 'Bluetooth hoparlör gecikmesi ölçülmeli',
+      detail: 'Bluetooth cihazlar ~150–250 ms gecikir. Kalibrasyon bunu ölçer ve diğer hoparlörleri ona göre bekletir.',
+      fix: { id: 'open-calibration', label: 'Kalibre et' },
+    })
   }
 
   if (!h.calibrated && speakers.some((s) => effectiveRole(s) !== ROLE_SUB) && speakers.length >= 2) {

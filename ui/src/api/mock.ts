@@ -31,6 +31,7 @@ function buildDevices(): Device[] {
     return [
       { id: 'rt-spk', name: 'Hoparlör (Realtek(R) Audio)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
       { id: 'rt-2nd', name: 'Realtek HD Audio 2nd output (Realtek(R) Audio)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
+      { id: 'bt-pill', name: 'Beats Pill (Bluetooth)', kind: 'bluetooth', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
       { id: 'usb-hs', name: 'Kulaklık (USBZH11S-ENC)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
       { id: 'cable-in', name: 'CABLE Input (VB-Audio Virtual Cable)', kind: 'multichannel', flow: 'render', channels: 8, sampleRate: 48000, isDefault: true },
       { id: 'cable-16', name: 'CABLE In 16ch (VB-Audio Virtual Cable)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
@@ -150,7 +151,7 @@ export function createMockApi(): SurroundApi {
     return config.outputs.map((o) => {
       const dev = devices.find((d) => d.id === o.deviceId)
       const c = counters.get(o.deviceId) ?? { under: 0, over: 0 }
-      const isNet = dev?.kind === 'network'
+      const isNet = dev?.kind === 'network' || dev?.kind === 'bluetooth'
       // Ağ cihazı arada bir tampon kaçırır.
       if (isNet && Math.random() < 0.04) c.under += 1
       if (Math.random() < 0.01) c.over += 1

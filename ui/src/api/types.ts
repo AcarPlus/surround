@@ -97,7 +97,13 @@ export interface Speaker {
   calibratedAt?: string
 }
 
-export type DeviceKind = 'local' | 'network' | 'multichannel'
+export type DeviceKind = 'local' | 'network' | 'multichannel' | 'bluetooth'
+
+/** Yüksek gecikmeli (ağ / Bluetooth) cihaz: düşük gecikme modunda çalmaz. */
+export const isHighLatencyKind = (k: DeviceKind | undefined): boolean => k === 'network' || k === 'bluetooth'
+
+/** Bluetooth çıkışlar için varsayılan tampon (ms). */
+export const BLUETOOTH_BUFFER_MS = 150
 export type DeviceFlow = 'render' | 'capture'
 
 export interface Device {
@@ -108,6 +114,8 @@ export interface Device {
   channels: number
   sampleRate: number
   isDefault: boolean
+  /** Bluetooth Hands-Free (HFP) uç noktası: düşük kalite, mono. */
+  handsFree?: boolean
 }
 
 export interface SinkStatus {

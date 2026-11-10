@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { isHighLatencyKind } from '../api/types'
 import { useStore, LISTENER_ID } from '../store/useStore'
 import { computeAuto, primaryChannel } from '../lib/geometry'
 import { effectiveRole, roleLabel } from '../lib/roles'
@@ -205,7 +206,7 @@ export function RoomCanvas({
         {speakers.map((s) => {
           const color = deviceColorVar(s.outputDeviceId, devices)
           const dev = devices.find((d) => d.id === s.outputDeviceId)
-          const disabled = (lowLatency && dev?.kind === 'network') || !dev
+          const disabled = (lowLatency && isHighLatencyKind(dev?.kind)) || !dev
           const ch = primaryChannel(s.source)
           const sel = selection === s.id
           const isPlaying = playing === s.id

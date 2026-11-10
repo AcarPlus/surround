@@ -1,4 +1,4 @@
-import type { Device, Output, Point, Room, Speaker } from '../api/types'
+import { BLUETOOTH_BUFFER_MS, type Device, type Output, type Point, type Room, type Speaker } from '../api/types'
 import { clamp, clampToRoom, polarToPoint, round } from './geometry'
 import { ROLE_SUB, effectiveRole, roleDef, roleLabel } from './roles'
 import { speakerPresetPatch } from './presets'
@@ -298,6 +298,8 @@ export interface BuildOptions {
   prevPlan?: PlannedSpeaker[]
   /** Olduğu gibi sona eklenecek hoparlörler (bkz. `outsideSpeakers`). */
   keep?: Speaker[]
+  /** Cihaz listesi: Bluetooth çıkışların yeni Output kaydı daha büyük tamponla açılır. */
+  devices?: Device[]
 }
 
 /**
@@ -388,7 +390,11 @@ export function buildSpeakers(
   })
   const all = [...speakers, ...keep]
   const used = [...new Set(all.map((s) => s.outputDeviceId))]
-  const outs = used.map((id) => outputs.find((o) => o.deviceId === id) ?? { deviceId: id, latencyMs: 0, bufferMs: 40 })
+  const outs = used.map((id) => outputs.find((o) => o.deviceId === id) ?? {
+      deviceId: id,
+      latencyMs: 0,
+      bufferMs: opts.devices?.find((d) => d.id === id)?.kind === 'bluetooth' ? BLUETOOTH_BUFFER_MS : 40,
+    })
   return { speakers: all, outputs: outs, createdIds }
 }
 

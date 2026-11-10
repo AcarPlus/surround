@@ -33,8 +33,13 @@ düğmeler ve silme/düzen/kurulum/kalibrasyon bildirimlerindeki "Geri al". Meti
 Saf fonksiyon; seviyeler hata / uyarı / bilgi. Örnekler: hoparlör yok, kaynak cihaz yok ya da VB-Cable değil, VB-Cable
 stereo ayarlı, hoparlörün cihazı bağlı değil / kanal yok / kaynak cihaza çıkıyor (geri besleme), aynı kanala iki hoparlör,
 bas kesiliyor ama bas alıcısı yok, tek taraflı surround (bir yanda arka/yan yok → o yanın ortam sesi önde kalır), ön çift eksik,
-stereo kaynakta upmix kapalı, sessizdeki hoparlörler, çalışırken kesinti (tamponu büyüt), kalibrasyon yapılmadı. Düzeltme
+stereo kaynakta upmix kapalı, sessizdeki hoparlörler, çalışırken kesinti (tamponu büyüt), kalibrasyon yapılmadı, Bluetooth hoparlör (gecikmesi ölçülmeli; Hands-Free uç noktası uyarısı). Düzeltme
 düğmeleri `fixHealth` eylemine bağlanır. Gezinmedeki Ana sayfa simgesi hata/uyarı sayısını gösterir.
+
+## Bluetooth hoparlörler
+`kind: "bluetooth"` cihazlar (Beats Pill vb.) sihirbazda "Bluetooth" rozeti ve gecikme notuyla görünür (~150–250 ms; kalibrasyon
+ölçer, diğer hoparlörleri ona göre bekletir). Sihirbaz yeni Bluetooth çıkışını `bufferMs: 150` ile açar. Düşük gecikme modu
+Bluetooth'u ağ cihazı gibi devre dışı bırakır. Hands-Free (HFP) uç noktası düşük kalite/mono olduğu için uyarı üretir.
 
 ## Arayüze özgü config alanları (motor yok sayar)
 `speakers[].calibratedAt` (ISO; değerler ölçümden geldi), `setupDone`, `lastCalibration: { at, micDeviceId, speakers }`.

@@ -1,10 +1,10 @@
 import { useStore } from '../store/useStore'
-import type { Device, DeviceKind, SinkStatus } from '../api/types'
+import { isHighLatencyKind, type Device, type DeviceKind, type SinkStatus } from '../api/types'
 import { deviceColorVar } from '../lib/colors'
 import { fmt, fmtRate, fmtSigned } from '../lib/format'
 import { Badge, Card, Field, NumberField, SectionTitle, cx } from '../components/ui'
 
-const KIND: Record<DeviceKind, string> = { local: 'Yerel', network: 'Ağ', multichannel: 'Çok kanallı' }
+const KIND: Record<DeviceKind, string> = { local: 'Yerel', network: 'Ağ', multichannel: 'Çok kanallı', bluetooth: 'Bluetooth' }
 
 /** Çıkış cihazları: tampon/gecikme ayarı ve canlı durum (Bağlantı ekranı). */
 export function OutputsPanel() {
@@ -30,7 +30,7 @@ export function OutputsPanel() {
         {used.map(({ out, dev }) => {
           const st = status.find((s) => s.deviceId === dev.id)
           const users = speakers.filter((s) => s.outputDeviceId === dev.id)
-          const off = lowLatency && dev.kind === 'network'
+          const off = lowLatency && isHighLatencyKind(dev.kind)
           return (
             <Card key={dev.id} className={cx('overflow-hidden', off && 'opacity-60')}>
               <div className="flex h-1" style={{ background: deviceColorVar(dev.id, devices) }} />
@@ -44,7 +44,7 @@ export function OutputsPanel() {
                   </div>
                   <div className="flex shrink-0 gap-1">
                     {off && <Badge tone="warn">Devre dışı</Badge>}
-                    <Badge tone={dev.kind === 'network' ? 'warn' : dev.kind === 'multichannel' ? 'accent' : 'neutral'}>
+                    <Badge tone={isHighLatencyKind(dev.kind) ? 'warn' : dev.kind === 'multichannel' ? 'accent' : 'neutral'}>
                       {KIND[dev.kind]}
                     </Badge>
                   </div>

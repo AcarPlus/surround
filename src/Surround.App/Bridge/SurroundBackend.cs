@@ -6,7 +6,7 @@ using Surround.Engine.Config;
 
 namespace Surround.Desktop.Bridge;
 
-public sealed record DeviceDto(string Id, string Name, string Kind, string Flow, int Channels, int SampleRate, bool IsDefault);
+public sealed record DeviceDto(string Id, string Name, string Kind, string Flow, int Channels, int SampleRate, bool IsDefault, bool HandsFree = false);
 
 /// <summary>The SurroundApi (ui/src/api/client.ts) implemented against the real engine. Transport-agnostic.</summary>
 public sealed class SurroundBackend : IDisposable
@@ -79,9 +79,9 @@ public sealed class SurroundBackend : IDisposable
         return DeviceEnumeration.List(includeInactive: false)
             .Select(d => new DeviceDto(
                 d.Id, d.Name,
-                d.Channels > 2 ? "multichannel" : "local", // network devices are not supported yet
+                d.Bluetooth ? "bluetooth" : d.Channels > 2 ? "multichannel" : "local", // "network" reserved
                 d.Flow == DeviceFlow.Render ? "render" : "capture",
-                d.Channels, d.SampleRate, d.IsDefault))
+                d.Channels, d.SampleRate, d.IsDefault, d.HandsFree))
             .ToList();
     }
 

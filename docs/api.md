@@ -20,7 +20,7 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 ## Arayüz
 | Metot | Açıklama |
 |---|---|
-| `listDevices()` | Çıkış (`render`) ve giriş (`capture`) cihazları |
+| `listDevices()` | Çıkış (`render`) ve giriş (`capture`) cihazları: `{ id, name, kind, flow, channels, sampleRate, isDefault, handsFree }`. `kind`: `multichannel` (>2 kanal), `local`, `bluetooth` (uç nokta numaralandırıcısı `BTH*` ya da ad sezgisi; `handsFree` = Hands-Free/HFP uç noktası, düşük kalite mono), `network` (ayrılmış, henüz üretilmez) |
 | `getConfig()` / `saveConfig(cfg)` | Tüm yapılandırma. Arayüz değişiklikten ~400 ms sonra ve Başlat'ta kaydeder |
 | `start()` / `stop()` | Motoru çalıştır / durdur |
 | `getStatus()` | Çıkış başına `SinkStatus[]` (çalışmıyorsa boş) |
