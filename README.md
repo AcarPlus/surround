@@ -6,7 +6,7 @@ ayrı cihazlar arasındaki saat kayması (drift) yeniden örnekleme ile telafi e
 
 Durum: ses motoru + komut satırı + testler + masaüstü uygulaması (WPF/WebView2 kabuğu, Velopack kurulum paketi).
 Kurulum sihirbazı hoparlörleri "hangi cihaza ne bağlı" sorusuyla tanıtır; gecikme ve seviye mesafeden hesaplanır ya da
-mikrofonla ölçülür (Kalibrasyon). Ekranlar ve arayüz davranışı: `docs/arayuz.md`.
+mikrofonla ölçülür (Kalibrasyon, bkz. docs/kalibrasyon.md). Ekranlar ve arayüz davranışı: `docs/arayuz.md`.
 
 ## Masaüstü uygulaması
 
@@ -77,12 +77,15 @@ dotnet run --project src/Surround.Cli -- devices [--all]
 dotnet run --project src/Surround.Cli -- validate --config config.json
 dotnet run --project src/Surround.Cli -- run --config config.json
 dotnet run --project src/Surround.Cli -- tone --device <id> --channel <n> [--seconds 2]
+dotnet run -c Release --project src/Surround.Cli -- calibrate --config config.json --mic <id> [--mic-loopback] [--speakers id1,id2] [--ref id] [--repeats 2] [--level -20] [--low-band id]
 dotnet test
 ```
 
 - `devices`: cihazları, kimliklerini, formatlarını listeler; varsayılanı işaretler.
 - `tone`: cihazın tek kanalında 440 Hz sinüs çalar (hoparlörleri kulakla tanımak için).
 - `run`: motoru başlatır, her saniye durum yazar, Ctrl+C ile temiz kapanır.
+- `calibrate`: hoparlörleri mikrofonla ölçer (motor çalışmıyorken), göreli varış (ms) ve seviye (dB) tablosu yazar.
+  Hoparlörler `id` (yoksa ad) ile seçilir; varsayılan hepsi. `--mic-loopback`: mikrofon yerine bir çıkış cihazının loopback'i (test).
 
 Örnek yapılandırma: `config.example.json` (cihaz kimlikleri yer tutucudur; kendi kimliklerinizi `devices` ile alın).
 
@@ -96,6 +99,6 @@ dotnet test
 
 ## Bilinen sınırlar
 
-- Gecikme ölçümü (mikrofonla kalibrasyon) yok; Faz 3.
+- Mikrofon kalibrasyonu ölçer ama değerleri kendisi yazmaz; arayüz uygular. Ayrıntı ve sınırlar: docs/kalibrasyon.md.
 - Paylaşımlı modda WASAPI kullanılır; toplam gecikme yaklaşık bufferMs + 30 ms + sürücü.
 - Loopback modunda sessizlikte paket gelmediği için kaynak cihaza sessiz bir oynatma akışı açılır.

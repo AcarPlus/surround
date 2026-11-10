@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using Surround.Engine;
 using Surround.Engine.Audio;
+using Surround.Engine.Calibration;
 using Surround.Engine.Config;
 
 Console.OutputEncoding = Encoding.UTF8;
@@ -14,7 +15,8 @@ if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
 try
 {
     bool all = args.Contains("--all");
-    var opts = ParseOptions(args.Skip(1).Where(a => a != "--all").ToArray());
+    bool micLoopback = args.Contains("--mic-loopback");
+    var opts = ParseOptions(args.Skip(1).Where(a => a is not "--all" and not "--mic-loopback").ToArray());
     switch (args[0].ToLowerInvariant())
     {
         case "devices": return CmdDevices(all);
@@ -24,6 +26,7 @@ try
             return CmdProbe(Require(opts, "device"),
                 opts.TryGetValue("seconds", out var ps) ? double.Parse(ps, System.Globalization.CultureInfo.InvariantCulture) : 5,
                 opts.TryGetValue("buffer", out var pb) ? int.Parse(pb) : 20);
+        case "calibrate": return CmdCalibrate(Require(opts, "config"), Require(opts, "mic"), micLoopback, opts);
         case "tone":
             return CmdTone(Require(opts, "device"), int.Parse(Require(opts, "channel")),
                 opts.TryGetValue("seconds", out var sec) ? double.Parse(sec, System.Globalization.CultureInfo.InvariantCulture) : 2);
@@ -45,7 +48,7 @@ catch (FormatException)
 }
 catch (Exception ex)
 {
-    Console.Error.WriteLine($"Hata: {ex.Message}");
+    Console.Error.WriteLine(Environment.GetEnvironmentVariable("SURROUND_TRACE") is null ? $"Hata: {ex.Message}" : ex.ToString());
     return 2;
 }
 
@@ -58,6 +61,10 @@ static void PrintUsage()
           surround run --config <yol>               Motoru çalıştır (Ctrl+C ile durdur)
           surround tone --device <id> --channel <n> [--seconds 2]
                                                     Cihazın tek kanalında 440 Hz test sesi
+          surround calibrate --config <yol> --mic <id> [--mic-loopback] [--speakers id1,id2] [--ref id]
+                             [--repeats 2] [--level -20] [--low-band id,...]
+                                                    Mikrofonla hoparlör gecikme/seviye ölçümü
+                                                    (--mic-loopback: mikrofon yerine bir çıkış cihazının loopback'i)
         """);
 }
 
@@ -147,6 +154,52 @@ static int CmdRun(string path)
         engine?.Dispose();
         Console.WriteLine("Durduruldu.");
     }
+}
+
+static int CmdCalibrate(string path, string mic, bool micLoopback, Dictionary<string, string> o)
+{
+    var cfg = SurroundConfig.Load(path);
+    static List<string> Ids(string v) => v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    var ids = o.TryGetValue("speakers", out var sp) ? Ids(sp)
+        : cfg.Speakers.Select(s => CalibrationRunner.IdOf(s) ?? s.Name).ToList();
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    var req = new CalibrationRequest(mic, ids,
+        o.TryGetValue("ref", out var r) ? r : null, micLoopback,
+        o.TryGetValue("repeats", out var rep) ? int.Parse(rep, inv) : 2,
+        o.TryGetValue("level", out var lv) ? double.Parse(lv, inv) : -20,
+        o.TryGetValue("low-band", out var lb) ? Ids(lb) : null);
+
+    using var cts = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+    string? lastPhase = null;
+    CalibrationResult res;
+    try
+    {
+        res = CalibrationRunner.Run(cfg, req, p =>
+        {
+            if (p.Phase == CalibrationPhase.Analyzing && lastPhase == CalibrationPhase.Analyzing) return;
+            lastPhase = p.Phase;
+            Console.WriteLine($"[{p.Phase}] {p.Message}");
+        }, cts.Token, msg => Console.WriteLine(msg));
+    }
+    catch (OperationCanceledException)
+    {
+        Console.Error.WriteLine("Kalibrasyon iptal edildi.");
+        return 1;
+    }
+
+    var names = new Dictionary<string, string>();
+    foreach (var s in cfg.Speakers) names.TryAdd(CalibrationRunner.IdOf(s) ?? s.Name, s.Name);
+    Console.WriteLine();
+    Console.WriteLine($"Referans: {res.ReferenceSpeakerId}   gürültü tabanı {res.NoiseFloorDb:0.0} dBFS{(res.MicClipped ? "   MİKROFON KIRPILDI" : "")}");
+    Console.WriteLine($"{"Hoparlör",-24} {"tamam",5} {"varış ms",9} {"seviye dB",9} {"SNR dB",7} {"fark ms",8} {"bas",4}  not");
+    foreach (var s in res.Speakers)
+    {
+        string name = names.TryGetValue(s.SpeakerId, out var nm) ? nm : s.SpeakerId;
+        Console.WriteLine(string.Create(inv,
+            $"{name,-24} {(s.Ok ? "evet" : "HAYIR"),5} {s.ArrivalMs,9:0.000} {s.LevelDb,9:0.00} {s.SnrDb,7:0.0} {s.SpreadMs,8:0.000} {(s.LowBand ? "evet" : ""),4}  {s.Message}"));
+    }
+    return res.Speakers.All(s => s.Ok) ? 0 : 3;
 }
 
 static int CmdTone(string deviceId, int channel, double seconds)

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Surround.Engine;
 using Surround.Engine.Audio;
+using Surround.Engine.Calibration;
 using Surround.Engine.Config;
 
 namespace Surround.Desktop.Bridge;
@@ -16,6 +17,7 @@ public sealed class SurroundBackend : IDisposable
     private readonly EngineHost _host = new();
     private readonly SemaphoreSlim _gate = new(1, 1);
     private CancellationTokenSource? _toneCts;
+    private CancellationTokenSource? _calCts;
     private string? _runningFingerprint;
     private readonly AppSettingsStore _settings;
     private readonly DefaultDeviceGuard _guard;
@@ -30,6 +32,8 @@ public sealed class SurroundBackend : IDisposable
     public event Action<bool>? RunningChanged;
     /// <summary>Raised after <c>saveAppSettings</c>, on a worker thread.</summary>
     public event Action<AppSettings>? SettingsChanged;
+    /// <summary>Calibration progress (<c>calibrate</c>), on a worker thread.</summary>
+    public event Action<CalibrationProgress>? CalibrationProgress;
 
     public SurroundBackend(ConfigStore? store = null, AppSettingsStore? settings = null, DefaultDeviceGuard? guard = null)
     {
@@ -57,6 +61,8 @@ public sealed class SurroundBackend : IDisposable
             case "getStatus": return _host.LastStatus;
             case "playTone": return await Task.Run(() => PlayTone(Arg(args, 0).GetString() ?? "", Arg(args, 1).GetInt32()));
             case "openSoundPanel": OpenSoundPanel(); return null;
+            case "calibrate": return await CalibrateAsync(Arg(args, 0));
+            case "cancelCalibration": Volatile.Read(ref _calCts)?.Cancel(); return null;
             default: throw new BridgeException($"Bilinmeyen yöntem: {method}");
         }
     }
@@ -176,6 +182,96 @@ public sealed class SurroundBackend : IDisposable
         finally { _gate.Release(); }
     }
 
+    // ---- calibration ----
+
+    /// <summary>
+    /// Measures the speakers with a microphone (see docs/kalibrasyon.md). A running engine is stopped for the
+    /// measurement and restarted afterwards; the default-device guard stays engaged meanwhile, so other applications'
+    /// sound keeps going to the (unread) source instead of disturbing the measurement.
+    /// </summary>
+    private async Task<CalibrationResult> CalibrateAsync(JsonElement doc)
+    {
+        var req = ParseCalibration(doc);
+        var cts = new CancellationTokenSource();
+        if (Interlocked.CompareExchange(ref _calCts, cts, null) != null) throw new BridgeException("Kalibrasyon zaten sürüyor.");
+        try
+        {
+            await _gate.WaitAsync(cts.Token);
+            try
+            {
+                var cfg = _store.Load();
+                bool wasRunning = _host.IsRunning;
+                if (wasRunning)
+                {
+                    await _host.StopAsync();
+                    _runningFingerprint = null;
+                    RunningChanged?.Invoke(false);
+                }
+                try
+                {
+                    return await Task.Run(() => CalibrationRunner.Run(cfg, req, p => CalibrationProgress?.Invoke(p), cts.Token));
+                }
+                catch (OperationCanceledException) { throw new BridgeException("Kalibrasyon iptal edildi."); }
+                catch (ArgumentException ex) { throw new BridgeException(ex.Message); }
+                catch (BridgeException) { throw; }
+                catch (Exception ex) { throw new BridgeException($"Kalibrasyon başarısız: {ex.Message}"); }
+                finally
+                {
+                    if (wasRunning) await ResumeAfterCalibrationAsync(cfg);
+                }
+            }
+            finally { _gate.Release(); }
+        }
+        catch (OperationCanceledException) { throw new BridgeException("Kalibrasyon iptal edildi."); }
+        finally
+        {
+            Interlocked.CompareExchange(ref _calCts, null, cts);
+        }
+    }
+
+    /// <summary>Restarts the engine stopped for calibration; on failure gives the user their default output back.</summary>
+    private async Task ResumeAfterCalibrationAsync(SurroundConfig cfg)
+    {
+        try
+        {
+            await _host.StartAsync(cfg);
+            _runningFingerprint = cfg.EngineFingerprint();
+            RunningChanged?.Invoke(true);
+        }
+        catch (Exception ex)
+        {
+            RunningChanged?.Invoke(false);
+            _host.ReportError($"Kalibrasyondan sonra motor yeniden başlatılamadı: {ex.Message}");
+            await Task.Run(_guard.Restore);
+        }
+    }
+
+    private static CalibrationRequest ParseCalibration(JsonElement doc)
+    {
+        if (doc.ValueKind != JsonValueKind.Object) throw new BridgeException("Kalibrasyon isteği bir nesne olmalı.");
+        static JsonElement? Get(JsonElement o, string name) =>
+            o.TryGetProperty(name, out var v) && v.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined) ? v : null;
+        static List<string>? Strings(JsonElement o, string name)
+        {
+            if (Get(o, name) is not { } v) return null;
+            if (v.ValueKind != JsonValueKind.Array || v.EnumerateArray().Any(x => x.ValueKind != JsonValueKind.String))
+                throw new BridgeException($"'{name}' metin dizisi olmalı.");
+            return v.EnumerateArray().Select(x => x.GetString()!).ToList();
+        }
+        static double? Number(JsonElement o, string name) => Get(o, name) is { } v
+            ? v.ValueKind == JsonValueKind.Number ? v.GetDouble() : throw new BridgeException($"'{name}' sayı olmalı.")
+            : null;
+
+        string mic = Get(doc, "micDeviceId") is { ValueKind: JsonValueKind.String } m ? m.GetString()! : "";
+        if (string.IsNullOrWhiteSpace(mic)) throw new BridgeException("Mikrofon seçilmedi.");
+        var speakers = Strings(doc, "speakerIds");
+        if (speakers is null || speakers.Count == 0) throw new BridgeException("Kalibre edilecek hoparlör seçilmedi.");
+        string? reference = Get(doc, "referenceSpeakerId") is { ValueKind: JsonValueKind.String } r ? r.GetString() : null;
+        bool loopback = Flag(doc, "micLoopback", false);
+        return new CalibrationRequest(mic, speakers, reference, loopback,
+            (int)Math.Round(Number(doc, "repeats") ?? 2), Number(doc, "levelDb") ?? -20, Strings(doc, "lowBandSpeakerIds"));
+    }
+
     // ---- default output device ----
 
     /// <summary>Makes the loopback source the Windows default (if enabled); COM failures are logged, never thrown.</summary>
@@ -279,6 +375,7 @@ public sealed class SurroundBackend : IDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         Interlocked.Exchange(ref _toneCts, null)?.Cancel();
+        Volatile.Read(ref _calCts)?.Cancel();
         _host.Dispose(); // stops the engine
         _guard.Restore(); // app exit / session end: give the user their default output back
     }

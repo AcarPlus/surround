@@ -16,18 +16,26 @@ public sealed class DriftResamplingReader
     private bool _primed;
     private long _underruns, _overruns;
     private double _fillMs;
+    private long _consumed;
 
-    public DriftResamplingReader(RingBuffer ring, int channels, double srcRate, double devRate, double targetMs)
+    /// <param name="controller">Optional drift controller (e.g. a slow one for calibration); default gains otherwise.</param>
+    public DriftResamplingReader(RingBuffer ring, int channels, double srcRate, double devRate, double targetMs, DriftController? controller = null)
     {
         _ring = ring; _ch = channels; _srcRate = srcRate; _devRate = devRate; _targetMs = targetMs;
         // Adaptive jitter buffer: each underrun grows the target (independent source/sink clocks such as
         // VB-Cable vs. a sound card occasionally drain a tight ring), capped so latency stays bounded.
         _maxTargetMs = Math.Max(3 * targetMs, 150);
-        _ctl = new DriftController(targetMs);
+        _ctl = controller ?? new DriftController(targetMs);
         _res = new HermiteResampler(channels);
     }
 
     public double FillMs => Volatile.Read(ref _fillMs);
+
+    /// <summary>
+    /// Diagnostics/calibration: called at the end of every <see cref="Render"/> (on the device thread) with the total
+    /// number of source frames consumed so far. Null in normal playback.
+    /// </summary>
+    public Action<long>? RenderObserver { get; set; }
     public double TargetMs => Volatile.Read(ref _targetMs);
     public double CorrectionPpm => _ctl.Correction * 1e6;
     public long Underruns => Interlocked.Read(ref _underruns);
@@ -44,7 +52,7 @@ public sealed class DriftResamplingReader
 
         if (!_primed)
         {
-            if (fillMs < _targetMs) { output.Clear(); return; }
+            if (fillMs < _targetMs) { output.Clear(); RenderObserver?.Invoke(_consumed); return; }
             _primed = true;
             _ctl.Reset();
         }
@@ -52,6 +60,7 @@ public sealed class DriftResamplingReader
         {
             int targetFrames = (int)(_targetMs * _srcRate / 1000.0);
             _ring.Skip((fillFrames - targetFrames) * ch);
+            _consumed += fillFrames - targetFrames;
             Interlocked.Increment(ref _overruns);
             _ctl.Reset();
             fillFrames = _ring.Count / ch;
@@ -68,6 +77,7 @@ public sealed class DriftResamplingReader
         int got = _ring.Peek(_in.AsSpan(0, need * ch)) / ch;
         int produced = _res.Process(_in, got, output, frames, ratio, out int consumed);
         _ring.Skip(consumed * ch);
+        _consumed += consumed;
 
         if (produced < frames)
         {
@@ -77,5 +87,6 @@ public sealed class DriftResamplingReader
             Volatile.Write(ref _targetMs, Math.Min(_targetMs * 1.25 + 5, _maxTargetMs));
             _ctl.TargetMs = _targetMs;
         }
+        RenderObserver?.Invoke(_consumed);
     }
 }
