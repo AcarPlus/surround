@@ -34,6 +34,10 @@ public sealed partial class SurroundBackend : IDisposable
     public event Action<AppSettings>? SettingsChanged;
     /// <summary>Calibration progress (<c>calibrate</c>), on a worker thread.</summary>
     public event Action<CalibrationProgress>? CalibrationProgress;
+    /// <summary>Raised after every config save (page or tray), on a worker thread.</summary>
+    public event Action<SurroundConfig>? ConfigSaved;
+    /// <summary>A profile was applied from the tray (not by the page), on a worker thread.</summary>
+    public event Action<string>? ProfileApplied;
 
     public SurroundBackend(ConfigStore? store = null, AppSettingsStore? settings = null, DefaultDeviceGuard? guard = null)
     {
@@ -103,11 +107,49 @@ public sealed partial class SurroundBackend : IDisposable
         try { cfg = SurroundConfig.Parse(doc.GetRawText()); }
         catch (JsonException ex) { throw new BridgeException($"Yapılandırma okunamadı: {ex.Message}"); }
 
+        return await SaveCoreAsync(cfg, profileId: null);
+    }
+
+    /// <summary>
+    /// Tray menu: applies a stored sound profile (<see cref="ProfileCatalog.Apply"/>) to the saved config and, when
+    /// the engine runs, to the live sound. Returns false for an unknown profile. The page hears of it via <see cref="ProfileApplied"/>.
+    /// </summary>
+    public async Task<bool> ApplyProfileAsync(string id)
+    {
+        bool applied = false;
+        try { await SaveCoreAsync(null, id, ok => applied = ok); }
+        finally
+        {
+            // Saved even when applying to the live sound failed: the page must still follow the stored config.
+            if (applied) ProfileApplied?.Invoke(id);
+        }
+        return applied;
+    }
+
+    /// <summary>The profiles and the selected one, as stored (for the tray menu).</summary>
+    public (List<ProfileEntry> Profiles, string? ActiveId) GetProfiles()
+    {
+        var cfg = _store.Load();
+        return (ProfileCatalog.List(cfg), ProfileCatalog.ActiveId(cfg));
+    }
+
+    private async Task<object?> SaveCoreAsync(SurroundConfig? cfg, string? profileId, Action<bool>? onApplied = null)
+    {
         await _gate.WaitAsync();
         try
         {
+            if (profileId is not null)
+            {
+                // Under the gate so a concurrent page save cannot slip in between load and save.
+                cfg = _store.Load();
+                bool ok = ProfileCatalog.Apply(cfg, profileId);
+                onApplied?.Invoke(ok);
+                if (!ok) return null;
+            }
             // Always persist: the UI edits continuously and the document is a draft until started.
+            if (cfg is null) return null;
             _store.Save(cfg);
+            ConfigSaved?.Invoke(cfg);
             // Waiting for devices: the restart uses this config, so its device list may have changed (e.g. a speaker removed).
             if (_recovery.State == RecoveryState.Waiting) SignalRecovery();
 

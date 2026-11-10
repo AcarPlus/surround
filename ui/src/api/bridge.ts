@@ -17,7 +17,7 @@ import {
  *
  *   JS -> C#: { id, method, params: unknown[] }
  *   C# -> JS: { id, result } | { id, error: { message, errors? } }
- *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'engineState' | 'calibration', data }
+ *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'engineState' | 'calibration' | 'profileApplied', data }
  */
 
 interface WebViewHost {
@@ -62,6 +62,7 @@ export function createBridgeApi(): SurroundApi {
   const engineListeners = new Set<(i: EngineInfo) => void>()
   const stateListeners = new Set<(s: EngineState) => void>()
   const calibrationListeners = new Set<(p: CalibrationProgress) => void>()
+  const profileListeners = new Set<(id: string) => void>()
   let nextId = 1
 
   host.addEventListener('message', (e) => {
@@ -96,6 +97,11 @@ export function createBridgeApi(): SurroundApi {
         case 'calibration':
           calibrationListeners.forEach((cb) => cb(msg.data as CalibrationProgress))
           break
+        case 'profileApplied': {
+          const id = msg.data && typeof msg.data.id === 'string' ? msg.data.id : null
+          if (id) profileListeners.forEach((cb) => cb(id))
+          break
+        }
       }
       return
     }
@@ -147,5 +153,6 @@ export function createBridgeApi(): SurroundApi {
     calibrate: (request) => call<CalibrationResult>('calibrate', request),
     cancelCalibration: () => call<void>('cancelCalibration'),
     onCalibration: (cb) => subscribe(calibrationListeners, cb),
+    onProfileApplied: (cb) => subscribe(profileListeners, cb),
   }
 }

@@ -4,17 +4,21 @@ using System.Windows.Forms;
 namespace Surround.Desktop;
 
 /// <summary>
-/// Notification-area icon: double-click shows the window; menu = Göster, Başlat/Durdur, Çıkış.
+/// Notification-area icon: double-click shows the window; menu = Göster, Başlat/Durdur, Profil ▸, Çıkış.
 /// Must be created and used on the UI thread (it relies on the WPF message loop).
 /// </summary>
 public sealed class TrayIcon : IDisposable
 {
     private readonly NotifyIcon _icon;
     private readonly ToolStripMenuItem _toggle;
+    private readonly ToolStripMenuItem _profiles;
+    private readonly Action<string> _selectProfile;
     private bool _running;
 
-    public TrayIcon(Action show, Action toggleEngine, Action exit)
+    public TrayIcon(Action show, Action toggleEngine, Action<string> selectProfile, Action exit)
     {
+        _selectProfile = selectProfile;
+        _profiles = new ToolStripMenuItem("Profil") { Visible = false };
         _toggle = new ToolStripMenuItem("Başlat");
         _toggle.Click += (_, _) => toggleEngine();
 
@@ -23,6 +27,7 @@ public sealed class TrayIcon : IDisposable
         showItem.Click += (_, _) => show();
         menu.Items.Add(showItem);
         menu.Items.Add(_toggle);
+        menu.Items.Add(_profiles);
         menu.Items.Add(new ToolStripSeparator());
         var exitItem = new ToolStripMenuItem("Çıkış");
         exitItem.Click += (_, _) => exit();
@@ -43,6 +48,23 @@ public sealed class TrayIcon : IDisposable
     }
 
     public bool IsRunning => _running;
+
+    /// <summary>Rebuilds the "Profil" submenu (hidden while there are no profiles); the active one is ticked.</summary>
+    public void SetProfiles(IReadOnlyList<Surround.Engine.Config.ProfileEntry> profiles, string? activeId)
+    {
+        _profiles.DropDownItems.Clear();
+        foreach (var p in profiles)
+        {
+            var id = p.Id;
+            // '&' would turn the next letter into a mnemonic instead of showing it.
+            var item = new ToolStripMenuItem(p.Name.Replace("&", "&&")) { Checked = id == activeId };
+            item.Click += (_, _) => _selectProfile(id);
+            _profiles.DropDownItems.Add(item);
+        }
+        _profiles.Visible = profiles.Count > 0;
+        var active = profiles.FirstOrDefault(p => p.Id == activeId);
+        _profiles.Text = active is null ? "Profil" : $"Profil: {active.Name.Replace("&", "&&")}";
+    }
 
     public void Balloon(string text)
     {

@@ -449,6 +449,13 @@ export const useStore = create<State>()((set, get) => {
       api.onEngine((info) => set({ engine: info.sourceRate > 0 ? info : null }))
       api.onEngineError((msg) => get().showToast(msg, 7000, { tone: 'error' }))
       api.onEngineState((e) => get().setEngineState(e))
+      // Tepsiden seçilen profil: backend kaydetti ve uyguladı; arayüz de aynı değerlere geçer (geri alınabilir).
+      api.onProfileApplied((id) => {
+        const p = get().profiles.find((v) => v.id === id)
+        if (!p) return
+        get().selectProfile(id)
+        get().showToast(`Profil: ${p.name} (tepsiden)`, 2500)
+      })
       // Pencere sonradan açıldıysa (tepsiden başlatma) motor zaten çalışıyor ya da cihaz bekliyor olabilir.
       try {
         const e = await api.getEngineState()

@@ -133,6 +133,11 @@ export function createMockApi(): SurroundApi {
   const stateListeners = new Set<(s: EngineState) => void>()
   let calibrationAbort: (() => void) | null = null
   let startedAt = 0
+  // Tepsi menüsünün taklidi (tarayıcı önizlemesi): konsoldan window.__trayProfile('builtin-game').
+  const profileListeners = new Set<(id: string) => void>()
+  if (typeof window !== 'undefined') {
+    ;(window as unknown as { __trayProfile?: (id: string) => void }).__trayProfile = (id) => profileListeners.forEach((cb) => cb(id))
+  }
   let engineState: EngineState = { state: 'stopped', missing: [] }
   let dropTimers: ReturnType<typeof setTimeout>[] = []
 
@@ -369,6 +374,10 @@ export function createMockApi(): SurroundApi {
     onCalibration(cb) {
       calibrationListeners.add(cb)
       return () => calibrationListeners.delete(cb)
+    },
+    onProfileApplied(cb) {
+      profileListeners.add(cb)
+      return () => profileListeners.delete(cb)
     },
   }
 }

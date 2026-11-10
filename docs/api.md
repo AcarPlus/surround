@@ -7,7 +7,7 @@ köprüsünü, yoksa (`npm run dev`, tarayıcı) `ui/src/api/mock.ts` sahte veri
 ## Köprü protokolü (WebView2)
 JSON-RPC, `postMessage` / `WebMessageReceived` üzerinden. Sayfa -> C#: `{ id, method, params: [] }` (konumsal argümanlar).
 C# -> sayfa: `{ id, result }` ya da `{ id, error: { message, errors?: string[] } }`; itilen olaylar:
-`{ event: "status" | "levels" | "engine" | "engineError" | "engineState" | "calibration", data }`. C# tarafı: `src/Surround.App/Bridge`.
+`{ event: "status" | "levels" | "engine" | "engineError" | "engineState" | "calibration" | "profileApplied", data }`. C# tarafı: `src/Surround.App/Bridge`.
 `saveConfig` her zaman diske yazar; doğrulama hatası varsa (boş oda hariç) `errors` ile reddeder, çalışan motor
 mühendislik alanları değiştiyse yeniden başlatılır (oda/konum gibi arayüz alanları yeniden başlatmaz).
 
@@ -30,6 +30,7 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 | `onEngine(cb)` | `EngineInfo` (`upmix: "off" \| "stereo" \| "native"`, `sourceChannels`, `sourceRate`, `upmixLatencyMs`), durumla aynı sıklıkta; her duruşta (kalibrasyonun durdurması ve başarısız yeniden başlatma dahil) `"off"` (`sourceRate: 0`) ve boş `status` |
 | `onEngineError(cb)` | Çalışma sırasında motor hataları (akış kopması, test sesi hatası vb.) |
 | `getEngineState()` / `onEngineState(cb)` | Çalışma durumu `EngineState` = `{ state: "running" \| "waiting" \| "stopped", missing: string[], message?: string }` (`engineState` olayı). Olay her geçişte (Başlat, Durdur, cihaz bekleme, otomatik yeniden başlama) ve bekleme sırasında eksik listesi/neden değişince gelir; kalibrasyonun geçici durdurması `running` sayılır. `missing`: eksik cihazların adları (yalnızca `waiting`); `message` yalnızca eksik cihaz dışındaki bir nedenle beklerken gelir. Ayrıntı: aşağıda "Cihaz değişince" |
+| `onProfileApplied(cb)` | `profileApplied` olayı, `data = { id }`: tepsi menüsünden (Profil ▸) bir profil seçildi. Backend profilin `processing` / `upmix` / `upmixOptions` alanlarını ve `activeProfileId`'yi kayıtlı yapılandırmaya zaten yazdı (çalışıyorsa sese de uyguladı); arayüz aynı profili `selectProfile` ile seçer (geri alınabilir, bildirim gösterir). Tepsi menüsü her `saveConfig` sonrası kayıttaki `profiles` listesinden yenilenir; liste boşsa menüde görünmez. |
 
 | `getAppSettings()` | Uygulama ayarları (`app.json`, motor yapılandırmasından ayrı): `{ switchDefaultDevice, startWithWindows, startEngineOnLaunch, minimizeToTray }` (hepsi boolean; varsayılan `true, false, false, true`). Dahili `restore*` alanları dönmez |
 | `calibrate(request)` | Mikrofonla hoparlör ölçümü (uzun sürer, ~2,4 sn × tekrar × hoparlör + 3 sn); bitince `CalibrationResult` döner. Ayrıntı: `docs/kalibrasyon.md` |

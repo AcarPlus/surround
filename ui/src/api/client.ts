@@ -50,6 +50,8 @@ export interface SurroundApi {
   calibrate(request: CalibrationRequest): Promise<CalibrationResult>
   cancelCalibration(): Promise<void>
   onCalibration(cb: (p: CalibrationProgress) => void): () => void
+  /** Tepsi menüsünden bir profil seçildi; backend onu kayıtlı yapılandırmaya zaten uyguladı. */
+  onProfileApplied(cb: (id: string) => void): () => void
 }
 
 export const api: SurroundApi = hasBridge() ? createBridgeApi() : createMockApi()

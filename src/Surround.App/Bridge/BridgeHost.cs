@@ -8,7 +8,7 @@ namespace Surround.Desktop.Bridge;
 /// JSON-RPC over WebView2 messages.
 ///   page -> host: { id, method, params: [] }
 ///   host -> page: { id, result } | { id, error: { message, errors } }
-///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "engineState" | "calibration", data }
+///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "engineState" | "calibration" | "profileApplied", data }
 /// </summary>
 public sealed class BridgeHost : IDisposable
 {
@@ -36,7 +36,11 @@ public sealed class BridgeHost : IDisposable
         _backend.CalibrationProgress += OnCalibration;
         _backend.RunningChanged += OnRunningChanged;
         _backend.StateChanged += OnEngineState;
+        _backend.ProfileApplied += OnProfileApplied;
     }
+
+    /// <summary>Tray menu applied a profile to the stored config: the page adopts it (undo, toast, profile menu).</summary>
+    private void OnProfileApplied(string id) => PushEvent("profileApplied", new { id });
 
     private void OnEngineState(EngineStateDto state) => PushEvent("engineState", state);
 
@@ -134,6 +138,7 @@ public sealed class BridgeHost : IDisposable
         _backend.CalibrationProgress -= OnCalibration;
         _backend.RunningChanged -= OnRunningChanged;
         _backend.StateChanged -= OnEngineState;
+        _backend.ProfileApplied -= OnProfileApplied;
         try { _web.WebMessageReceived -= OnMessage; } catch { }
     }
 }

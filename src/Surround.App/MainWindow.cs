@@ -4,6 +4,7 @@ using System.Windows.Media.Imaging;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.Wpf;
 using Surround.Desktop.Bridge;
+using Surround.Engine.Config;
 
 namespace Surround.Desktop;
 
@@ -42,7 +43,15 @@ public sealed class MainWindow : Window
         };
         Content = _web;
 
-        _tray = new TrayIcon(BringToFront, () => _ = ToggleEngineAsync(), ExitApplication);
+        _tray = new TrayIcon(BringToFront, () => _ = ToggleEngineAsync(), id => _ = ApplyProfileAsync(id), ExitApplication);
+        RefreshTrayProfiles();
+        // Every save (the page saves while editing) re-reads the profiles from the saved document, off the UI thread.
+        _backend.ConfigSaved += cfg =>
+        {
+            var profiles = ProfileCatalog.List(cfg);
+            var active = ProfileCatalog.ActiveId(cfg);
+            _ = Dispatcher.InvokeAsync(() => { if (!_shutDown) _tray.SetProfiles(profiles, active); });
+        };
         _backend.StateChanged += st => _ = Dispatcher.InvokeAsync(() =>
         {
             if (!_shutDown) _tray.SetRunning(st.State != EngineStateDto.StoppedName, st.State == EngineStateDto.WaitingName);
@@ -82,6 +91,31 @@ public sealed class MainWindow : Window
         {
             _tray.Balloon((_backend.IsRunning ? "Durdurulamadı: " : "Başlatılamadı: ") +
                 (ex is BridgeException { Errors.Count: > 0 } be ? be.Errors[0] : ex.Message));
+        }
+    }
+
+    private void RefreshTrayProfiles()
+    {
+        if (_shutDown) return;
+        try
+        {
+            var (profiles, active) = _backend.GetProfiles();
+            _tray.SetProfiles(profiles, active);
+        }
+        catch { /* unreadable config: keep the previous menu */ }
+    }
+
+    private async Task ApplyProfileAsync(string id)
+    {
+        try
+        {
+            if (!await _backend.ApplyProfileAsync(id)) _tray.Balloon("Profil bulunamadı.");
+        }
+        catch (Exception ex)
+        {
+            // Saved either way; only a running engine cares that the new settings could not be applied now.
+            if (_backend.IsRunning)
+                _tray.Balloon("Profil uygulanamadı: " + (ex is BridgeException { Errors.Count: > 0 } be ? be.Errors[0] : ex.Message));
         }
     }
 
