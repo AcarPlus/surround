@@ -17,8 +17,10 @@ motor sözleşmesi için `docs/api.md`, ölçüm yöntemi için `docs/kalibrasyo
 Düzen sayısı (5.1, 7.1 …) yerine gerçek bağlantıdan yola çıkar: kaynak ve sanal kablo uçları dışındaki her çıkış cihazı için
 "ne bağlı?" sorulur — 2.1 set (sol/sağ + dahili sub, bas alıcısı), stereo çift (yeri, tipi, sol/sağ ters), tek hoparlör
 (rol) ya da çok kanallı sistem (kanal başına rol, Windows sırası FL FR FC LFE BL BR SL SR varsayılan). Her kanal için test
-sesi vardır. Sihirbaz yeniden açılınca cevaplar mevcut hoparlörlerden çıkarılır. Uygularken aynı cihaz + kanal + roldeki
-hoparlör korunur (kimlik, konum, EQ, gecikme/kazanç, kalibrasyon); yeni hoparlörler rolün standart açısına, dinleyicinin
+sesi vardır. Sihirbaz yeniden açılınca cevaplar mevcut hoparlörlerden çıkarılır. Uygularken aynı cihaz + kanaldaki hoparlör
+korunur (kimlik, konum, EQ, gecikme/kazanç, kalibrasyon); rolü değişirse yeni rol/karışım/ad alır, gecikme/kazancı otomatiğe
+döner, yalnızca tarafı değiştiyse standart konuma taşınır; ön ayarı değiştiyse yeniden uygulanır. Sihirbazın listelemediği
+cihazlardaki hoparlörler (çıkarılmış cihaz vb.) olduğu gibi kalır; yeni hoparlörler rolün standart açısına, dinleyicinin
 duvara uzaklığıyla sınırlı yarıçapa yerleştirilir. Hiç hoparlör yoksa ilk açılışta kendiliğinden açılır.
 
 ## Geri al / yinele
