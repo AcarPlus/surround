@@ -38,6 +38,11 @@ public sealed class EngineHost : IDisposable
     /// <summary>dBFS per logical channel, FL..SR order, -90 floor.</summary>
     public event Action<float[]>? LevelsChanged;
     public event Action<string>? Error;
+    /// <summary>
+    /// A capture or playback stream of the current engine failed (device invalidated, format changed …). Raised on an
+    /// audio/driver thread, right after <see cref="Error"/>; failures of an engine already being replaced are dropped.
+    /// </summary>
+    public event Action? StreamFailed;
 
     public EngineHost()
     {
@@ -158,7 +163,11 @@ public sealed class EngineHost : IDisposable
         {
             if (msg.StartsWith("Uyarı", StringComparison.Ordinal)) Error?.Invoke(msg);
         });
-        engine.Error += msg => Error?.Invoke(msg);
+        engine.Error += msg =>
+        {
+            Error?.Invoke(msg);
+            if (ReferenceEquals(Volatile.Read(ref _engine), engine)) StreamFailed?.Invoke();
+        };
         engine.Start();
         return engine;
     }

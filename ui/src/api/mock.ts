@@ -10,6 +10,7 @@ import {
   type CalibrationResult,
   type Config,
   type EngineInfo,
+  type EngineState,
   type Device,
   type LevelFrame,
   type LogicalChannel,
@@ -25,6 +26,9 @@ const query = (k: string) => typeof location !== 'undefined' && new URLSearchPar
 
 /** Önizleme: ?masaustu -> tipik masaüstü kurulumu (iki Realtek çıkışı + VB-Cable + kulaklık mikrofonu). */
 const DESKTOP = query('masaustu')
+/** Önizleme: ?bekle -> başlattıktan 5 sn sonra bir çıkış cihazı "çıkarılır", 5 sn sonra geri gelir (cihaz bekleniyor). */
+const DROP_DEVICE = query('bekle')
+const DROP_AFTER_MS = 5000
 
 function buildDevices(): Device[] {
   if (DESKTOP) {
@@ -125,8 +129,44 @@ export function createMockApi(): SurroundApi {
   const levelListeners = new Set<(l: LevelFrame) => void>()
   const engineListeners = new Set<(i: EngineInfo) => void>()
   const calibrationListeners = new Set<(p: CalibrationProgress) => void>()
+  const stateListeners = new Set<(s: EngineState) => void>()
   let calibrationAbort: (() => void) | null = null
   let startedAt = 0
+  let engineState: EngineState = { state: 'stopped', missing: [] }
+  let dropTimers: ReturnType<typeof setTimeout>[] = []
+
+  const setEngineState = (s: EngineState) => {
+    engineState = s
+    stateListeners.forEach((cb) => cb({ ...s, missing: [...s.missing] }))
+  }
+  const clearDrop = () => {
+    dropTimers.forEach(clearTimeout)
+    dropTimers = []
+  }
+  /** ?bekle: motor gibi — cihaz gidince durur ve bekler, geri gelince kendiliğinden yeniden başlar. */
+  function scheduleDrop() {
+    clearDrop()
+    const outs = config.outputs.flatMap((o) => devices.filter((d) => d.id === o.deviceId))
+    const name = outs[outs.length - 1]?.name ?? 'Hoparlör (USB)'
+    dropTimers.push(
+      setTimeout(() => {
+        running = false
+        statusListeners.forEach((cb) => cb([]))
+        emitEngine()
+        setEngineState({ state: 'waiting', missing: [name] })
+        dropTimers.push(
+          setTimeout(() => {
+            running = true
+            startedAt = Date.now()
+            setEngineState({ state: 'running', missing: [] })
+            const s = snapshot()
+            statusListeners.forEach((cb) => cb(s))
+            emitEngine()
+          }, DROP_AFTER_MS),
+        )
+      }, DROP_AFTER_MS),
+    )
+  }
 
   /** Upmix durumu: 2 kanallı kaynakta hep stereo; çok kanallıda ~6 sn'de bir stereo/yerel arasında gidip gelir. */
   function engineInfo(): EngineInfo {
@@ -221,12 +261,16 @@ export function createMockApi(): SurroundApi {
       const s = snapshot()
       statusListeners.forEach((cb) => cb(s))
       emitEngine()
+      setEngineState({ state: 'running', missing: [] })
+      if (DROP_DEVICE) scheduleDrop()
     },
     async stop() {
       await wait(150)
+      clearDrop()
       running = false
       counters.clear()
       emitEngine()
+      setEngineState({ state: 'stopped', missing: [] })
     },
     async getStatus() {
       return running ? snapshot() : []
@@ -252,6 +296,13 @@ export function createMockApi(): SurroundApi {
     },
     onEngineError() {
       return () => {}
+    },
+    async getEngineState() {
+      return { ...engineState, missing: [...engineState.missing] }
+    },
+    onEngineState(cb) {
+      stateListeners.add(cb)
+      return () => stateListeners.delete(cb)
     },
     calibrate(req) {
       // Ölçümü odadaki konumdan taklit eder: varış = mesafe/343 + cihaza özgü gecikme, seviye = mesafe kaybı + cihaz farkı.

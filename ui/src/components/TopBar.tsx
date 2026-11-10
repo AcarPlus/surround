@@ -6,12 +6,17 @@ import { IconMoon, IconPlay, IconRedo, IconStop, IconSun, IconUndo } from './ico
 function StatusPill() {
   const runState = useStore((s) => s.runState)
   const status = useStore((s) => s.status)
+  const waitingFor = useStore((s) => s.waitingFor)
   const drops = status.reduce((a, s) => a + s.underruns + s.overruns, 0)
 
   let tone = 'text-muted border-line-strong'
   let dot = 'bg-faint'
   let text = 'Durdu'
-  if (runState === 'starting') {
+  if (runState === 'waiting') {
+    tone = 'text-warn border-warn/40'
+    dot = 'bg-warn animate-pulse'
+    text = waitingFor.length > 0 ? `Cihaz bekleniyor: ${waitingFor.join(', ')}` : 'Yeniden başlatılıyor…'
+  } else if (runState === 'starting') {
     tone = 'text-warn border-warn/40'
     dot = 'bg-warn animate-pulse'
     text = 'Başlatılıyor…'
@@ -27,9 +32,13 @@ function StatusPill() {
     }
   }
   return (
-    <span role="status" className={cx('inline-flex h-7 items-center gap-2 whitespace-nowrap rounded-full border px-3 text-xs font-medium', tone)}>
-      <span className={cx('h-1.5 w-1.5 rounded-full', dot)} />
-      {text}
+    <span
+      role="status"
+      title={text}
+      className={cx('inline-flex h-7 max-w-[420px] items-center gap-2 whitespace-nowrap rounded-full border px-3 text-xs font-medium', tone)}
+    >
+      <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', dot)} />
+      <span className="truncate">{text}</span>
     </span>
   )
 }
@@ -37,7 +46,8 @@ function StatusPill() {
 export function RunButton({ big }: { big?: boolean }) {
   const runState = useStore((s) => s.runState)
   const toggleRun = useStore((s) => s.toggleRun)
-  const running = runState === 'running'
+  // Cihaz beklerken de "Durdur": beklemeyi bitirir.
+  const running = runState === 'running' || runState === 'waiting'
   const starting = runState === 'starting'
   return (
     <button

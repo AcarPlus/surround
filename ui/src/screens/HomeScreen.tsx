@@ -25,8 +25,9 @@ export function HomeScreen() {
         status: s.status,
         lowLatency: s.lowLatency,
         calibrated: !!s.lastCalibration,
+        waiting: s.runState === 'waiting' ? { missing: s.waitingFor, message: s.waitMessage } : null,
       }),
-    [s.devices, s.source, s.speakers, s.upmix, s.upmixOptions, s.processing, s.runState, s.status, s.lowLatency, s.lastCalibration],
+    [s.devices, s.source, s.speakers, s.upmix, s.upmixOptions, s.processing, s.runState, s.status, s.lowLatency, s.lastCalibration, s.waitingFor, s.waitMessage],
   )
   const counts = countLayout(s.speakers)
   // 2.1 setin dahili subwoofer'ı (bas alıcısı ön hoparlörler) da ".1" sayılır.

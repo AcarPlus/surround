@@ -43,7 +43,10 @@ public sealed class MainWindow : Window
         Content = _web;
 
         _tray = new TrayIcon(BringToFront, () => _ = ToggleEngineAsync(), ExitApplication);
-        _backend.RunningChanged += running => _ = Dispatcher.InvokeAsync(() => { if (!_shutDown) _tray.SetRunning(running); });
+        _backend.StateChanged += st => _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (!_shutDown) _tray.SetRunning(st.State != EngineStateDto.StoppedName, st.State == EngineStateDto.WaitingName);
+        });
 
         Loaded += async (_, _) => await InitializeWebAsync();
         Closing += OnClosing;

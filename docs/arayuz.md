@@ -33,7 +33,8 @@ düğmeler ve silme/düzen/kurulum/kalibrasyon bildirimlerindeki "Geri al". Meti
 Saf fonksiyon; seviyeler hata / uyarı / bilgi. Örnekler: hoparlör yok, kaynak cihaz yok ya da VB-Cable değil, VB-Cable
 stereo ayarlı, hoparlörün cihazı bağlı değil / kanal yok / kaynak cihaza çıkıyor (geri besleme), aynı kanala iki hoparlör,
 bas kesiliyor ama bas alıcısı yok, tek taraflı surround (bir yanda arka/yan yok → o yanın ortam sesi önde kalır), ön çift eksik,
-stereo kaynakta upmix kapalı, sessizdeki hoparlörler, çalışırken kesinti (tamponu büyüt), kalibrasyon yapılmadı. Düzeltme
+stereo kaynakta upmix kapalı, sessizdeki hoparlörler, çalışırken kesinti (tamponu büyüt), cihaz bekleniyor (motor bir cihaz
+değişikliğiyle durdu, eksik cihazlar listelenir; bkz. docs/api.md "Cihaz değişince"), kalibrasyon yapılmadı. Düzeltme
 düğmeleri `fixHealth` eylemine bağlanır. Gezinmedeki Ana sayfa simgesi hata/uyarı sayısını gösterir.
 
 ## Arayüze özgü config alanları (motor yok sayar)
@@ -43,4 +44,6 @@ Hiçbir hoparlörün kullanmadığı `outputs` kaydedilmez.
 ## Önizleme (tarayıcı, sahte veri)
 `npm --prefix ui run dev` → `http://localhost:5173`. Sorgu parametreleri: `?masaustu` (iki Realtek çıkışı + VB-Cable +
 kulaklık mikrofonu, boş kurulum → sihirbaz açılır), `?bos` (boş kurulum), `?zayif` (kalibrasyonda son hoparlör zayıf sinyal),
-`?nocable`, `?cable2ch`.
+`?nocable`, `?cable2ch`, `?bekle` (Başlat'tan 5 sn sonra bir çıkış "çıkarılır", 5 sn sonra döner: üst çubukta "Cihaz bekleniyor").
+Cihaz beklerken (`runState: 'waiting'`) üst çubuktaki durum etiketi uyarı renginde eksik cihazları yazar, Başlat düğmesi
+"Durdur" olur (beklemeyi bitirir).

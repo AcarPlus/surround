@@ -1,0 +1,203 @@
+using System.Collections.Concurrent;
+using System.Text.Json.Serialization;
+using Surround.Engine;
+using Surround.Engine.Audio;
+using Surround.Engine.Config;
+
+namespace Surround.Desktop.Bridge;
+
+/// <summary>
+/// The <c>engineState</c> event. <paramref name="State"/>: "running" | "waiting" | "stopped"; <paramref name="Missing"/>:
+/// names of the required devices that are gone (waiting only).
+/// </summary>
+public sealed record EngineStateDto(string State, IReadOnlyList<string> Missing,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Message = null)
+{
+    public const string RunningName = "running", WaitingName = "waiting", StoppedName = "stopped";
+    public static readonly EngineStateDto Stopped = new(StoppedName, Array.Empty<string>());
+
+    public bool SameAs(EngineStateDto o) => State == o.State && Message == o.Message && Missing.SequenceEqual(o.Missing);
+}
+
+/// <summary>
+/// Automatic recovery when devices change while the engine runs (see docs/api.md, "Cihaz değişince"). Windows endpoint
+/// notifications and stream failures only record what happened and wake <see cref="RecoveryLoopAsync"/>; the loop takes
+/// <c>_gate</c> (so it never races start/stop/saveConfig/calibration), probes the devices and lets
+/// <see cref="DeviceRecovery"/> decide. The engine itself is only ever touched through <see cref="EngineHost"/>, i.e. on
+/// its worker thread. While waiting the default-device guard stays engaged; a user stop restores it as usual.
+/// </summary>
+public sealed partial class SurroundBackend
+{
+    private const int CoalesceMs = 150;
+
+    private readonly DeviceRecovery _recovery = new();
+    private readonly SemaphoreSlim _recoverySignal = new(0, int.MaxValue);
+    private readonly CancellationTokenSource _recoveryCts = new();
+    private readonly ConcurrentDictionary<string, byte> _changedDevices = new(StringComparer.OrdinalIgnoreCase);
+    private DeviceWatcher? _watcher;
+    private int _streamFailed;
+    private long _nextCheckAt; // Environment.TickCount64 ms; 0 = only on events
+    private volatile bool _watching;
+    private EngineStateDto _state = EngineStateDto.Stopped;
+
+    /// <summary>Raised on every running / waiting / stopped transition (and when the missing list changes), on a worker thread.</summary>
+    public event Action<EngineStateDto>? StateChanged;
+
+    public EngineStateDto EngineState => Volatile.Read(ref _state);
+
+    private static long Now => Environment.TickCount64;
+
+    private void StartRecovery()
+    {
+        _host.StreamFailed += OnStreamFailed;
+        _ = Task.Run(() => RecoveryLoopAsync(_recoveryCts.Token));
+    }
+
+    private void StopRecovery()
+    {
+        _recoveryCts.Cancel();
+        _host.StreamFailed -= OnStreamFailed;
+        var w = Interlocked.Exchange(ref _watcher, null);
+        if (w is null) return;
+        w.Changed -= OnDeviceChanged;
+        w.Dispose();
+    }
+
+    // Notification / audio threads: record and wake the loop, nothing else.
+    private void OnDeviceChanged(string deviceId)
+    {
+        if (!_watching) return;
+        _changedDevices[deviceId] = 0;
+        _recoverySignal.Release();
+    }
+
+    private void OnStreamFailed()
+    {
+        if (!_watching) return;
+        Interlocked.Exchange(ref _streamFailed, 1);
+        _recoverySignal.Release();
+    }
+
+    private void SignalRecovery() => _recoverySignal.Release();
+
+    private async Task RecoveryLoopAsync(CancellationToken ct)
+    {
+        // Registered from a thread-pool (MTA) thread; callbacks arrive on Windows' own notification thread.
+        try
+        {
+            var w = new DeviceWatcher();
+            w.Changed += OnDeviceChanged;
+            if (ct.IsCancellationRequested || Interlocked.CompareExchange(ref _watcher, w, null) != null) { w.Dispose(); return; }
+        }
+        catch (Exception ex)
+        {
+            // Without notifications, stream failures still trigger recovery and waiting still polls.
+            System.Diagnostics.Debug.WriteLine($"Cihaz değişiklikleri izlenemiyor: {ex.Message}");
+        }
+
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                long at = Interlocked.Read(ref _nextCheckAt);
+                int delay = at == 0 ? Timeout.Infinite : (int)Math.Clamp(at - Now, 0, int.MaxValue);
+                // A device change arrives as a burst (state, format, stream errors): gather it before looking.
+                if (await _recoverySignal.WaitAsync(delay, ct)) await Task.Delay(CoalesceMs, ct);
+                while (_recoverySignal.Wait(0)) { }
+                await _gate.WaitAsync(ct);
+            }
+            catch (OperationCanceledException) { break; }
+
+            try
+            {
+                var changed = new List<string>();
+                foreach (var id in _changedDevices.Keys)
+                    if (_changedDevices.TryRemove(id, out _)) changed.Add(id);
+                bool failed = Interlocked.Exchange(ref _streamFailed, 0) != 0;
+                await RecoverAsync(changed, failed);
+            }
+            catch (Exception ex) { _host.ReportError($"Cihaz değişikliği işlenemedi: {ex.Message}"); }
+            finally { _gate.Release(); }
+        }
+    }
+
+    /// <summary>Under <c>_gate</c>.</summary>
+    private async Task RecoverAsync(IReadOnlyCollection<string> changed, bool streamFailed)
+    {
+        var state = _recovery.State;
+        if (state == RecoveryState.Stopped) return;
+
+        // Running: watch what the engine opened. Waiting: what a start would open now (the user may edit meanwhile).
+        SurroundConfig? cfg = null;
+        IReadOnlyList<string> ids;
+        if (state == RecoveryState.Running) ids = _recovery.Watched;
+        else
+        {
+            cfg = _store.Load();
+            ids = DeviceRecovery.RequiredIds(cfg);
+        }
+        bool deviceEvent = changed.Any(c => ids.Any(i => SurroundConfig.SameId(i, c)));
+        if (state == RecoveryState.Running && !deviceEvent && !streamFailed) return; // someone else's device
+
+        var probes = await ProbeAsync(ids);
+        switch (_recovery.Evaluate(probes, streamFailed, deviceEvent, Now))
+        {
+            case RecoveryAction.Stop:
+                await _host.StopAsync();
+                _runningFingerprint = null;
+                RunningChanged?.Invoke(false); // the page's status/meters go "off"; the default output stays switched
+                break;
+            case RecoveryAction.Restart:
+                await TryRestartAsync(cfg ?? _store.Load());
+                break;
+        }
+        PublishState();
+    }
+
+    private async Task TryRestartAsync(SurroundConfig cfg)
+    {
+        var errors = await Task.Run(() => Validate(cfg));
+        if (errors.Count > 0) { _recovery.RestartFailed(errors[0], Now); return; }
+        try { await _host.StartAsync(cfg); }
+        catch (ConfigException ex) { _recovery.RestartFailed(ex.Errors.FirstOrDefault() ?? ex.Message, Now); return; }
+        catch (Exception ex) { _recovery.RestartFailed($"Motor başlatılamadı: {ex.Message}", Now); return; }
+
+        _runningFingerprint = cfg.EngineFingerprint();
+        await MarkStartedAsync(cfg);
+        RunningChanged?.Invoke(true);
+        await SyncDefaultDeviceAsync(cfg); // the source may have come back after Windows moved the default away
+    }
+
+    /// <summary>Under <c>_gate</c>, after the engine started with <paramref name="cfg"/>: watch its devices.</summary>
+    private async Task MarkStartedAsync(SurroundConfig cfg)
+    {
+        var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
+        _recovery.Started(probes, Now);
+        PublishState();
+    }
+
+    /// <summary>Under <c>_gate</c>: the engine is (and stays) stopped.</summary>
+    private void MarkStopped()
+    {
+        _recovery.Stopped();
+        PublishState();
+    }
+
+    private static Task<List<DeviceProbe>> ProbeAsync(IReadOnlyList<string> ids) =>
+        Task.Run(() => ids.Select(DeviceEnumeration.Probe).ToList());
+
+    private void PublishState()
+    {
+        var next = _recovery.State switch
+        {
+            RecoveryState.Running => new EngineStateDto(EngineStateDto.RunningName, Array.Empty<string>()),
+            RecoveryState.Waiting => new EngineStateDto(EngineStateDto.WaitingName, _recovery.Missing.ToArray(), _recovery.Message),
+            _ => EngineStateDto.Stopped,
+        };
+        Interlocked.Exchange(ref _nextCheckAt, _recovery.NextCheckAt ?? 0);
+        _watching = _recovery.State != RecoveryState.Stopped;
+        if (next.SameAs(Volatile.Read(ref _state))) return;
+        Volatile.Write(ref _state, next);
+        StateChanged?.Invoke(next);
+    }
+}

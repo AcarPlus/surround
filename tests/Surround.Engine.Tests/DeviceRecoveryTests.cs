@@ -1,0 +1,203 @@
+using Surround.Engine.Audio;
+using Surround.Engine.Config;
+
+namespace Surround.Engine.Tests;
+
+public class DeviceRecoveryTests
+{
+    private static DeviceProbe Up(string id, int ch = 2, int rate = 48000) => new(id, "Cihaz " + id, true, ch, rate);
+    private static DeviceProbe Gone(string id, string? name = null) => new(id, name, false);
+
+    private static DeviceRecovery Running(long now = 0, params DeviceProbe[] devices)
+    {
+        var r = new DeviceRecovery();
+        r.Started(devices.Length > 0 ? devices : new[] { Up("SRC", 8), Up("A"), Up("B") }, now);
+        return r;
+    }
+
+    [Fact]
+    public void RequiredIds_are_source_and_routed_outputs()
+    {
+        var cfg = SurroundConfig.Parse("""
+        {
+          "source": { "deviceId": "CABLE", "mode": "loopback" },
+          "outputs": [ { "deviceId": "A" }, { "deviceId": "B" }, { "deviceId": "CABLE" }, { "deviceId": "UNUSED" } ],
+          "speakers": [
+            { "name": "FL", "outputDeviceId": "A", "deviceChannel": 1, "source": { "FL": 1 } },
+            { "name": "FR", "outputDeviceId": " a ", "deviceChannel": 2, "source": { "FR": 1 } },
+            { "name": "BL", "outputDeviceId": "B", "deviceChannel": 1, "source": { "BL": 1 } },
+            { "name": "On source", "outputDeviceId": "CABLE", "deviceChannel": 1, "source": { "FC": 1 } }
+          ]
+        }
+        """);
+        Assert.Equal(new[] { "CABLE", "A", "B" }, DeviceRecovery.RequiredIds(cfg));
+    }
+
+    [Fact]
+    public void Stopped_ignores_everything()
+    {
+        var r = new DeviceRecovery();
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Gone("A") }, streamFailed: true, deviceEvent: true, 0));
+        Assert.Equal(RecoveryState.Stopped, r.State);
+        Assert.Null(r.NextCheckAt);
+    }
+
+    [Fact]
+    public void Running_with_all_devices_unchanged_does_nothing()
+    {
+        var r = Running();
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Up("SRC", 8), Up("A"), Up("B") }, false, true, 500));
+        Assert.Equal(RecoveryState.Running, r.State);
+        Assert.Equal(new[] { "SRC", "A", "B" }, r.Watched);
+    }
+
+    [Fact]
+    public void Missing_output_stops_and_waits_until_it_has_been_back_for_the_debounce()
+    {
+        var r = Running();
+        Assert.Equal(RecoveryAction.Stop, r.Evaluate(new[] { Up("SRC", 8), Gone("A"), Up("B") }, false, true, 1000));
+        Assert.Equal(RecoveryState.Waiting, r.State);
+        Assert.Equal(new[] { "Cihaz A" }, r.Missing); // name remembered from the start
+        Assert.Null(r.Message);
+        Assert.Equal(1000 + DeviceRecovery.PollMs, r.NextCheckAt); // polled in case a notification is missed
+
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Up("SRC", 8), Gone("A"), Up("B") }, false, false, 2000));
+
+        // Back at 5000: debounce starts, restart at 6000.
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Up("SRC", 8), Up("A"), Up("B") }, false, true, 5000));
+        Assert.Empty(r.Missing);
+        Assert.Equal(6000, r.NextCheckAt);
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Up("SRC", 8), Up("A"), Up("B") }, false, false, 5999));
+        Assert.Equal(RecoveryAction.Restart, r.Evaluate(new[] { Up("SRC", 8), Up("A"), Up("B") }, false, false, 6000));
+        Assert.Equal(RecoveryState.Waiting, r.State); // until the host reports back
+
+        r.Started(new[] { Up("SRC", 8), Up("A"), Up("B") }, 6100);
+        Assert.Equal(RecoveryState.Running, r.State);
+        Assert.Null(r.NextCheckAt);
+    }
+
+    [Fact]
+    public void Device_events_during_the_debounce_restart_it()
+    {
+        var r = Running();
+        r.Evaluate(new[] { Gone("SRC"), Up("A"), Up("B") }, false, true, 0);
+        var all = new[] { Up("SRC", 8), Up("A"), Up("B") };
+        Assert.Equal(RecoveryAction.None, r.Evaluate(all, false, true, 100));
+        Assert.Equal(RecoveryAction.None, r.Evaluate(all, false, true, 900)); // flapping: debounce from 900
+        Assert.Equal(RecoveryAction.None, r.Evaluate(all, false, false, 1500));
+        Assert.Equal(RecoveryAction.Restart, r.Evaluate(all, false, false, 1900));
+    }
+
+    [Fact]
+    public void Device_lost_again_while_debouncing_waits_again()
+    {
+        var r = Running();
+        r.Evaluate(new[] { Up("SRC", 8), Gone("A"), Up("B") }, false, true, 0);
+        r.Evaluate(new[] { Up("SRC", 8), Up("A"), Up("B") }, false, true, 100);
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Up("SRC", 8), Gone("A"), Up("B") }, false, true, 600));
+        Assert.Equal(new[] { "Cihaz A" }, r.Missing);
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Up("SRC", 8), Gone("A"), Up("B") }, false, false, 1200));
+    }
+
+    [Fact]
+    public void Stream_failure_with_devices_present_stops_then_restarts_after_debounce()
+    {
+        var r = Running();
+        var all = new[] { Up("SRC", 8), Up("A"), Up("B") };
+        Assert.Equal(RecoveryAction.Stop, r.Evaluate(all, streamFailed: true, deviceEvent: false, 20_000));
+        Assert.Empty(r.Missing);
+        Assert.NotNull(r.Message);
+        Assert.Equal(21_000, r.NextCheckAt);
+        Assert.Equal(RecoveryAction.Restart, r.Evaluate(all, false, false, 21_000));
+    }
+
+    [Fact]
+    public void Format_change_of_a_required_device_restarts_but_an_identical_or_unreadable_format_does_not()
+    {
+        var r = Running();
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Up("SRC", 8), Up("A"), Up("B") }, false, true, 10)); // spurious event
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Up("SRC", 0, 0), Up("A"), Up("B") }, false, true, 20)); // mix format busy
+        Assert.Equal(RecoveryAction.Stop, r.Evaluate(new[] { Up("SRC", 2), Up("A"), Up("B") }, false, true, 30)); // 7.1 -> stereo
+        Assert.Equal(RecoveryState.Waiting, r.State);
+        Assert.Contains("biçim", r.Message);
+
+        var r2 = Running();
+        Assert.Equal(RecoveryAction.Stop, r2.Evaluate(new[] { Up("SRC", 8), Up("A", 2, 44100), Up("B") }, false, true, 30)); // rate
+    }
+
+    [Fact]
+    public void Failed_restarts_back_off_up_to_the_cap_and_a_returning_device_resets_it()
+    {
+        var r = Running();
+        var all = new[] { Up("SRC", 8), Up("A"), Up("B") };
+        r.Evaluate(all, true, false, 0);
+        Assert.Equal(RecoveryAction.Restart, r.Evaluate(all, false, false, 1000));
+
+        r.RestartFailed("Motor başlatılamadı: meşgul", 1000);
+        Assert.Equal("Motor başlatılamadı: meşgul", r.Message);
+        Assert.Equal(2000, r.RetryMs);
+        Assert.Equal(3000, r.NextCheckAt);
+        Assert.Equal(RecoveryAction.None, r.Evaluate(all, false, false, 2999));
+        Assert.Equal(RecoveryAction.Restart, r.Evaluate(all, false, false, 3000));
+
+        long now = 3000;
+        for (int i = 0; i < 10; i++) { r.RestartFailed("x", now); now += r.RetryMs; }
+        Assert.Equal(DeviceRecovery.MaxRetryMs, r.RetryMs);
+
+        // The device really goes away and comes back: plain debounce again.
+        r.Evaluate(new[] { Up("SRC", 8), Gone("A"), Up("B") }, false, true, now);
+        Assert.Equal(DeviceRecovery.DefaultDebounceMs, r.RetryMs);
+        r.Evaluate(all, false, true, now + 10);
+        Assert.Equal(RecoveryAction.Restart, r.Evaluate(all, false, false, now + 10 + DeviceRecovery.DefaultDebounceMs));
+    }
+
+    [Fact]
+    public void Auto_restarted_engine_failing_again_quickly_backs_off_but_a_stable_run_resets()
+    {
+        var r = Running();
+        var all = new[] { Up("SRC", 8), Up("A"), Up("B") };
+        r.Evaluate(all, true, false, 0);
+        r.Evaluate(all, false, false, 1000);
+        r.Started(all, 1000); // automatic restart
+
+        Assert.Equal(RecoveryAction.Stop, r.Evaluate(all, true, false, 3000)); // failed again after 2 s
+        Assert.Equal(2000, r.RetryMs);
+        r.Evaluate(all, false, false, 5000);
+        r.Started(all, 5000);
+
+        Assert.Equal(RecoveryAction.Stop, r.Evaluate(all, true, false, 5000 + DeviceRecovery.StableMs + 1));
+        Assert.Equal(DeviceRecovery.DefaultDebounceMs, r.RetryMs);
+    }
+
+    [Fact]
+    public void Stopped_clears_waiting_and_a_user_start_resets_backoff()
+    {
+        var r = Running();
+        r.Evaluate(new[] { Gone("SRC"), Up("A"), Up("B") }, false, true, 0);
+        r.Stopped();
+        Assert.Equal(RecoveryState.Stopped, r.State);
+        Assert.Empty(r.Missing);
+        Assert.Null(r.NextCheckAt);
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Up("SRC", 8) }, false, false, 99_000));
+    }
+
+    [Fact]
+    public void Missing_device_names_fall_back_to_the_remembered_name_then_the_id()
+    {
+        var r = Running(0, Up("SRC", 8), Up("A"));
+        r.Evaluate(new[] { Gone("SRC"), Gone("A", "Hoparlör (USB)"), Gone("NEW") }, false, true, 0);
+        Assert.Equal(new[] { "Cihaz SRC", "Hoparlör (USB)", "NEW" }, r.Missing);
+    }
+
+    [Fact]
+    public void Waiting_uses_the_required_set_it_is_given()
+    {
+        // While waiting the host passes the devices of the saved config: removing the missing device's speakers lets it restart.
+        var r = Running();
+        r.Evaluate(new[] { Up("SRC", 8), Up("A"), Gone("B") }, false, true, 0);
+        var withoutB = new[] { Up("SRC", 8), Up("A") };
+        Assert.Equal(RecoveryAction.None, r.Evaluate(withoutB, false, false, 100));
+        Assert.Empty(r.Missing);
+        Assert.Equal(RecoveryAction.Restart, r.Evaluate(withoutB, false, false, 1100));
+    }
+}

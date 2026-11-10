@@ -30,6 +30,28 @@ public static class DeviceEnumeration
         return result;
     }
 
+    /// <summary>
+    /// Current state of one endpoint for <see cref="DeviceRecovery"/>: present = active. The name is kept for unplugged or
+    /// disabled endpoints Windows still knows; null when the id is unknown.
+    /// </summary>
+    public static DeviceProbe Probe(string id)
+    {
+        try
+        {
+            using var en = new MMDeviceEnumerator();
+            using var dev = en.GetDevice(id.Trim());
+            string? name = null;
+            try { name = dev.FriendlyName; } catch { /* property store unavailable */ }
+            if (dev.State != DeviceState.Active) return new DeviceProbe(id, name, false);
+            var info = Describe(dev);
+            return new DeviceProbe(id, name ?? info.Name, true, info.Channels, info.SampleRate);
+        }
+        catch
+        {
+            return new DeviceProbe(id, null, false);
+        }
+    }
+
     internal static DeviceInfo Describe(MMDevice dev, string? defaultId = null)
     {
         int rate = 0, ch = 0;

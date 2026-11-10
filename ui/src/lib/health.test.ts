@@ -57,6 +57,22 @@ describe('checkHealth', () => {
     expect(items[0].fix?.id).toBe('open-setup')
   })
 
+  it('cihaz beklenirken eksik cihazları listeleyen uyarı', () => {
+    expect(ids(base({ waiting: null }))).not.toContain('waiting-devices')
+    const item = checkHealth(base({ waiting: { missing: ['Hoparlör (USB)', 'HDMI'] } })).find((i) => i.id === 'waiting-devices')!
+    expect(item.level).toBe('warn')
+    expect(item.title).toBe('Cihaz bekleniyor: Hoparlör (USB), HDMI')
+    expect(item.detail).toContain('kendiliğinden')
+  })
+
+  it('cihaz eksik değilse bekleme nedenini gösterir', () => {
+    const item = checkHealth(base({ waiting: { missing: [], message: 'Ses akışı kesildi; motor yeniden başlatılacak.' } })).find(
+      (i) => i.id === 'waiting-devices',
+    )!
+    expect(item.title).toBe('Motor yeniden başlatılmayı bekliyor')
+    expect(item.detail).toContain('Ses akışı kesildi')
+  })
+
   it('tek taraflı surround (yankı şikâyeti) uyarısı', () => {
     const h = base()
     h.speakers = h.speakers.filter((s) => s.id !== 'BL')

@@ -9,7 +9,7 @@ namespace Surround.Desktop.Bridge;
 public sealed record DeviceDto(string Id, string Name, string Kind, string Flow, int Channels, int SampleRate, bool IsDefault);
 
 /// <summary>The SurroundApi (ui/src/api/client.ts) implemented against the real engine. Transport-agnostic.</summary>
-public sealed class SurroundBackend : IDisposable
+public sealed partial class SurroundBackend : IDisposable
 {
     private const double ToneSeconds = 2;
 
@@ -41,10 +41,12 @@ public sealed class SurroundBackend : IDisposable
         _settings = settings ?? new AppSettingsStore(AppPaths.AppSettingsFile);
         _guard = guard ?? new DefaultDeviceGuard(new WasapiDefaultDeviceSwitcher(), _settings,
             msg => { System.Diagnostics.Debug.WriteLine(msg); _host.ReportError(msg); });
+        StartRecovery();
     }
 
     public AppSettingsStore Settings => _settings;
-    public bool IsRunning => _host.IsRunning;
+    /// <summary>Running, or stopped by a device change and waiting to restart (the user has not stopped it).</summary>
+    public bool IsRunning => _host.IsRunning || EngineState.State != EngineStateDto.StoppedName;
 
     /// <summary>Dispatches a JSON-RPC method. <paramref name="args"/> is the positional params array.</summary>
     public async Task<object?> InvokeAsync(string method, JsonElement args)
@@ -59,6 +61,7 @@ public sealed class SurroundBackend : IDisposable
             case "getAppSettings": return await Task.Run(GetAppSettings);
             case "saveAppSettings": await SaveAppSettingsAsync(Arg(args, 0)); return null;
             case "getStatus": return _host.LastStatus;
+            case "getEngineState": return EngineState;
             case "playTone": return await Task.Run(() => PlayTone(Arg(args, 0).GetString() ?? "", Arg(args, 1).GetInt32()));
             case "openSoundPanel": OpenSoundPanel(); return null;
             case "calibrate": return await CalibrateAsync(Arg(args, 0));
@@ -105,6 +108,8 @@ public sealed class SurroundBackend : IDisposable
         {
             // Always persist: the UI edits continuously and the document is a draft until started.
             _store.Save(cfg);
+            // Waiting for devices: the restart uses this config, so its device list may have changed (e.g. a speaker removed).
+            if (_recovery.State == RecoveryState.Waiting) SignalRecovery();
 
             // A brand-new empty room (no outputs, no speakers) is legitimate, not an error.
             if (cfg.Outputs.Count == 0 && cfg.Speakers.Count == 0) return null;
@@ -122,11 +127,13 @@ public sealed class SurroundBackend : IDisposable
                     {
                         // Neither the new nor the previous config runs: stopped, so the user gets their default output back.
                         _runningFingerprint = null;
+                        MarkStopped();
                         await Task.Run(_guard.Restore);
                         throw;
                     }
                     finally { RunningChanged?.Invoke(_host.IsRunning); }
                     _runningFingerprint = fp;
+                    await MarkStartedAsync(cfg);
                     await SyncDefaultDeviceAsync(cfg);
                 }
                 else
@@ -162,7 +169,8 @@ public sealed class SurroundBackend : IDisposable
         await _gate.WaitAsync();
         try
         {
-            if (_host.IsRunning) return;
+            // Waiting for devices counts as started: the restart happens on its own (Stop cancels it).
+            if (_host.IsRunning || _recovery.State == RecoveryState.Waiting) return;
             var cfg = _store.Load();
             var errors = await Task.Run(() => Validate(cfg));
             if (errors.Count > 0) throw new BridgeException(errors);
@@ -170,6 +178,7 @@ public sealed class SurroundBackend : IDisposable
             catch (ConfigException ex) { throw new BridgeException(ex.Errors); }
             catch (Exception ex) { throw new BridgeException($"Motor başlatılamadı: {ex.Message}"); }
             _runningFingerprint = cfg.EngineFingerprint();
+            await MarkStartedAsync(cfg);
             RunningChanged?.Invoke(true);
             await SyncDefaultDeviceAsync(cfg);
         }
@@ -183,6 +192,7 @@ public sealed class SurroundBackend : IDisposable
         {
             await _host.StopAsync();
             _runningFingerprint = null;
+            MarkStopped(); // also ends waiting for devices
             RunningChanged?.Invoke(false);
             await Task.Run(_guard.Restore); // back to the user's own default output
         }
@@ -246,12 +256,14 @@ public sealed class SurroundBackend : IDisposable
         catch (Exception ex)
         {
             _runningFingerprint = null;
+            MarkStopped();
             RunningChanged?.Invoke(false);
             _host.ReportError($"Kalibrasyondan sonra motor yeniden başlatılamadı: {ex.Message}");
             await Task.Run(_guard.Restore);
             return;
         }
         _runningFingerprint = cfg.EngineFingerprint();
+        await MarkStartedAsync(cfg);
         RunningChanged?.Invoke(true);
         // saveAppSettings does not wait for a calibration and sees a stopped engine meanwhile, so a switchDefaultDevice
         // toggle during the measurement is applied here, from the settings as they are now.
@@ -330,8 +342,9 @@ public sealed class SurroundBackend : IDisposable
         catch (Exception ex) { registryError = ex.Message; }
 
         // Toggled while running: act now instead of at the next start/stop. (During a calibration the engine is stopped;
-        // the restart after it re-reads the setting.)
-        if (before.SwitchDefaultDevice != after.SwitchDefaultDevice && _host.IsRunning)
+        // the restart after it re-reads the setting.) Waiting for devices counts as running: the guard is engaged meanwhile.
+        if (before.SwitchDefaultDevice != after.SwitchDefaultDevice
+            && (_host.IsRunning || EngineState.State == EngineStateDto.WaitingName))
         {
             if (after.SwitchDefaultDevice) await SyncDefaultDeviceAsync(_store.Load());
             else await Task.Run(_guard.Restore);
@@ -390,6 +403,7 @@ public sealed class SurroundBackend : IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         Interlocked.Exchange(ref _toneCts, null)?.Cancel();
         Volatile.Read(ref _calCts)?.Cancel();
+        StopRecovery();
         _host.Dispose(); // stops the engine
         _guard.Restore(); // app exit / session end: give the user their default output back
     }

@@ -6,6 +6,7 @@ import {
   type Config,
   type Device,
   type EngineInfo,
+  type EngineState,
   type LogicalChannel,
   type Output,
   type Point,
@@ -39,7 +40,8 @@ import {
 
 export type Screen = 'home' | 'room' | 'sound' | 'calibration' | 'connection' | 'settings'
 export type Theme = 'dark' | 'light'
-export type RunState = 'stopped' | 'starting' | 'running'
+/** 'waiting': motor bir cihaz değişikliğiyle durdu, cihazlar dönünce kendiliğinden yeniden başlar (Durdur bitirir). */
+export type RunState = 'stopped' | 'starting' | 'running' | 'waiting'
 export const LISTENER_ID = 'listener'
 
 export interface AutoFlags {
@@ -131,9 +133,14 @@ interface State {
   status: SinkStatus[]
   /** Çalışırken motorun bildirdiği durum (upmix durumu vb.); dururken null. */
   engine: EngineInfo | null
+  /** runState 'waiting' iken: geri gelmesi beklenen cihazların adları ve (varsa) bekleme nedeni. */
+  waitingFor: string[]
+  waitMessage: string | null
   toast: Toast | null
 
   init: () => Promise<void>
+  /** Backend'in `engineState` olayı: running / waiting (cihaz bekleniyor) / stopped. */
+  setEngineState: (e: EngineState) => void
   /** Cihaz listesini yeniden okur (Windows'ta kanal sayısı/varsayılan değişince ekran güncellensin). */
   refreshDevices: () => Promise<void>
   setTheme: (t: Theme) => void
@@ -408,6 +415,8 @@ export const useStore = create<State>()((set, get) => {
     runState: 'stopped',
     status: [],
     engine: null,
+    waitingFor: [],
+    waitMessage: null,
     toast: null,
 
     async init() {
@@ -438,6 +447,26 @@ export const useStore = create<State>()((set, get) => {
       api.onStatus((status) => set({ status }))
       api.onEngine((info) => set({ engine: info.sourceRate > 0 ? info : null }))
       api.onEngineError((msg) => get().showToast(msg, 7000, { tone: 'error' }))
+      api.onEngineState((e) => get().setEngineState(e))
+      // Pencere sonradan açıldıysa (tepsiden başlatma) motor zaten çalışıyor ya da cihaz bekliyor olabilir.
+      try {
+        const e = await api.getEngineState()
+        if (e.state !== 'stopped') get().setEngineState(e)
+      } catch {
+        /* olaylarla gelir */
+      }
+    },
+
+    setEngineState(e) {
+      const idle = { waitingFor: [] as string[], waitMessage: null }
+      if (e.state === 'waiting') {
+        set({ runState: 'waiting', status: [], engine: null, waitingFor: [...e.missing], waitMessage: e.message ?? null })
+      } else if (e.state === 'running') {
+        set({ runState: 'running', ...idle })
+      } else if (get().runState !== 'starting') {
+        // Başlatılırken gelen eski bir "stopped" yok sayılır; sonucu toggleRun belirler.
+        set({ runState: 'stopped', status: [], engine: null, ...idle })
+      }
     },
 
     async refreshDevices() {
@@ -472,13 +501,14 @@ export const useStore = create<State>()((set, get) => {
     async toggleRun() {
       const { runState } = get()
       if (runState === 'starting') return
-      if (runState === 'running') {
+      // Cihaz beklerken Durdur beklemeyi de bitirir.
+      if (runState === 'running' || runState === 'waiting') {
         try {
           await api.stop()
         } catch (e) {
           get().showToast(describeError(e), 6000, { tone: 'error' })
         }
-        set({ runState: 'stopped', status: [], engine: null })
+        set({ runState: 'stopped', status: [], engine: null, waitingFor: [], waitMessage: null })
         return
       }
       set({ runState: 'starting' })
