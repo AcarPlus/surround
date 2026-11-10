@@ -52,4 +52,5 @@ kanala indirilir. Başka cihazdaki hoparlörler bu modda duyulmaz ("algılanamad
   (~10 ms) kadar yavaşça oynayabilir (motorun sürüklenme denetleyicisi halkanın geri çağrı anındaki doluluğunu izler). Kalibrasyon bunun
   ortalamasını ölçer; bu oynama motorun kendi özelliğidir.
 - Ham (RAW, işlemesiz) mikrofon akışı istenmez; ENC'li mikrofonlarda süpürme genelde geçer, SNR ve `spreadMs` kontrol edilmeli.
-- Loopback kaynak cihazındaki hoparlörler (Windows'un doğrudan çaldıkları) ölçülemez. En fazla 12 hoparlör.
+- Loopback kaynak cihazındaki hoparlörler (Windows'un doğrudan çaldıkları) ölçülemez: atlanır, sonuçta `ok: false` ve
+  "Kaynak cihazdaki hoparlör ölçülemez." ile yer alır; referans kaynak cihazda olamaz. En fazla 12 hoparlör.

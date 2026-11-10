@@ -118,6 +118,13 @@ public sealed class SurroundBackend : IDisposable
                 if (fp != _runningFingerprint)
                 {
                     try { await RestartAsync(cfg); }
+                    catch when (!_host.IsRunning)
+                    {
+                        // Neither the new nor the previous config runs: stopped, so the user gets their default output back.
+                        _runningFingerprint = null;
+                        await Task.Run(_guard.Restore);
+                        throw;
+                    }
                     finally { RunningChanged?.Invoke(_host.IsRunning); }
                     _runningFingerprint = fp;
                     await SyncDefaultDeviceAsync(cfg);
@@ -229,21 +236,27 @@ public sealed class SurroundBackend : IDisposable
         }
     }
 
-    /// <summary>Restarts the engine stopped for calibration; on failure gives the user their default output back.</summary>
+    /// <summary>
+    /// Restarts the engine stopped for calibration; on failure the page learns it stays stopped (RunningChanged(false):
+    /// "off" engine event, plus an engineError) and the user gets their default output back.
+    /// </summary>
     private async Task ResumeAfterCalibrationAsync(SurroundConfig cfg)
     {
-        try
-        {
-            await _host.StartAsync(cfg);
-            _runningFingerprint = cfg.EngineFingerprint();
-            RunningChanged?.Invoke(true);
-        }
+        try { await _host.StartAsync(cfg); }
         catch (Exception ex)
         {
+            _runningFingerprint = null;
             RunningChanged?.Invoke(false);
             _host.ReportError($"Kalibrasyondan sonra motor yeniden başlatılamadı: {ex.Message}");
             await Task.Run(_guard.Restore);
+            return;
         }
+        _runningFingerprint = cfg.EngineFingerprint();
+        RunningChanged?.Invoke(true);
+        // saveAppSettings does not wait for a calibration and sees a stopped engine meanwhile, so a switchDefaultDevice
+        // toggle during the measurement is applied here, from the settings as they are now.
+        if (_settings.Load().SwitchDefaultDevice) await SyncDefaultDeviceAsync(cfg);
+        else await Task.Run(_guard.Restore);
     }
 
     private static CalibrationRequest ParseCalibration(JsonElement doc)
@@ -316,7 +329,8 @@ public sealed class SurroundBackend : IDisposable
         try { StartupRegistration.Apply(after.StartWithWindows); }
         catch (Exception ex) { registryError = ex.Message; }
 
-        // Toggled while running: act now instead of at the next start/stop.
+        // Toggled while running: act now instead of at the next start/stop. (During a calibration the engine is stopped;
+        // the restart after it re-reads the setting.)
         if (before.SwitchDefaultDevice != after.SwitchDefaultDevice && _host.IsRunning)
         {
             if (after.SwitchDefaultDevice) await SyncDefaultDeviceAsync(_store.Load());

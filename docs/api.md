@@ -27,12 +27,12 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 | `playTone(deviceId, channel)` | Test sesi |
 | `onStatus(cb)` | Çalışırken ~250 ms'de bir durum (köprüde); unsubscribe döner |
 | `onLevels(cb)` | Mantıksal kanal tepe seviyeleri (dBFS, `LevelFrame`: kanal adı → dB nesnesi), ~20 Hz; motorda upmix ve genel işleme sonrası, kanal katlamadan önce ölçülür. Biçim aynı, artık 12 anahtar (FL..SR + TFL TFR TBL TBR); hiçbir hoparlörün kullanmadığı üst şerit -90 gösterir |
-| `onEngine(cb)` | `EngineInfo` (`upmix: "off" \| "stereo" \| "native"`, `sourceChannels`, `sourceRate`, `upmixLatencyMs`), durumla aynı sıklıkta; durunca bir kez `"off"` |
+| `onEngine(cb)` | `EngineInfo` (`upmix: "off" \| "stereo" \| "native"`, `sourceChannels`, `sourceRate`, `upmixLatencyMs`), durumla aynı sıklıkta; her duruşta (kalibrasyonun durdurması ve başarısız yeniden başlatma dahil) `"off"` (`sourceRate: 0`) ve boş `status` |
 | `onEngineError(cb)` | Çalışma sırasında motor hataları (akış kopması, test sesi hatası vb.) |
 
 | `getAppSettings()` | Uygulama ayarları (`app.json`, motor yapılandırmasından ayrı): `{ switchDefaultDevice, startWithWindows, startEngineOnLaunch, minimizeToTray }` (hepsi boolean; varsayılan `true, false, false, true`). Dahili `restore*` alanları dönmez |
 | `calibrate(request)` | Mikrofonla hoparlör ölçümü (uzun sürer, ~2,4 sn × tekrar × hoparlör + 3 sn); bitince `CalibrationResult` döner. Ayrıntı: `docs/kalibrasyon.md` |
-| `cancelCalibration()` | Süren kalibrasyonu durdurur, `null` döner; bekleyen `calibrate` "Kalibrasyon iptal edildi." ile reddedilir |
+| `cancelCalibration()` | Süren kalibrasyonu (analiz aşaması dahil) durdurur, `null` döner; bekleyen `calibrate` "Kalibrasyon iptal edildi." ile reddedilir |
 | `calibration` olayı | Kalibrasyon sırasında itilen `CalibrationProgress` |
 | `saveAppSettings(settings)` | Verilen alanları kaydeder (eksik alan değişmez, bilinmeyen/`restore*` alanlar yok sayılır); başarıyla `null` döner. `startWithWindows` HKCU\...\Run altındaki `Surround` değerini yazar/siler (komut: `"<exe>" --tray`; Velopack kurulumunda güncellemelerden etkilenmeyen kök başlatıcı); yazılamazsa reddeder. Motor çalışırken `switchDefaultDevice` değişirse hemen uygulanır |
 
@@ -47,8 +47,12 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 - `lowBandSpeakerIds`: bas bandında (≈25–180 Hz) analiz edilecek hoparlörler (subwoofer). Alan yoksa yalnızca karışım satırı (`source`)
   sadece LFE olan hoparlörler bas bandında analiz edilir (`bassReceiver` dikkate alınmaz).
 - Motor çalışıyorsa durdurulur, ölçümden sonra aynı yapılandırmayla yeniden başlatılır (varsayılan cihaz koruması bu sırada devrede kalır,
-  böylece diğer uygulamaların sesi ölçümü bozmaz). Kalibrasyon sürerken `saveConfig`/`start`/`stop` çağrıları bitişi bekler. Aynı anda tek kalibrasyon.
-- Kaynak cihazdaki hoparlörler (loopback modunda) kalibre edilemez; en fazla 12 hoparlör.
+  böylece diğer uygulamaların sesi ölçümü bozmaz). Durdurma `engine` `"off"` olayıyla bildirilir; yeniden başlatma başarısız olursa
+  motor durmuş kalır (`"off"` + `engineError`) ve varsayılan cihaz geri yüklenir. Ölçüm sırasında değişen `switchDefaultDevice`
+  yeniden başlatmada uygulanır. Kalibrasyon sürerken `saveConfig`/`start`/`stop` çağrıları bitişi bekler. Aynı anda tek kalibrasyon.
+- Kaynak cihazdaki hoparlörler (loopback modunda) ölçülemez: çalıştırma diğerleriyle sürer, onlar sonuçta `ok: false`,
+  `message: "Kaynak cihazdaki hoparlör ölçülemez."` ile döner. Referans kaynak cihazdaysa (ya da hepsi oradaysa) hata verir;
+  `referenceSpeakerId` yoksa referans ilk ölçülebilir hoparlördür. En fazla 12 hoparlör.
 
 Tipler (camelCase):
 ```

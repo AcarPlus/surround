@@ -109,8 +109,9 @@ public static class CalibrationAnalyzer
     private readonly record struct Event(bool Found, double Arrival, double Snr, double LevelDb, bool Clipped);
 
     public static CalibrationResult Analyze(CalibrationPlan plan, float[] mic, int micLength, int micRate, string micDeviceId,
-        CalibrationExtras? extras = null, Action<CalibrationProgress>? progress = null)
+        CalibrationExtras? extras = null, Action<CalibrationProgress>? progress = null, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         micLength = Math.Min(micLength, mic.Length);
         double ratio = micRate / (double)plan.Rate;
         double cap = Math.Min(plan.Sweep.F2, 0.45 * micRate);
@@ -146,6 +147,7 @@ public static class CalibrationAnalyzer
             if (p >= 0 && p < micLength) noisePow += (double)mic[p] * mic[p];
         }
         double noiseFloorDb = noiseLen > 0 ? 10 * Math.Log10(Math.Max(noisePow / noiseLen, 1e-12)) : -120;
+        ct.ThrowIfCancellationRequested();
         dec.Load(mic, micLength, noiseStart, noiseLen);
         int nFrom = 0, nTo = Math.Max(1, noiseLen - reference.Length);
         var env = new float[segLen];
@@ -215,6 +217,7 @@ public static class CalibrationAnalyzer
         var stepLow = new bool[steps.Count];
         for (int i = 0; i < steps.Count; i++)
         {
+            ct.ThrowIfCancellationRequested();
             var st = steps[i];
             progress?.Invoke(new CalibrationProgress(CalibrationPhase.Analyzing, spk[st.Test].Id, i + 1, steps.Count,
                 $"Analiz ediliyor ({i + 1}/{steps.Count})"));
@@ -224,6 +227,7 @@ public static class CalibrationAnalyzer
             evS[i] = Analyze((st.StartFrame + plan.OffsetFrames) * ratio, spk[st.Test], timing);
         }
 
+        ct.ThrowIfCancellationRequested();
         bool Glitched(int i) => extras?.StepGlitched is { } g && i < g.Length && g[i];
         static bool Usable(Event e) => e.Found && e.Snr >= MinSnrDb;
 

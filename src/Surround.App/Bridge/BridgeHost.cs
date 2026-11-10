@@ -34,6 +34,20 @@ public sealed class BridgeHost : IDisposable
         _backend.Info += OnInfo;
         _backend.EngineError += OnEngineError;
         _backend.CalibrationProgress += OnCalibration;
+        _backend.RunningChanged += OnRunningChanged;
+    }
+
+    private static readonly EngineInfoDto Off = new("off", 0, 0, 0);
+
+    /// <summary>
+    /// Every stop (also one the page did not ask for: calibration, a failed restart) reaches the page as an "off"
+    /// engine event (sourceRate 0) and an empty status, even when the engine thread had nothing left to report.
+    /// </summary>
+    private void OnRunningChanged(bool running)
+    {
+        if (running) return;
+        PushEvent("status", Array.Empty<SinkStatusDto>());
+        PushEvent("engine", Off);
     }
 
     private void OnCalibration(Surround.Engine.Calibration.CalibrationProgress p) => PushEvent("calibration", p);
@@ -115,6 +129,7 @@ public sealed class BridgeHost : IDisposable
         _backend.Info -= OnInfo;
         _backend.EngineError -= OnEngineError;
         _backend.CalibrationProgress -= OnCalibration;
+        _backend.RunningChanged -= OnRunningChanged;
         try { _web.WebMessageReceived -= OnMessage; } catch { }
     }
 }

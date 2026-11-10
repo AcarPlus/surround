@@ -19,14 +19,25 @@ public static class CalibrationRunner
     private const int CaptureBufferMs = 20;
     private const int MaxRepeats = 5;
 
-    private sealed record Target(string Id, SpeakerConfig Speaker, bool LowBand);
+    internal sealed record Target(string Id, SpeakerConfig Speaker, bool LowBand);
+
+    /// <summary>
+    /// Resolved request: <paramref name="Targets"/> are measured (<paramref name="Reference"/> indexes them),
+    /// <paramref name="Skipped"/> are reported without a measurement, <paramref name="Order"/> is the result order.
+    /// </summary>
+    internal sealed record Selection(List<Target> Targets, int Reference, List<string> Order, Dictionary<string, SpeakerCalibration> Skipped);
+
+    /// <summary>Message of a speaker on the loopback source device (Windows renders it directly; it cannot be measured).</summary>
+    public const string SourceDeviceMessage = "Kaynak cihazdaki hoparlör ölçülemez.";
 
     /// <summary>Blocks until done. Throws <see cref="OperationCanceledException"/> when <paramref name="ct"/> fires.</summary>
     public static CalibrationResult Run(SurroundConfig cfg, CalibrationRequest req, Action<CalibrationProgress>? progress = null,
         CancellationToken ct = default, Action<string>? log = null)
     {
         progress?.Invoke(new CalibrationProgress(CalibrationPhase.Preparing, null, 0, 0, "Hazırlanıyor"));
-        var (targets, refIdx) = Resolve(cfg, req);
+        var sel = Resolve(cfg, req);
+        var targets = sel.Targets;
+        int refIdx = sel.Reference;
         int repeats = Math.Clamp(req.Repeats, 1, MaxRepeats);
         double levelDb = Math.Clamp(req.LevelDb, -40, -6);
         if (string.IsNullOrWhiteSpace(req.MicDeviceId)) throw new ArgumentException("Mikrofon seçilmedi.");
@@ -53,37 +64,67 @@ public static class CalibrationRunner
         }
         finally { session.Dispose(); }
 
-        return CalibrationAnalyzer.Analyze(plan, session.Recording, (int)Math.Min(session.Recorded, session.Recording.Length),
-            session.MicRate, req.MicDeviceId, session.Extras(log), progress);
+        ct.ThrowIfCancellationRequested();
+        var result = CalibrationAnalyzer.Analyze(plan, session.Recording, (int)Math.Min(session.Recorded, session.Recording.Length),
+            session.MicRate, req.MicDeviceId, session.Extras(log), progress, ct);
+        return WithSkipped(result, sel);
     }
 
     /// <summary>Speaker id: the UI's <c>id</c> member; the CLI may also pass the speaker's name.</summary>
     public static string? IdOf(SpeakerConfig s) =>
         s.Extra != null && s.Extra.TryGetValue("id", out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
-    private static (List<Target>, int) Resolve(SurroundConfig cfg, CalibrationRequest req)
+    /// <summary>
+    /// Looks the requested speakers up. With a loopback source, speakers on the source device are skipped (reported
+    /// with <see cref="SourceDeviceMessage"/>) unless one is the explicit reference, which is an error; without an explicit
+    /// reference the first measurable speaker is the reference.
+    /// </summary>
+    internal static Selection Resolve(SurroundConfig cfg, CalibrationRequest req)
     {
         var ids = req.SpeakerIds.Where(i => !string.IsNullOrWhiteSpace(i)).Select(i => i.Trim()).Distinct().ToList();
         if (ids.Count == 0) throw new ArgumentException("Kalibre edilecek hoparlör seçilmedi.");
-        string refId = string.IsNullOrWhiteSpace(req.ReferenceSpeakerId) ? ids[0] : req.ReferenceSpeakerId.Trim();
-        if (!ids.Contains(refId)) ids.Insert(0, refId);
+        string? refId = string.IsNullOrWhiteSpace(req.ReferenceSpeakerId) ? null : req.ReferenceSpeakerId.Trim();
+        if (refId != null && !ids.Contains(refId)) ids.Insert(0, refId);
         if (ids.Count > CalibrationPlan.MaxSpeakers)
             throw new ArgumentException($"Aynı anda en fazla {CalibrationPlan.MaxSpeakers} hoparlör kalibre edilebilir.");
 
         bool loopback = string.Equals(cfg.Source.Mode?.Trim(), "loopback", StringComparison.OrdinalIgnoreCase);
         var lowIds = req.LowBandSpeakerIds?.Select(i => i.Trim()).ToHashSet();
         var list = new List<Target>();
+        var skipped = new Dictionary<string, SpeakerCalibration>();
         foreach (var id in ids)
         {
             var s = cfg.Speakers.FirstOrDefault(x => IdOf(x) == id)
                 ?? cfg.Speakers.FirstOrDefault(x => string.Equals(x.Name.Trim(), id, StringComparison.OrdinalIgnoreCase))
                 ?? throw new ArgumentException($"Hoparlör bulunamadı: {id}");
-            if (loopback && SurroundConfig.SameId(s.OutputDeviceId, cfg.Source.DeviceId))
-                throw new ArgumentException($"'{s.Name}' kaynak cihazda; Windows doğrudan çalıyor, kalibre edilemez.");
             bool low = lowIds != null ? lowIds.Contains(id) : IsLfeOnly(s);
+            if (loopback && SurroundConfig.SameId(s.OutputDeviceId, cfg.Source.DeviceId))
+            {
+                if (id == refId)
+                    throw new ArgumentException($"Referans hoparlör '{s.Name}' kaynak cihazda; Windows doğrudan çalıyor, ölçülemez. Başka bir referans seçin.");
+                skipped[id] = new SpeakerCalibration(id, false, 0, 0, 0, 0, low, SourceDeviceMessage);
+                continue;
+            }
             list.Add(new Target(id, s, low));
         }
-        return (list, ids.IndexOf(refId));
+        if (list.Count == 0)
+            throw new ArgumentException("Seçilen hoparlörlerin hepsi kaynak cihazda; Windows doğrudan çalıyor, ölçülemez.");
+        int refIdx = refId != null ? list.FindIndex(t => t.Id == refId) : 0;
+        return new Selection(list, refIdx, ids, skipped);
+    }
+
+    /// <summary>Puts the skipped speakers back into the result, in request order.</summary>
+    internal static CalibrationResult WithSkipped(CalibrationResult result, Selection sel)
+    {
+        if (sel.Skipped.Count == 0) return result;
+        var measured = result.Speakers.GroupBy(s => s.SpeakerId).ToDictionary(g => g.Key, g => g.First());
+        var speakers = new List<SpeakerCalibration>(sel.Order.Count);
+        foreach (var id in sel.Order)
+        {
+            if (sel.Skipped.TryGetValue(id, out var skip)) speakers.Add(skip);
+            else if (measured.TryGetValue(id, out var m)) speakers.Add(m);
+        }
+        return result with { Speakers = speakers };
     }
 
     private static bool IsLfeOnly(SpeakerConfig s) =>

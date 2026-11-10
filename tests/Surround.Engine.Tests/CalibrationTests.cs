@@ -190,4 +190,93 @@ public class CalibrationTests(ITestOutputHelper output)
             """{"speakerId":"a","ok":true,"arrivalMs":0,"levelDb":0,"snrDb":40,"spreadMs":0,"lowBand":false},""" +
             """{"speakerId":"b","ok":false,"arrivalMs":0,"levelDb":0,"snrDb":3,"spreadMs":0,"lowBand":true,"message":"w"}]}""", r);
     }
+
+    [Fact]
+    public void Analyze_CancelledDuringAnalysis_Throws()
+    {
+        const int micRate = 48000;
+        var plan = Plan(3);
+        var mic = Record(plan, new[] { new Room(2, 0.5), new Room(3, 0.5), new Room(4, 0.5) }, micRate, noiseRms: 1e-4);
+        using var cts = new CancellationTokenSource();
+        var phases = new List<string>();
+        Assert.Throws<OperationCanceledException>(() => CalibrationAnalyzer.Analyze(plan, mic, mic.Length, micRate, "mic", null, p =>
+        {
+            phases.Add(p.Phase);
+            if (p.Phase == CalibrationPhase.Analyzing) cts.Cancel();
+        }, cts.Token));
+        Assert.Equal(new[] { CalibrationPhase.Analyzing }, phases); // stopped at the next step, never "done"
+
+        using var pre = new CancellationTokenSource();
+        pre.Cancel();
+        Assert.Throws<OperationCanceledException>(() => CalibrationAnalyzer.Analyze(plan, mic, mic.Length, micRate, "mic", ct: pre.Token));
+    }
+
+    private static Config.SurroundConfig LoopbackRoom(string mode = "loopback") => Config.SurroundConfig.Parse($$"""
+    {
+      "source": { "deviceId": "SRC", "mode": "{{mode}}" },
+      "outputs": [ { "deviceId": "A" }, { "deviceId": "SRC" } ],
+      "speakers": [
+        { "id": "fl", "name": "FL", "outputDeviceId": "A", "deviceChannel": 1, "source": { "FL": 1.0 } },
+        { "id": "fr", "name": "FR", "outputDeviceId": " src ", "deviceChannel": 2, "source": { "FR": 1.0 } },
+        { "id": "sub", "name": "Sub", "outputDeviceId": "SRC", "deviceChannel": 4, "source": { "LFE": 1.0 } },
+        { "id": "bl", "name": "BL", "outputDeviceId": "A", "deviceChannel": 2, "source": { "BL": 1.0 } }
+      ]
+    }
+    """);
+
+    [Fact]
+    public void Resolve_SkipsSpeakersOnTheLoopbackSource_AndReportsThemInRequestOrder()
+    {
+        var sel = CalibrationRunner.Resolve(LoopbackRoom(), new CalibrationRequest("mic", new[] { "fl", "fr", "sub", "bl" }, "fl"));
+        Assert.Equal(new[] { "fl", "bl" }, sel.Targets.Select(t => t.Id));
+        Assert.Equal(0, sel.Reference);
+        Assert.Equal(new[] { "fr", "sub" }, sel.Skipped.Keys.Order());
+        Assert.True(sel.Skipped["sub"].LowBand);
+
+        var measured = new CalibrationResult("fl", "mic", -80, false, new[]
+        {
+            new SpeakerCalibration("fl", true, 0, 0, 40, 0, false, null),
+            new SpeakerCalibration("bl", true, 1.5, -2, 38, 0.01, false, null),
+        });
+        var r = CalibrationRunner.WithSkipped(measured, sel);
+        Assert.Equal(new[] { "fl", "fr", "sub", "bl" }, r.Speakers.Select(s => s.SpeakerId));
+        Assert.Equal("fl", r.ReferenceSpeakerId);
+        foreach (var s in r.Speakers.Where(s => s.SpeakerId is "fr" or "sub"))
+        {
+            Assert.False(s.Ok);
+            Assert.Equal(0, s.ArrivalMs);
+            Assert.Equal(0, s.LevelDb);
+            Assert.Equal("Kaynak cihazdaki hoparlör ölçülemez.", s.Message);
+        }
+        Assert.Same(measured.Speakers[1], r.Speakers[3]);
+    }
+
+    [Fact]
+    public void Resolve_DefaultReferenceIsTheFirstMeasurableSpeaker()
+    {
+        var sel = CalibrationRunner.Resolve(LoopbackRoom(), new CalibrationRequest("mic", new[] { "fr", "bl", "fl" }));
+        Assert.Equal(new[] { "bl", "fl" }, sel.Targets.Select(t => t.Id));
+        Assert.Equal(0, sel.Reference);
+        Assert.Equal(new[] { "fr", "bl", "fl" }, sel.Order);
+    }
+
+    [Fact]
+    public void Resolve_SourceSpeakerAsReferenceOrOnlySourceSpeakers_Fails()
+    {
+        var cfg = LoopbackRoom();
+        var ex = Assert.Throws<ArgumentException>(() => CalibrationRunner.Resolve(cfg, new CalibrationRequest("mic", new[] { "fl", "fr" }, "fr")));
+        Assert.Contains("Referans", ex.Message);
+        Assert.Throws<ArgumentException>(() => CalibrationRunner.Resolve(cfg, new CalibrationRequest("mic", new[] { "fr", "sub" })));
+    }
+
+    [Fact]
+    public void Resolve_CaptureSourceSkipsNothing()
+    {
+        var sel = CalibrationRunner.Resolve(LoopbackRoom("capture"), new CalibrationRequest("mic", new[] { "fl", "fr" }, "fr"));
+        Assert.Equal(new[] { "fl", "fr" }, sel.Targets.Select(t => t.Id));
+        Assert.Equal(1, sel.Reference);
+        Assert.Empty(sel.Skipped);
+        var measured = new CalibrationResult("fr", "mic", -80, false, Array.Empty<SpeakerCalibration>());
+        Assert.Same(measured, CalibrationRunner.WithSkipped(measured, sel));
+    }
 }
