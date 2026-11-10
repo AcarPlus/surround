@@ -7,7 +7,7 @@ köprüsünü, yoksa (`npm run dev`, tarayıcı) `ui/src/api/mock.ts` sahte veri
 ## Köprü protokolü (WebView2)
 JSON-RPC, `postMessage` / `WebMessageReceived` üzerinden. Sayfa -> C#: `{ id, method, params: [] }` (konumsal argümanlar).
 C# -> sayfa: `{ id, result }` ya da `{ id, error: { message, errors?: string[] } }`; itilen olaylar:
-`{ event: "status" | "levels" | "engine" | "engineError", data }`. C# tarafı: `src/Surround.App/Bridge`.
+`{ event: "status" | "levels" | "engine" | "engineError" | "calibration", data }`. C# tarafı: `src/Surround.App/Bridge`.
 `saveConfig` her zaman diske yazar; doğrulama hatası varsa (boş oda hariç) `errors` ile reddeder, çalışan motor
 mühendislik alanları değiştiyse yeniden başlatılır (oda/konum gibi arayüz alanları yeniden başlatmaz).
 
@@ -31,7 +31,43 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 | `onEngineError(cb)` | Çalışma sırasında motor hataları (akış kopması, test sesi hatası vb.) |
 
 | `getAppSettings()` | Uygulama ayarları (`app.json`, motor yapılandırmasından ayrı): `{ switchDefaultDevice, startWithWindows, startEngineOnLaunch, minimizeToTray }` (hepsi boolean; varsayılan `true, false, false, true`). Dahili `restore*` alanları dönmez |
+| `calibrate(request)` | Mikrofonla hoparlör ölçümü (uzun sürer, ~2,4 sn × tekrar × hoparlör + 3 sn); bitince `CalibrationResult` döner. Ayrıntı: `docs/kalibrasyon.md` |
+| `cancelCalibration()` | Süren kalibrasyonu durdurur, `null` döner; bekleyen `calibrate` "Kalibrasyon iptal edildi." ile reddedilir |
+| `calibration` olayı | Kalibrasyon sırasında itilen `CalibrationProgress` |
 | `saveAppSettings(settings)` | Verilen alanları kaydeder (eksik alan değişmez, bilinmeyen/`restore*` alanlar yok sayılır); başarıyla `null` döner. `startWithWindows` HKCU\...\Run altındaki `Surround` değerini yazar/siler (komut: `"<exe>" --tray`; Velopack kurulumunda güncellemelerden etkilenmeyen kök başlatıcı); yazılamazsa reddeder. Motor çalışırken `switchDefaultDevice` değişirse hemen uygulanır |
+
+## Kalibrasyon (`calibrate`)
+İstek (hoparlörler kayıtlı config.json içinde `id` ile aranır; bilinmeyen id hata verir):
+```
+{ micDeviceId: string, micLoopback?: boolean, speakerIds: string[], referenceSpeakerId?: string,
+  repeats?: number, levelDb?: number, lowBandSpeakerIds?: string[] }
+```
+- `referenceSpeakerId` yoksa `speakerIds[0]`; listede değilse yine çalınır ve sonuçta yer alır. `repeats` 1–5 (varsayılan 2),
+  `levelDb` süpürme tepe seviyesi −40…−6 dBFS (varsayılan −20). `micLoopback: true` test modudur: "mikrofon" bir çıkış cihazının loopback'idir.
+- `lowBandSpeakerIds`: bas bandında (≈25–180 Hz) analiz edilecek hoparlörler (subwoofer). Alan yoksa yalnızca karışım satırı (`source`)
+  sadece LFE olan hoparlörler bas bandında analiz edilir (`bassReceiver` dikkate alınmaz).
+- Motor çalışıyorsa durdurulur, ölçümden sonra aynı yapılandırmayla yeniden başlatılır (varsayılan cihaz koruması bu sırada devrede kalır,
+  böylece diğer uygulamaların sesi ölçümü bozmaz). Kalibrasyon sürerken `saveConfig`/`start`/`stop` çağrıları bitişi bekler. Aynı anda tek kalibrasyon.
+- Kaynak cihazdaki hoparlörler (loopback modunda) kalibre edilemez; en fazla 12 hoparlör.
+
+Tipler (camelCase):
+```
+CalibrationProgress = { phase: 'preparing'|'noise'|'measuring'|'analyzing'|'done', speakerId?: string, index: number, total: number, message: string }
+CalibrationResult = {
+  referenceSpeakerId: string, micDeviceId: string,
+  noiseFloorDb: number,        // dBFS, sessiz giriş bölümünde (ENC'li mikrofonlar -120'ye kadar düşebilir)
+  micClipped: boolean,
+  speakers: Array<{ speakerId: string, ok: boolean,
+    arrivalMs: number,         // referansa göre (negatif = önce); delayMs ve latencyMs telafisi hariç
+    levelDb: number,           // referansa göre; gainDb hariç
+    snrDb: number, spreadMs: number /* tekrarlar arası maks−min */, lowBand: boolean, message?: string }>
+}
+```
+`index`/`total`: ölçüm adımları (tekrar × ölçülen hoparlör); `measuring` ve `analyzing` için 1 tabanlı geçerli adım, `done` için `total`,
+diğerlerinde 0. `message` (hoparlör) yalnızca uyarı varsa gelir. Referansın kendi satırı `arrivalMs = 0`, `levelDb = 0`.
+Ölçüm yapılandırılmış gecikme/kazanç olmadan yapıldığı için yeni değerler mevcutların yerine geçer (üstüne eklenmez):
+`delayMs = max(arrivalMs) - arrivalMs` (en geç gelen 0), `gainDb = min(levelDb) - levelDb` (en sessiz 0, diğerleri kısılır).
+`outputs[].latencyMs` sıfır değilse etkin gecikmeye ayrıca eklendiğini hesaba katın. `ok: false` olan hoparlörün değerleri 0'dır, kullanılmamalı.
 
 ## Arayüze özgü durum (config'e yazılmaz)
 - Hoparlör başına "Otomatik" gecikme/kazanç bayrakları (`auto`). Otomatikken `delayMs`/`gainDb`

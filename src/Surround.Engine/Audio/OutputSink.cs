@@ -20,8 +20,19 @@ public sealed class OutputSink : IDisposable
     public string Name { get; }
     public int DeviceRate { get; }
     public int DeviceChannels { get; }
+    /// <summary>Configured jitter-buffer target (the fill the drift controller steers to in steady state).</summary>
+    public double BufferMs { get; }
+    /// <summary>Calibration: see <see cref="DriftResamplingReader.RenderObserver"/>. Set before <see cref="Start"/>.</summary>
+    public Action<long>? RenderObserver { set => _reader.RenderObserver = value; }
+    /// <summary>Underruns + overruns so far (any of them shifts the timing of what follows).</summary>
+    public long Glitches => _reader.Underruns + _reader.Overruns;
 
-    public OutputSink(MMDevice device, double bufferMs, int sourceRate, IReadOnlyList<SpeakerRoute> routes, bool limiter, Action<string>? log = null, Action<string>? error = null)
+    /// <param name="steadyClock">
+    /// Calibration: a very slow drift controller, so the resampling ratio stays nearly constant while test sweeps play
+    /// (the ring latency is then tracked via <see cref="RenderObserver"/> and compensated by the analysis instead).
+    /// </param>
+    public OutputSink(MMDevice device, double bufferMs, int sourceRate, IReadOnlyList<SpeakerRoute> routes, bool limiter, Action<string>? log = null, Action<string>? error = null,
+        bool steadyClock = false)
     {
         _device = device;
         _log = log;
@@ -38,7 +49,9 @@ public sealed class OutputSink : IDisposable
         _ring = new RingBuffer(capFrames * DeviceChannels, DeviceChannels);
         // The limiter always runs (bypassed when off) so its look-ahead delay is the same on every output.
         _mixer = new SinkMixer(DeviceChannels, routes, sourceRate, new PeakLimiter(DeviceChannels, sourceRate) { Enabled = limiter });
-        _reader = new DriftResamplingReader(_ring, DeviceChannels, sourceRate, DeviceRate, bufferMs);
+        _reader = new DriftResamplingReader(_ring, DeviceChannels, sourceRate, DeviceRate, bufferMs,
+            steadyClock ? new DriftController(bufferMs, kp: 2e-5, ki: 1e-7) : null);
+        BufferMs = bufferMs;
 
         _out = new WasapiOut(device, AudioClientShareMode.Shared, true, 30);
         _out.PlaybackStopped += (_, e) =>
