@@ -82,6 +82,19 @@ public class ConfigTests
         Assert.Equal(5, cfg.EffectiveDelayMs(cfg.Speakers[1]), 6);  // (30-30)+5
     }
 
+    [Fact]
+    public void EffectiveDelayIncludesBufferSoChangingItDoesNotShiftSpeaker()
+    {
+        var cfg = SurroundConfig.Parse(Json);
+        foreach (var o in cfg.Outputs) o.BufferMs = 40;
+        double before0 = cfg.EffectiveDelayMs(cfg.Speakers[0]), before1 = cfg.EffectiveDelayMs(cfg.Speakers[1]);
+        // Output of speaker 1 gets a larger buffer: it now plays 60 ms later, so the other one must wait 60 ms more.
+        var o1 = cfg.Outputs.First(o => SurroundConfig.SameId(o.DeviceId, cfg.Speakers[1].OutputDeviceId));
+        o1.BufferMs = 100;
+        Assert.Equal(before0 + 60, cfg.EffectiveDelayMs(cfg.Speakers[0]), 6);
+        Assert.Equal(before1, cfg.EffectiveDelayMs(cfg.Speakers[1]), 6);
+    }
+
     private static FakeCatalog GoodCatalog()
     {
         var c = new FakeCatalog();

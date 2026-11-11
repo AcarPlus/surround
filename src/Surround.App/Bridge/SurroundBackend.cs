@@ -59,6 +59,8 @@ public sealed partial class SurroundBackend : IDisposable
         {
             case "listDevices": return await Task.Run(ListDevices);
             case "getConfig": return await Task.Run(GetConfig);
+            case "takeConfigNotice": return _store.TakeNotice() is { } n ? new { backupPath = n.BackupPath } : null;
+            case "resetConfig": await Task.Run(_store.ResetToDefault); return null;
             case "saveConfig": return await SaveConfigAsync(Arg(args, 0));
             case "start": await StartAsync(); return null;
             case "stop": await StopAsync(); return null;

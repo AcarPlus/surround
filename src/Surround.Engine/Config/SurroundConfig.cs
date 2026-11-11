@@ -136,11 +136,39 @@ public sealed class SurroundConfig
         AllowTrailingCommas = true,
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        // Lenient: "deviceChannel": "2" is read as 2 instead of discarding the whole file.
+        NumberHandling = JsonNumberHandling.AllowReadingFromString,
     };
 
-    public static SurroundConfig Parse(string json) =>
-        JsonSerializer.Deserialize<SurroundConfig>(json, Options)
-        ?? throw new JsonException("Empty config.");
+    public static SurroundConfig Parse(string json)
+    {
+        var cfg = JsonSerializer.Deserialize<SurroundConfig>(json, Options)
+            ?? throw new JsonException("Empty config.");
+        cfg.NormalizeNulls();
+        return cfg;
+    }
+
+    /// <summary>
+    /// Valid-but-null JSON (<c>"speakers": null</c>, <c>[null]</c>, <c>"source": null</c> …) must not crash later code:
+    /// null items are dropped, null objects/strings get their defaults.
+    /// </summary>
+    public void NormalizeNulls()
+    {
+        Source ??= new();
+        Source.DeviceId ??= "";
+        Source.Mode ??= "loopback";
+        Outputs = (Outputs ?? new()).Where(o => o is not null).ToList();
+        foreach (var o in Outputs) o.DeviceId ??= "";
+        Speakers = (Speakers ?? new()).Where(s => s is not null).ToList();
+        foreach (var s in Speakers)
+        {
+            s.Name ??= "";
+            s.OutputDeviceId ??= "";
+            s.Source ??= new();
+        }
+        UpmixOptions.Mode ??= UpmixOptions.Film;
+        Processing.Preset ??= "flat";
+    }
 
     public static SurroundConfig Load(string path) => Parse(File.ReadAllText(path));
 
@@ -181,12 +209,17 @@ public sealed class SurroundConfig
         return copy;
     }
 
-    /// <summary>Effective delay in ms for a speaker: output latency compensation + user delay.</summary>
+    /// <summary>
+    /// Effective delay in ms for a speaker: alignment of the output's total delay (device latency + jitter buffer,
+    /// both really heard) to the slowest output, plus the user delay. Changing an output's buffer therefore does not
+    /// shift that speaker against the others.
+    /// </summary>
     public double EffectiveDelayMs(SpeakerConfig speaker)
     {
-        double maxLatency = Outputs.Count == 0 ? 0 : Outputs.Max(o => o.LatencyMs);
+        static double Total(OutputConfig o) => o.LatencyMs + (o.BufferMs > 0 ? o.BufferMs : 0);
+        double max = Outputs.Count == 0 ? 0 : Outputs.Max(Total);
         var own = Outputs.FirstOrDefault(o => SameId(o.DeviceId, speaker.OutputDeviceId));
-        return (maxLatency - (own?.LatencyMs ?? 0)) + speaker.DelayMs;
+        return (max - (own is null ? 0 : Total(own))) + speaker.DelayMs;
     }
 
     public static bool SameId(string? a, string? b) =>

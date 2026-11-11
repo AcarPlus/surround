@@ -201,12 +201,21 @@ public sealed class EngineHost : IDisposable
         };
         info = new EngineInfoDto(up, st.SourceChannels, st.SourceRate,
             st.SourceRate > 0 ? Math.Round(st.UpmixLatencyFrames * 1000.0 / st.SourceRate, 1) : 0);
-        var list = new List<SinkStatusDto>(st.Sinks.Count);
-        // Engine sinks are created in cfg.Outputs order.
-        for (int i = 0; i < st.Sinks.Count && i < cfg.Outputs.Count; i++)
+        return SinkDtos(st.Sinks, cfg);
+    }
+
+    /// <summary>
+    /// The engine opens its sinks in <see cref="SurroundConfig.ForRouting"/> order (outputs without a routed speaker, e.g.
+    /// the source device in loopback mode, are skipped), so labels must come from the routed config, not the raw one.
+    /// </summary>
+    internal static IReadOnlyList<SinkStatusDto> SinkDtos(IReadOnlyList<Surround.Engine.Audio.SinkStatus> sinks, SurroundConfig cfg)
+    {
+        var routed = cfg.ForRouting();
+        var list = new List<SinkStatusDto>(sinks.Count);
+        for (int i = 0; i < sinks.Count && i < routed.Outputs.Count; i++)
         {
-            var s = st.Sinks[i];
-            list.Add(new SinkStatusDto(cfg.Outputs[i].DeviceId, Math.Round(s.FillMs, 1), Math.Round(s.CorrectionPpm, 1), s.Underruns, s.Overruns));
+            var s = sinks[i];
+            list.Add(new SinkStatusDto(routed.Outputs[i].DeviceId, Math.Round(s.FillMs, 1), Math.Round(s.CorrectionPpm, 1), s.Underruns, s.Overruns));
         }
         return list;
     }

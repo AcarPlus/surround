@@ -5,8 +5,13 @@ using Surround.Engine.Config;
 namespace Surround.Desktop.Bridge;
 
 /// <summary>Persists the UI document (engine config + UI-only members) at %AppData%\Surround\config.json.</summary>
+/// <summary>The saved config could not be read; it was kept as <see cref="BackupPath"/> and defaults were loaded.</summary>
+public sealed record ConfigLoadNotice(string BackupPath, string Reason);
+
 public sealed class ConfigStore
 {
+    private ConfigLoadNotice? _notice;
+
     private readonly string _path;
     private readonly object _gate = new();
 
@@ -21,10 +26,11 @@ public sealed class ConfigStore
             if (File.Exists(_path))
             {
                 try { cfg = SurroundConfig.Load(_path); }
-                catch (Exception ex) when (ex is JsonException or IOException)
+                catch (Exception ex) when (ex is JsonException or IOException or NotSupportedException)
                 {
-                    // Keep the broken file for inspection instead of silently overwriting it.
-                    try { File.Move(_path, _path + ".bad", overwrite: true); } catch { }
+                    // Keep the broken file (never overwriting an earlier backup) and tell the UI once.
+                    var backup = BackUpUnlocked();
+                    if (backup is not null) _notice = new ConfigLoadNotice(backup, ex.Message);
                 }
             }
             if (cfg is null)
@@ -35,6 +41,40 @@ public sealed class ConfigStore
             NormalizeForUi(cfg);
             return cfg;
         }
+    }
+
+    /// <summary>Returns (once) the notice about an unreadable config file that was replaced by defaults, if any.</summary>
+    public ConfigLoadNotice? TakeNotice()
+    {
+        lock (_gate) { var n = _notice; _notice = null; return n; }
+    }
+
+    /// <summary>UI recovery: keeps the current file as a timestamped backup and writes fresh defaults.</summary>
+    public void ResetToDefault()
+    {
+        lock (_gate)
+        {
+            BackUpUnlocked();
+            _notice = null;
+            SaveUnlocked(CreateDefault());
+        }
+    }
+
+    /// <summary>Moves the config file to <c>config.bad-YYYYMMDD-HHmmss.json</c> next to it; null if that failed.</summary>
+    private string? BackUpUnlocked()
+    {
+        try
+        {
+            if (!File.Exists(_path)) return null;
+            string dir = Path.GetDirectoryName(_path)!;
+            string stem = Path.GetFileNameWithoutExtension(_path), ext = Path.GetExtension(_path);
+            string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            string target = Path.Combine(dir, $"{stem}.bad-{stamp}{ext}");
+            for (int i = 2; File.Exists(target); i++) target = Path.Combine(dir, $"{stem}.bad-{stamp}-{i}{ext}");
+            File.Move(_path, target);
+            return target;
+        }
+        catch { return null; }
     }
 
     public void Save(SurroundConfig cfg)
