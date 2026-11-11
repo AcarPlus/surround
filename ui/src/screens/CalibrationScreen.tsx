@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { CalibrationProgress, CalibrationResult } from '../api/types'
+import { micPrivacyHint } from '../lib/errors'
 import { describeError, useStore } from '../store/useStore'
 import {
   calibrationPatches,
@@ -8,6 +9,7 @@ import {
   computeCalibration,
   isSubwoofer,
   msToMeters,
+  offCentreSuspect,
   type LevelTarget,
 } from '../lib/calibration'
 import { fmt, fmtSigned } from '../lib/format'
@@ -56,6 +58,8 @@ export function CalibrationScreen() {
   const [result, setResult] = useState<CalibrationResult | null>(null)
   const [target, setTarget] = useState<LevelTarget>('quietest')
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
+  // Mikrofon ortada değil şüphesi: kullanıcı onaylayana kadar uygulanmaz.
+  const [askConfirm, setAskConfirm] = useState(false)
 
   useEffect(() => {
     if (!micId && mics[0]) setMicId(mics[0].id)
@@ -91,6 +95,7 @@ export function CalibrationScreen() {
     setPhase('running')
     setResult(null)
     setExcluded(new Set())
+    setAskConfirm(false)
     setProgress({ phase: 'preparing', index: 0, total: list.length, message: 'Hazırlanıyor…' })
     runningRef.current = true
     try {
@@ -111,7 +116,7 @@ export function CalibrationScreen() {
     } catch (e) {
       if (!mounted.current) return
       setPhase('setup')
-      const msg = describeError(e)
+      const msg = micPrivacyHint(e) ?? describeError(e)
       if (msg === CANCELLED) showToast(msg, 3000)
       else showToast(msg, 7000, { tone: 'error' })
     } finally {
@@ -126,6 +131,7 @@ export function CalibrationScreen() {
     () => (result ? computeCalibration(result, speakers, { target, excluded, outputs }) : []),
     [result, speakers, target, excluded, outputs],
   )
+  const suspect = useMemo(() => offCentreSuspect(rows, speakers), [rows, speakers])
 
   if (speakers.length === 0) {
     return (
@@ -158,6 +164,16 @@ export function CalibrationScreen() {
       {phase === 'setup' && (
         <div className="grid grid-cols-1 gap-4 min-[1100px]:grid-cols-[minmax(0,1fr)_380px]">
           <div className="space-y-4">
+            <Card className="border-accent/40 p-4">
+              <SectionTitle>Başlamadan önce</SectionTitle>
+              <p className="text-[13px]">
+                Mikrofonu başının olduğu yere, kulak hizasına koy; kulaklığın mikrofonunu kullanıyorsan kulaklığı takıp otur.
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                Mikrofon ortada değilse ölçüm hoparlörlerin değil mikrofonun konumunu yansıtır: bir taraf “erken” ya da “yüksek” çıkar.
+              </p>
+            </Card>
+
             <Card className="p-4">
               <SectionTitle>1 · Mikrofon</SectionTitle>
               {mics.length === 0 && !loopback ? (
@@ -178,7 +194,7 @@ export function CalibrationScreen() {
               )}
               <ul className="mt-3 space-y-1.5 text-[13px] text-muted">
                 <li>• Mikrofonu oturduğun yere, kulak hizasına koy; ölçüm boyunca kıpırdatma.</li>
-                <li>• Kulaklık mikrofonu: kulaklığı başına takmadan, mikrofonu tavana bakacak şekilde bırak.</li>
+                <li>• Kulaklık mikrofonu: kulaklığı tak ve dinleme konumunda otur; ölçüm sırasında kıpırdama.</li>
                 <li>• Odayı sessizleştir; ölçüm hoparlör başına ~2 sn sürer.</li>
                 <li>
                   • Gürültü engellemeli (ENC) mikrofonlar sesi bastırabilir; sonuçta “zayıf sinyal” görürsen seviyeyi artır.
@@ -422,17 +438,33 @@ export function CalibrationScreen() {
               hoparlör 0 ms alır, diğerleri ona göre bekletilir. Uygulanan değerler “Otomatik”ten çıkar; Ctrl+Z ile geri alınabilir.
             </p>
           </Card>
+          {suspect && (
+            <Card className="border-warn/60 p-4">
+              <p className="flex items-center gap-2 text-[13px] font-semibold text-warn">
+                <IconWarn /> Mikrofon büyük olasılıkla ortada değil
+              </p>
+              <p className="mt-1 text-[13px] text-muted">
+                Tüm hoparlörler aynı cihazda; {suspect.pair} arasında {fmt(suspect.deltaMs, 1)} ms / {fmt(suspect.deltaDb, 1)} dB düzeltme
+                öneriliyor. Aynı cihazdaki simetrik bir çiftte bu fark normalde çıkmaz; ölçümü mikrofonun konumu bozmuş olabilir.
+                Mikrofonu dinleme konumuna alıp tekrar ölçmen önerilir.
+              </p>
+            </Card>
+          )}
           <div className="flex flex-wrap gap-2">
             <Button
               variant="primary"
               disabled={!rows.some((r) => r.include)}
               onClick={() => {
+                if (suspect && !askConfirm) {
+                  setAskConfirm(true)
+                  return
+                }
                 const at = new Date().toISOString()
                 applyCalibration(calibrationPatches(rows, at), result.micDeviceId, at)
                 setPhase('setup')
               }}
             >
-              <IconCheck /> Uygula ({rows.filter((r) => r.include).length} hoparlör)
+              <IconCheck /> {askConfirm ? 'Mikrofon ortada, yine de uygula' : 'Uygula'} ({rows.filter((r) => r.include).length} hoparlör)
             </Button>
             <Button onClick={() => void start()}>Tekrar ölç</Button>
             <Button variant="ghost" onClick={() => setPhase('setup')}>

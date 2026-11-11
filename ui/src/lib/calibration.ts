@@ -135,3 +135,46 @@ export function calibrationPercent(p: CalibrationProgress | null): number {
       return 100
   }
 }
+
+/** Aynı cihazdaki simetrik çiftte bundan büyük fark mikrofon konumundan şüphelendirir. */
+export const OFF_CENTRE_MS = 1
+export const OFF_CENTRE_DB = 1
+
+const PAIRS: ReadonlyArray<readonly [string, string]> = [
+  ['left', 'right'],
+  ['side-left', 'side-right'],
+  ['back-left', 'back-right'],
+  ['wide-left', 'wide-right'],
+  ['top-front-left', 'top-front-right'],
+  ['top-back-left', 'top-back-right'],
+]
+
+export interface OffCentreSuspect {
+  /** Çiftin adları, ör. "Sol / Sağ". */
+  pair: string
+  deltaMs: number
+  deltaDb: number
+}
+
+/**
+ * Tüm ölçülen hoparlörler TEK cihazdaysa (aynı ses kartı → gerçek gecikme farkı ~0) ve simetrik bir sol/sağ çiftin
+ * önerilen düzeltmeleri ~1 ms ya da ~1 dB'yi aşıyorsa: büyük olasılıkla mikrofon ortada değildir. Yoksa null.
+ */
+export function offCentreSuspect(rows: CalibrationRow[], speakers: Speaker[]): OffCentreSuspect | null {
+  const used = rows.filter((r) => r.include && r.ok)
+  const sps = used.flatMap((r) => {
+    const s = speakers.find((x) => x.id === r.speakerId)
+    return s ? [{ r, s }] : []
+  })
+  if (sps.length < 2 || new Set(sps.map(({ s }) => s.outputDeviceId)).size !== 1) return null
+  for (const [a, b] of PAIRS) {
+    const ra = sps.find(({ s }) => effectiveRole(s) === a)
+    const rb = sps.find(({ s }) => effectiveRole(s) === b)
+    if (!ra || !rb) continue
+    const deltaMs = Math.abs(ra.r.delayMs - rb.r.delayMs)
+    const deltaDb = ra.r.gainDb !== null && rb.r.gainDb !== null ? Math.abs(ra.r.gainDb - rb.r.gainDb) : 0
+    if (deltaMs > OFF_CENTRE_MS || deltaDb > OFF_CENTRE_DB)
+      return { pair: `${ra.s.name} / ${rb.s.name}`, deltaMs: round(deltaMs, 2), deltaDb: round(deltaDb, 1) }
+  }
+  return null
+}

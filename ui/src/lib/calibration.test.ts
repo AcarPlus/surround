@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CalibrationResult, Speaker } from '../api/types'
-import { calibrationPatches, calibrationPercent, computeCalibration } from './calibration'
+import { calibrationPatches, calibrationPercent, computeCalibration, offCentreSuspect } from './calibration'
 
 const sp = (id: string, extra: Partial<Speaker> = {}): Speaker => ({
   id,
@@ -114,5 +114,31 @@ describe('calibrationPercent', () => {
     expect(calibrationPercent(p('analyzing', 4))).toBeLessThan(100)
     expect(calibrationPercent(p('done', 4))).toBe(100)
     expect(calibrationPercent(null)).toBeGreaterThan(0)
+  })
+})
+
+describe('offCentreSuspect', () => {
+  const pair = [sp('l', { name: 'Sol', role: 'left' }), sp('r', { name: 'Sağ', role: 'right', source: { FR: 1 } })]
+  const rowsFor = (spk: Speaker[], r: CalibrationResult['speakers']) => computeCalibration(result(r), spk)
+
+  it('tek cihazda, sağ 2 ms erken / +1,8 dB ise uyarır', () => {
+    const rows = rowsFor(pair, [m('l', 2, -1.8), m('r', 0, 0)])
+    const s = offCentreSuspect(rows, pair)
+    expect(s?.pair).toBe('Sol / Sağ')
+    expect(s?.deltaMs).toBeGreaterThan(1)
+  })
+  it('fark küçükse uyarmaz', () => {
+    expect(offCentreSuspect(rowsFor(pair, [m('l', 0.4, -0.3), m('r', 0, 0)]), pair)).toBeNull()
+  })
+  it('sadece dB farkı 1\'i aşarsa da uyarır', () => {
+    expect(offCentreSuspect(rowsFor(pair, [m('l', 0, -2), m('r', 0, 0)]), pair)).not.toBeNull()
+  })
+  it('hoparlörler farklı cihazlardaysa uyarmaz (gerçek gecikme farkı olabilir)', () => {
+    const two = [pair[0], { ...pair[1], outputDeviceId: 'other' }]
+    expect(offCentreSuspect(rowsFor(two, [m('l', 3, 0), m('r', 0, 0)]), two)).toBeNull()
+  })
+  it('simetrik çift yoksa uyarmaz', () => {
+    const odd = [sp('a', { role: 'left' }), sp('c', { role: 'center', source: { FC: 1 } })]
+    expect(offCentreSuspect(rowsFor(odd, [m('a', 3, 0), m('c', 0, 0)]), odd)).toBeNull()
   })
 })

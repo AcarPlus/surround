@@ -49,3 +49,15 @@ export function explainError(e: unknown): ExplainedError {
     detail: anyTranslated || raws.length > 1 ? raws.join('\n') : undefined,
   }
 }
+
+const MIC_DENIED = /E_ACCESSDENIED|0x80070005|UnauthorizedAccess|access (is )?denied|erişim.*(reddedildi|engellendi)/i
+
+/** Mikrofon yakalamada Windows erişimi reddettiyse (gizlilik ayarı) yönlendiren Türkçe ipucu; değilse null. */
+export const MIC_PRIVACY_HINT =
+  'Windows mikrofon erişimini engelliyor. Ayarlar > Gizlilik ve güvenlik > Mikrofon bölümünde "Mikrofon erişimi" ve "Masaüstü uygulamalarının mikrofona erişmesine izin ver" seçeneklerini aç, sonra tekrar dene.'
+
+export function micPrivacyHint(e: unknown): string | null {
+  const errors = (e as { errors?: unknown })?.errors
+  const raws = Array.isArray(errors) && errors.length > 0 ? errors.map(String) : [e instanceof Error ? e.message : String(e)]
+  return raws.some((r) => MIC_DENIED.test(r)) ? MIC_PRIVACY_HINT : null
+}
