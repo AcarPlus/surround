@@ -29,6 +29,7 @@ import { ROLE_CUSTOM_MANUAL, ROLE_CUSTOM_MAP, computeMapSource, roleDef, rolePat
 import { plannedName, standardPosition, type BuildResult } from '../lib/setup'
 import { findCable, type FixId } from '../lib/health'
 import { explainError } from '../lib/errors'
+import { rejoinMessage } from '../lib/waiting'
 import { matchSoundPreset, soundPresetPatch } from '../lib/presets'
 import {
   builtinProfile,
@@ -513,6 +514,7 @@ export const useStore = create<State>()((set, get) => {
         api.onEngine((info) => set({ engine: info.sourceRate > 0 ? info : null }))
         api.onEngineError((msg) => get().showError(new Error(msg), 7000))
         api.onEngineState((e) => get().setEngineState(e))
+        api.onDeviceRejoined((names) => get().showToast(rejoinMessage(names), 6000))
         // Tepsiden seçilen profil: backend kaydetti ve uyguladı; arayüz de aynı değerlere geçer (geri alınabilir).
         api.onProfileApplied((id) => {
           const p = get().profiles.find((v) => v.id === id)

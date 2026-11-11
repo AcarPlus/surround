@@ -166,9 +166,11 @@ public sealed partial class SurroundBackend : IDisposable
             _store.Save(cfg);
             ConfigSaved?.Invoke(cfg);
             // Started "without the missing devices": the engine keeps following the saved config minus what is still absent.
+            List<DeviceProbe>? stillAbsent = null;
             if (_degraded && _host.IsRunning)
             {
                 var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
+                stillAbsent = probes.Where(p => !p.Present).ToList();
                 cfg = DeviceRecovery.WithoutMissing(cfg, probes, out _) ?? cfg;
             }
             // Waiting for devices: the restart uses this config, so its device list may have changed (e.g. a speaker removed).
@@ -199,7 +201,7 @@ public sealed partial class SurroundBackend : IDisposable
                     }
                     finally { RunningChanged?.Invoke(_host.IsRunning); }
                     _runningFingerprint = fp;
-                    await MarkStartedAsync(cfg);
+                    await MarkStartedAsync(cfg, stillAbsent);
                     await SyncDefaultDeviceAsync(cfg);
                 }
                 else
@@ -300,7 +302,7 @@ public sealed partial class SurroundBackend : IDisposable
             catch (Exception ex) { throw new BridgeException($"Motor başlatılamadı: {ex.Message}"); }
             _degraded = true;
             _runningFingerprint = reduced.EngineFingerprint();
-            await MarkStartedAsync(reduced);
+            await MarkStartedAsync(reduced, probes.Where(p => !p.Present).ToList());
             RunningChanged?.Invoke(true);
             await SyncDefaultDeviceAsync(reduced);
             AppLog.Info($"Eksik cihaz olmadan başlatıldı; sessiz hoparlörler: {string.Join(", ", dropped)}");

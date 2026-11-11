@@ -315,4 +315,80 @@ public class DeviceRecoveryTests
         Assert.Null(DeviceRecovery.WithoutMissing(cfg, new[] { Gone("SRC"), Up("A"), Up("B") }, out _));
         Assert.Null(DeviceRecovery.WithoutMissing(cfg, new[] { Up("SRC", 8), Gone("A"), Gone("B") }, out _));
     }
+
+    // --- Started without missing devices: rejoin when they return ---
+
+    private static DeviceRecovery Degraded(long now = 0)
+    {
+        var r = new DeviceRecovery(debounceMs: 1000);
+        r.Started(new[] { Up("SRC", 8), Up("A") }, now, new[] { Gone("B", "Sağ hoparlör") });
+        return r;
+    }
+
+    private static DeviceProbe[] Probes(DeviceProbe b) => new[] { Up("SRC", 8), Up("A"), b };
+
+    [Fact]
+    public void Degraded_start_watches_the_left_out_device_and_polls()
+    {
+        var r = Degraded(100);
+        Assert.Equal(new[] { "B" }, r.RejoinIds);
+        Assert.Equal(100 + DeviceRecovery.PollMs, r.NextCheckAt);
+    }
+
+    [Fact]
+    public void Degraded_absent_device_is_not_a_failure()
+    {
+        var r = Degraded();
+        Assert.Equal(RecoveryAction.None, r.Evaluate(Probes(Gone("B")), false, true, 500));
+        Assert.Equal(RecoveryState.Running, r.State);
+    }
+
+    [Fact]
+    public void Degraded_device_back_rejoins_after_debounce()
+    {
+        var r = Degraded();
+        Assert.Equal(RecoveryAction.None, r.Evaluate(Probes(Up("B")), false, true, 5000));
+        Assert.Equal(RecoveryState.Running, r.State);
+        Assert.Equal(6000, r.NextCheckAt);
+        Assert.Equal(RecoveryAction.Rejoin, r.Evaluate(Probes(Up("B")), false, false, 6000));
+        Assert.Equal(new[] { "Cihaz B" }, r.Rejoined);
+        Assert.Equal(RecoveryState.Waiting, r.State);
+        Assert.Empty(r.RejoinIds);
+    }
+
+    [Fact]
+    public void Degraded_device_flapping_restarts_the_debounce()
+    {
+        var r = Degraded();
+        r.Evaluate(Probes(Up("B")), false, true, 5000);
+        Assert.Equal(RecoveryAction.None, r.Evaluate(Probes(Up("B")), false, true, 5800));
+        Assert.Equal(RecoveryAction.None, r.Evaluate(Probes(Up("B")), false, false, 6500));
+        Assert.Equal(RecoveryAction.Rejoin, r.Evaluate(Probes(Up("B")), false, false, 6800));
+    }
+
+    [Fact]
+    public void Degraded_device_gone_again_resets_pending_rejoin()
+    {
+        var r = Degraded();
+        r.Evaluate(Probes(Up("B")), false, true, 5000);
+        Assert.Equal(RecoveryAction.None, r.Evaluate(Probes(Gone("B")), false, true, 5500));
+        Assert.Equal(RecoveryAction.None, r.Evaluate(Probes(Up("B")), false, true, 7000));
+        Assert.Equal(RecoveryAction.Rejoin, r.Evaluate(Probes(Up("B")), false, false, 8000));
+    }
+
+    [Fact]
+    public void Degraded_real_failure_still_stops()
+    {
+        var r = Degraded();
+        Assert.Equal(RecoveryAction.Stop, r.Evaluate(new[] { Up("SRC", 8), Gone("A"), Gone("B") }, false, true, 500));
+        Assert.Empty(r.RejoinIds);
+    }
+
+    [Fact]
+    public void Normal_start_never_rejoins()
+    {
+        var r = Running();
+        Assert.Empty(r.RejoinIds);
+        Assert.Null(r.NextCheckAt);
+    }
 }

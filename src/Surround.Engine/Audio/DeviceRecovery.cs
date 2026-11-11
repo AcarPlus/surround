@@ -11,7 +11,7 @@ public sealed record DeviceProbe(string Id, string? Name, bool Present, int Chan
 
 public enum RecoveryState { Stopped, Running, Waiting }
 
-public enum RecoveryAction { None, Stop, Restart }
+public enum RecoveryAction { None, Stop, Restart, Rejoin }
 
 /// <summary>What a user start should do (<see cref="DeviceRecovery.PlanStart"/>).</summary>
 public enum StartDecision { Start, Wait, Fail }
@@ -43,6 +43,8 @@ public sealed class DeviceRecovery
     private readonly Dictionary<string, string> _names = new(StringComparer.OrdinalIgnoreCase);
     private List<string> _watched = new();
     private long? _allPresentSince;
+    private List<string> _rejoin = new();
+    private long? _rejoinSince;
     private long _startedAt;
     private bool _autoRestarted;
     private int _retryMs;
@@ -60,6 +62,13 @@ public sealed class DeviceRecovery
     public string? Message { get; private set; }
     /// <summary>Device ids the running engine uses (set by <see cref="Started"/>).</summary>
     public IReadOnlyList<string> Watched => _watched;
+    /// <summary>
+    /// Devices a "start without the missing devices" left out: they are watched so the engine can take them in when they
+    /// come back (<see cref="RecoveryAction.Rejoin"/>). Empty for a normal start.
+    /// </summary>
+    public IReadOnlyList<string> RejoinIds => _rejoin;
+    /// <summary>Names of the devices that triggered the last <see cref="RecoveryAction.Rejoin"/>.</summary>
+    public IReadOnlyList<string> Rejoined { get; private set; } = Array.Empty<string>();
     /// <summary>Current wait before a restart (debounce, or the backed-off retry delay).</summary>
     public int RetryMs => _retryMs;
     /// <summary>When the host should call <see cref="Evaluate"/> again without an event (null: only on events).</summary>
@@ -126,7 +135,10 @@ public sealed class DeviceRecovery
     }
 
     /// <summary>The engine started (by the user, a config restart or <see cref="RecoveryAction.Restart"/>) with these devices.</summary>
-    public void Started(IReadOnlyList<DeviceProbe> devices, long nowMs)
+    /// <param name="absent">
+    /// Devices the engine was deliberately started without (<see cref="WithoutMissing"/>): watched for their return.
+    /// </param>
+    public void Started(IReadOnlyList<DeviceProbe> devices, long nowMs, IReadOnlyList<DeviceProbe>? absent = null)
     {
         _autoRestarted = State == RecoveryState.Waiting;
         if (!_autoRestarted) _retryMs = _debounceMs;
@@ -142,7 +154,10 @@ public sealed class DeviceRecovery
         Missing = Array.Empty<string>();
         Message = null;
         _allPresentSince = null;
-        NextCheckAt = null;
+        _rejoin = (absent ?? Array.Empty<DeviceProbe>()).Where(a => !a.Present).Select(a => a.Id).ToList();
+        foreach (var a in absent ?? Array.Empty<DeviceProbe>()) Remember(a);
+        _rejoinSince = null;
+        NextCheckAt = _rejoin.Count > 0 ? nowMs + PollMs : null;
     }
 
     /// <summary>The user stopped the engine (or it could not be kept running): stop watching.</summary>
@@ -153,6 +168,8 @@ public sealed class DeviceRecovery
         Message = null;
         _formats.Clear();
         _watched = new();
+        _rejoin = new();
+        _rejoinSince = null;
         _allPresentSince = null;
         _autoRestarted = false;
         _retryMs = _debounceMs;
@@ -178,7 +195,9 @@ public sealed class DeviceRecovery
     public RecoveryAction Evaluate(IReadOnlyList<DeviceProbe> required, bool streamFailed, bool deviceEvent, long nowMs)
     {
         foreach (var p in required) Remember(p);
-        var missing = required.Where(p => !p.Present).Select(NameOf).ToList();
+        // A device the engine was started without is expected to be absent; it only matters once it is back.
+        bool Expected(DeviceProbe p) => _rejoin.Any(r => SurroundConfig.SameId(r, p.Id));
+        var missing = required.Where(p => !p.Present && !Expected(p)).Select(NameOf).ToList();
 
         switch (State)
         {
@@ -186,7 +205,26 @@ public sealed class DeviceRecovery
             {
                 bool formatChanged = required.Any(p => p.Present && p.Channels > 0
                     && _formats.TryGetValue(p.Id, out var f) && (f.Channels != p.Channels || f.Rate != p.SampleRate));
-                if (!streamFailed && missing.Count == 0 && !formatChanged) return RecoveryAction.None;
+                if (!streamFailed && missing.Count == 0 && !formatChanged)
+                {
+                    var back = required.Where(p => p.Present && Expected(p)).ToList();
+                    if (back.Count == 0) { _rejoinSince = null; if (_rejoin.Count > 0) NextCheckAt = nowMs + PollMs; return RecoveryAction.None; }
+                    // Back: take it in after the debounce (a device event restarts the debounce), as a restart.
+                    if (_rejoinSince is null || deviceEvent) _rejoinSince = nowMs;
+                    if (nowMs - _rejoinSince.Value < _debounceMs) { NextCheckAt = _rejoinSince.Value + _debounceMs; return RecoveryAction.None; }
+                    Rejoined = back.Select(NameOf).ToList();
+                    State = RecoveryState.Waiting;
+                    Missing = Array.Empty<string>();
+                    Message = null;
+                    _retryMs = _debounceMs;
+                    _allPresentSince = nowMs;
+                    _rejoin = new();
+                    _rejoinSince = null;
+                    NextCheckAt = null; // the host reports back with Started or RestartFailed
+                    return RecoveryAction.Rejoin;
+                }
+                _rejoin = new();
+                _rejoinSince = null;
 
                 State = RecoveryState.Waiting;
                 Missing = missing;

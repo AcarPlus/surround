@@ -45,6 +45,9 @@ public sealed partial class SurroundBackend
     /// <summary>Raised on every running / waiting / stopped transition (and when the missing list changes), on a worker thread.</summary>
     public event Action<EngineStateDto>? StateChanged;
 
+    /// <summary>Devices the engine was started without came back and were taken in (names; the page shows a toast).</summary>
+    public event Action<IReadOnlyList<string>>? DeviceRejoined;
+
     public EngineStateDto EngineState => Volatile.Read(ref _state);
 
     private static long Now => Environment.TickCount64;
@@ -132,7 +135,7 @@ public sealed partial class SurroundBackend
         // Running: watch what the engine opened. Waiting: what a start would open now (the user may edit meanwhile).
         SurroundConfig? cfg = null;
         IReadOnlyList<string> ids;
-        if (state == RecoveryState.Running) ids = _recovery.Watched;
+        if (state == RecoveryState.Running) ids = _recovery.Watched.Concat(_recovery.RejoinIds).ToList();
         else
         {
             cfg = _store.Load();
@@ -143,7 +146,8 @@ public sealed partial class SurroundBackend
         if (deviceEvent || streamFailed)
             AppLog.Info("Cihaz değişikliği: " + string.Join(", ", changed.Where(c => ids.Any(i => SurroundConfig.SameId(i, c)))
                 .Select(c => DeviceEnumeration.Probe(c) is { } p ? $"{p.Name ?? DeviceRecovery.UnknownDeviceName} ({(p.Present ? "var" : "yok")})" : c)) + (streamFailed ? " [akış hatası]" : ""));
-        if (state == RecoveryState.Running && !deviceEvent && !streamFailed) return; // someone else's device
+        // Someone else's device; but with devices left out at start, the poll timer comes here to look for their return.
+        if (state == RecoveryState.Running && !deviceEvent && !streamFailed && _recovery.RejoinIds.Count == 0) return;
 
         var probes = await ProbeAsync(ids);
         switch (_recovery.Evaluate(probes, streamFailed, deviceEvent, Now))
@@ -160,31 +164,53 @@ public sealed partial class SurroundBackend
             case RecoveryAction.Restart:
                 await TryRestartAsync(cfg ?? _store.Load());
                 break;
+            case RecoveryAction.Rejoin:
+                await RejoinAsync();
+                break;
         }
         PublishState();
     }
 
-    private async Task TryRestartAsync(SurroundConfig cfg)
+    /// <summary>
+    /// Devices the engine was started without are back: restart with the saved config (minus whatever is still absent) and
+    /// tell the page. The engine is stopped first; if the restart fails the normal waiting recovery takes over.
+    /// </summary>
+    private async Task RejoinAsync()
+    {
+        var names = _recovery.Rejoined;
+        var cfg = _store.Load();
+        var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
+        var target = probes.All(p => p.Present) ? cfg : DeviceRecovery.WithoutMissing(cfg, probes, out _);
+        await _host.StopAsync();
+        RunningChanged?.Invoke(false);
+        if (target is null) { _recovery.RestartFailed("Cihaz döndü ama motor yeniden başlatılamadı.", Now); return; }
+        bool ok = await TryRestartAsync(target, probes.Where(p => !p.Present).ToList());
+        if (ok) { AppLog.Info($"Cihaz geri geldi, eklendi: {string.Join(", ", names)}"); DeviceRejoined?.Invoke(names); }
+        else await Task.Run(_guard.Restore);
+    }
+
+    private async Task<bool> TryRestartAsync(SurroundConfig cfg, IReadOnlyList<DeviceProbe>? absent = null)
     {
         var errors = await Task.Run(() => Validate(cfg));
-        if (errors.Count > 0) { _recovery.RestartFailed(errors[0], Now); return; }
+        if (errors.Count > 0) { _recovery.RestartFailed(errors[0], Now); return false; }
         try { await _host.StartAsync(cfg); }
-        catch (ConfigException ex) { _recovery.RestartFailed(ex.Errors.FirstOrDefault() ?? ex.Message, Now); return; }
-        catch (Exception ex) { _recovery.RestartFailed($"Motor başlatılamadı: {ex.Message}", Now); return; }
+        catch (ConfigException ex) { _recovery.RestartFailed(ex.Errors.FirstOrDefault() ?? ex.Message, Now); return false; }
+        catch (Exception ex) { _recovery.RestartFailed($"Motor başlatılamadı: {ex.Message}", Now); return false; }
 
-        _degraded = false;
+        _degraded = absent is { Count: > 0 };
         _runningFingerprint = cfg.EngineFingerprint();
-        await MarkStartedAsync(cfg);
+        await MarkStartedAsync(cfg, absent);
         RunningChanged?.Invoke(true);
         await SyncDefaultDeviceAsync(cfg); // the source may have come back after Windows moved the default away
+        return true;
     }
 
     /// <summary>Under <c>_gate</c>, after the engine started with <paramref name="cfg"/>: watch its devices.</summary>
-    private async Task MarkStartedAsync(SurroundConfig cfg)
+    private async Task MarkStartedAsync(SurroundConfig cfg, IReadOnlyList<DeviceProbe>? absent = null)
     {
         _recovery.SeedNames(cfg);
         var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
-        _recovery.Started(probes, Now);
+        _recovery.Started(probes, Now, absent);
         PublishState();
     }
 

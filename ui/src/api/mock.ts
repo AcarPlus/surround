@@ -138,6 +138,7 @@ export function createMockApi(): SurroundApi {
   if (typeof window !== 'undefined') {
     ;(window as unknown as { __trayProfile?: (id: string) => void }).__trayProfile = (id) => profileListeners.forEach((cb) => cb(id))
   }
+  const rejoinListeners = new Set<(names: string[]) => void>()
   let engineState: EngineState = { state: 'stopped', missing: [] }
   let dropTimers: ReturnType<typeof setTimeout>[] = []
 
@@ -388,6 +389,10 @@ export function createMockApi(): SurroundApi {
     onCalibration(cb) {
       calibrationListeners.add(cb)
       return () => calibrationListeners.delete(cb)
+    },
+    onDeviceRejoined(cb) {
+      rejoinListeners.add(cb)
+      return () => rejoinListeners.delete(cb)
     },
     onProfileApplied(cb) {
       profileListeners.add(cb)

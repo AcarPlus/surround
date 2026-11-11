@@ -60,6 +60,8 @@ export interface SurroundApi {
   onCalibration(cb: (p: CalibrationProgress) => void): () => void
   /** Tepsi menüsünden bir profil seçildi; backend onu kayıtlı yapılandırmaya zaten uyguladı. */
   onProfileApplied(cb: (id: string) => void): () => void
+  /** "Eksik cihaz olmadan başlat"tan sonra eksik cihaz geri geldi ve motora eklendi (cihaz adları). */
+  onDeviceRejoined(cb: (names: string[]) => void): () => void
 }
 
 export const api: SurroundApi = hasBridge() ? createBridgeApi() : createMockApi()

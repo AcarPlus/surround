@@ -8,7 +8,7 @@ namespace Surround.Desktop.Bridge;
 /// JSON-RPC over WebView2 messages.
 ///   page -> host: { id, method, params: [] }
 ///   host -> page: { id, result } | { id, error: { message, errors } }
-///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "engineState" | "calibration" | "profileApplied", data }
+///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "engineState" | "deviceRejoined" | "calibration" | "profileApplied", data }
 /// </summary>
 public sealed class BridgeHost : IDisposable
 {
@@ -36,6 +36,7 @@ public sealed class BridgeHost : IDisposable
         _backend.CalibrationProgress += OnCalibration;
         _backend.RunningChanged += OnRunningChanged;
         _backend.StateChanged += OnEngineState;
+        _backend.DeviceRejoined += OnDeviceRejoined;
         _backend.ProfileApplied += OnProfileApplied;
     }
 
@@ -43,6 +44,8 @@ public sealed class BridgeHost : IDisposable
     private void OnProfileApplied(string id) => PushEvent("profileApplied", new { id });
 
     private void OnEngineState(EngineStateDto state) => PushEvent("engineState", state);
+
+    private void OnDeviceRejoined(IReadOnlyList<string> names) => PushEvent("deviceRejoined", new { names });
 
     private static readonly EngineInfoDto Off = new("off", 0, 0, 0);
 
@@ -138,6 +141,7 @@ public sealed class BridgeHost : IDisposable
         _backend.CalibrationProgress -= OnCalibration;
         _backend.RunningChanged -= OnRunningChanged;
         _backend.StateChanged -= OnEngineState;
+        _backend.DeviceRejoined -= OnDeviceRejoined;
         _backend.ProfileApplied -= OnProfileApplied;
         try { _web.WebMessageReceived -= OnMessage; } catch { }
     }
