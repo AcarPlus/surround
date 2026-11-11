@@ -5,7 +5,10 @@ import {
   HEIGHT_CHANNELS,
   HEIGHT_DB_MAX,
   HEIGHT_DB_MIN,
+  HIGH_CUT_MAX_HZ,
+  HIGH_CUT_MIN_HZ,
   LOGICAL_CHANNELS,
+  SURROUND_DELAY_MAX_MS,
   UPMIX_DB_MAX,
   UPMIX_DB_MIN,
   type Device,
@@ -203,6 +206,51 @@ export function UpmixControls() {
         </span>
         <Switch checked={o.lfeEnabled} onChange={(lfeEnabled) => set({ lfeEnabled })} label="LFE" />
       </label>
+      <RearControls />
+    </div>
+  )
+}
+
+/** Yan/arka kanalların karakteri: gecikme, tiz kesme, ayrıştırma. Üçü de canlı uygulanır (docs/upmix.md). */
+function RearControls() {
+  const o = useStore((s) => s.upmixOptions)
+  const set = useStore((s) => s.setUpmixOptions)
+  // Kaydırıcının sol ucu (2500) "Kapalı"; 3000..16000 arası kHz.
+  const cutPos = o.surroundHighCutHz > 0 ? o.surroundHighCutHz : HIGH_CUT_MIN_HZ - 500
+  const cutText = o.surroundHighCutHz > 0 ? `${(o.surroundHighCutHz / 1000).toFixed(1).replace('.', ',')} kHz` : 'Kapalı'
+  return (
+    <div className="space-y-4 border-t border-line pt-4">
+      <h3 className="text-[13px] font-semibold">Arka kanallar</h3>
+      <BigSlider
+        label="Arka gecikme"
+        hint="Arka sesin ön sesten ne kadar sonra geldiği. Varsayılan 10 ms; düşürmek arkayı daha doğrudan yapar."
+        value={o.surroundDelayMs}
+        min={0}
+        max={SURROUND_DELAY_MAX_MS}
+        step={0.5}
+        display={`${o.surroundDelayMs.toFixed(1).replace('.', ',')} ms`}
+        onChange={(surroundDelayMs) => set({ surroundDelayMs })}
+      />
+      <BigSlider
+        label="Arka tiz kesme"
+        hint="Arka hoparlörlerin keskin tizlerini yumuşatır (sinema tarzı). Ucuz küçük uydularda sert ses için dene."
+        value={cutPos}
+        min={HIGH_CUT_MIN_HZ - 500}
+        max={HIGH_CUT_MAX_HZ}
+        step={500}
+        display={cutText}
+        onChange={(v) => set({ surroundHighCutHz: v < HIGH_CUT_MIN_HZ ? 0 : v })}
+      />
+      <BigSlider
+        label="Ayrıştırma (dağınıklık)"
+        hint="Arka sesi ne kadar “dağıtıp” yaydığı. Düşürmek yankı hissini azaltır, arka ses daha net ve doğrudan olur."
+        value={o.diffusion}
+        min={0}
+        max={1}
+        step={0.05}
+        display={`${Math.round(o.diffusion * 100)}%`}
+        onChange={(diffusion) => set({ diffusion })}
+      />
     </div>
   )
 }
