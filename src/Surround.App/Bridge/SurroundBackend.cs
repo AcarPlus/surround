@@ -156,7 +156,10 @@ public sealed partial class SurroundBackend : IDisposable
             // A brand-new empty room (no outputs, no speakers) is legitimate, not an error.
             if (cfg.Outputs.Count == 0 && cfg.Speakers.Count == 0) return null;
 
-            var errors = await Task.Run(() => Validate(cfg));
+            var (decision, errors, _) = await PlanStartAsync(cfg);
+            // Required devices not there yet: fine while stopped or waiting (a start waits for them); a running engine cannot restart onto them.
+            if (decision == StartDecision.Wait && !_host.IsRunning) return null;
+            if (decision == StartDecision.Wait) errors = await Task.Run(() => Validate(cfg));
             if (errors.Count > 0) throw new BridgeException(errors);
 
             if (_host.IsRunning)
@@ -190,6 +193,23 @@ public sealed partial class SurroundBackend : IDisposable
         finally { _gate.Release(); }
     }
 
+    /// <summary>
+    /// Config errors fail; required devices that are missing mean wait (see <see cref="DeviceRecovery.PlanStart"/>); only then
+    /// the remaining device checks (kind, channel count) run and may fail.
+    /// </summary>
+    private async Task<(StartDecision Decision, List<string> Errors, List<DeviceProbe> Probes)> PlanStartAsync(SurroundConfig cfg)
+    {
+        var configErrors = await Task.Run(() => ConfigValidator.Validate(cfg));
+        var probes = configErrors.Count > 0 ? new List<DeviceProbe>() : await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
+        var decision = DeviceRecovery.PlanStart(configErrors, probes);
+        if (decision == StartDecision.Start)
+        {
+            var errors = await Task.Run(() => Validate(cfg));
+            return errors.Count > 0 ? (StartDecision.Fail, errors, probes) : (StartDecision.Start, errors, probes);
+        }
+        return (decision, configErrors, probes);
+    }
+
     private static List<string> Validate(SurroundConfig cfg)
     {
         var errors = ConfigValidator.Validate(cfg);
@@ -214,8 +234,17 @@ public sealed partial class SurroundBackend : IDisposable
             // Waiting for devices counts as started: the restart happens on its own (Stop cancels it).
             if (_host.IsRunning || _recovery.State == RecoveryState.Waiting) return;
             var cfg = _store.Load();
-            var errors = await Task.Run(() => Validate(cfg));
-            if (errors.Count > 0) throw new BridgeException(errors);
+            var (decision, errors, probes) = await PlanStartAsync(cfg);
+            if (decision == StartDecision.Fail) throw new BridgeException(errors);
+            if (decision == StartDecision.Wait)
+            {
+                // A required device (e.g. a USB / Bluetooth speaker) is not there yet: behave as if it vanished while running.
+                _recovery.WaitForDevices(probes, Now);
+                PublishState();
+                SignalRecovery(); // the loop re-reads its next check time
+                await Task.Run(_guard.RestoreIfPending); // nothing is switched yet; undo a leftover of an earlier crash
+                return;
+            }
             try { await _host.StartAsync(cfg); }
             catch (ConfigException ex) { throw new BridgeException(ex.Errors); }
             catch (Exception ex) { throw new BridgeException($"Motor başlatılamadı: {ex.Message}"); }

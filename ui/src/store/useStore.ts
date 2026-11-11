@@ -524,7 +524,10 @@ export const useStore = create<State>()((set, get) => {
       try {
         await api.saveConfig(buildConfig(get()))
         await api.start()
-        set({ runState: 'running' })
+        // Eksik cihaz yüzünden motor beklemeye geçmiş olabilir (start hata vermez): gerçek durumu sor.
+        const e = await api.getEngineState().catch(() => null)
+        if (e?.state === 'waiting') get().setEngineState(e)
+        else set({ runState: 'running' })
       } catch (e) {
         set({ runState: 'stopped', status: [] })
         get().showToast(describeError(e), 7000, { tone: 'error' })

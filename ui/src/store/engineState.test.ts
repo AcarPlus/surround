@@ -68,6 +68,16 @@ describe('engineState', () => {
     expect(st().runState).toBe('stopped')
   })
 
+  it('Başlat eksik cihaz yüzünden beklemeye geçerse hata yok, durum bekliyor olur', async () => {
+    vi.spyOn(api, 'saveConfig').mockResolvedValue()
+    vi.spyOn(api, 'start').mockResolvedValue()
+    vi.spyOn(api, 'getEngineState').mockResolvedValue({ state: 'waiting', missing: ['Hoparlör (USB)'] })
+    await st().toggleRun()
+    expect(st().runState).toBe('waiting')
+    expect(st().waitingFor).toEqual(['Hoparlör (USB)'])
+    expect(st().toast).toBeNull()
+  })
+
   it('syncRunState beklemeyi bozmaz (beklerken durum listesi boştur)', async () => {
     vi.spyOn(api, 'getStatus').mockResolvedValueOnce([])
     useStore.setState({ runState: 'waiting', waitingFor: ['HDMI'] })

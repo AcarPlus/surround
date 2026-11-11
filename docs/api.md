@@ -99,7 +99,11 @@ yeniden başlar ve `running` gelir.
 - Beklerken varsayılan çıkış cihazı koruması devrede kalır (Windows varsayılanı kaynakta kalır); Durdur beklemeyi bitirir ve varsayılanı
   her zamanki gibi geri yükler. Beklerken `start()` bir şey yapmaz. Bekleme başlarken `engine` `"off"` ve boş `status` gelir;
   akış koptuysa ayrıca `engineError` gelir. Tepsi "Surround — cihaz bekleniyor" gösterir ve menüsü "Durdur"dur.
-- Açılışta (`startEngineOnLaunch`) cihaz eksikse motor beklemeye geçmez, eskisi gibi başlatılamadı balonu çıkar.
+- Başlatırken (`start()`, tepsiden Başlat, `startEngineOnLaunch` / `--tray` açılışı) gereken bir cihaz (çıkış ya da kaynak) henüz yoksa
+  hata verilmez: motor aynı şekilde `waiting` olur (eksik cihaz adları `missing` içinde), cihazlar gelince yukarıdaki kurallarla
+  kendiliğinden başlar; Durdur beklemeyi bitirir. Bu sırada `saveConfig` de eksik cihaz yüzünden hata vermez. Yapılandırma hataları
+  (geçersiz ayar, hoparlörü olmayan çıkış vb.) ve mevcut cihazın uygunsuzluğu (yanlış tür, az kanal) eskisi gibi hata olarak döner.
+  Başlangıçta bekleme varsayılan çıkış korumasını devreye sokmaz (yalnızca önceki çökmeden kalan bir geri yükleme bekliyorsa yapılır).
 
 ## Uygulama davranışı (masaüstü kabuğu)
 - **Varsayılan çıkış cihazı** (`switchDefaultDevice`): kaynak `loopback` ise motor başlayınca (ve kaynak değişerek yeniden başlayınca)
@@ -111,6 +115,6 @@ yeniden başlar ve `running` gelir.
   `minimizeToTray` açıkken pencereyi kapatmak gizler (ilk seferde "Surround arka planda çalışıyor" balonu), Çıkış gerçekten kapatır.
   Tepsiden başlat/durdur yapılınca arayüz `status`/`engine` olaylarıyla durumu görür.
 - `--tray` bağımsız değişkeni: pencere açılmadan tepsiye başlar (WebView ilk gösterimde oluşturulur). `startEngineOnLaunch` açıksa
-  yapılandırma geçerliyse motor otomatik başlar; başlayamazsa tepsi balonu gösterilir.
+  yapılandırma geçerliyse motor otomatik başlar (cihaz eksikse bekler); yapılandırma hatasıyla başlayamazsa tepsi balonu gösterilir.
 - Açılışta sıfır underrun: ilk saniyedeki underrun, DSP döngülerinin yavaş tier-0 JIT koduyla çalışmasından kaynaklanıyordu;
   `TieredPGO=false` ve `TieredCompilationQuickJitForLoops=false` (App ve Cli csproj) ile giderildi.

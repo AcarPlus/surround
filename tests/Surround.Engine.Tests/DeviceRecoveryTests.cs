@@ -200,4 +200,78 @@ public class DeviceRecoveryTests
         Assert.Empty(r.Missing);
         Assert.Equal(RecoveryAction.Restart, r.Evaluate(withoutB, false, false, 1100));
     }
+
+    // ---- start-up with missing devices ----
+
+    [Fact]
+    public void PlanStart_waits_for_missing_devices_and_fails_on_config_errors()
+    {
+        var none = Array.Empty<string>();
+        Assert.Equal(StartDecision.Start, DeviceRecovery.PlanStart(none, new[] { Up("SRC", 8), Up("A") }));
+        Assert.Equal(StartDecision.Wait, DeviceRecovery.PlanStart(none, new[] { Up("SRC", 8), Gone("A") }));
+        Assert.Equal(StartDecision.Wait, DeviceRecovery.PlanStart(none, new[] { Gone("SRC"), Up("A") }));
+        // A genuine non-device error stays an error, even with a device missing.
+        Assert.Equal(StartDecision.Fail, DeviceRecovery.PlanStart(new[] { "Hoparlör yok" }, Array.Empty<DeviceProbe>()));
+        Assert.Equal(StartDecision.Fail, DeviceRecovery.PlanStart(new[] { "x" }, new[] { Gone("A") }));
+    }
+
+    [Fact]
+    public void Start_with_missing_output_waits_then_restarts_when_it_appears_then_runs()
+    {
+        var r = new DeviceRecovery();
+        r.WaitForDevices(new[] { Up("SRC", 8), Gone("A", "USB Hoparlör") }, 0);
+        Assert.Equal(RecoveryState.Waiting, r.State);
+        Assert.Equal(new[] { "USB Hoparlör" }, r.Missing);
+        Assert.NotNull(r.NextCheckAt);
+
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Up("SRC", 8), Gone("A", "USB Hoparlör") }, false, false, 3000));
+        Assert.Equal(RecoveryState.Waiting, r.State);
+
+        // The device appears: restart only after the debounce.
+        var all = new[] { Up("SRC", 8), Up("A") };
+        Assert.Equal(RecoveryAction.None, r.Evaluate(all, false, true, 4000));
+        Assert.Empty(r.Missing);
+        Assert.Equal(RecoveryAction.Restart, r.Evaluate(all, false, false, 4000 + DeviceRecovery.DefaultDebounceMs));
+
+        r.Started(all, 5500);
+        Assert.Equal(RecoveryState.Running, r.State);
+        Assert.Equal(new[] { "SRC", "A" }, r.Watched);
+    }
+
+    [Fact]
+    public void Start_with_missing_source_waits_the_same_way()
+    {
+        var r = new DeviceRecovery();
+        r.WaitForDevices(new[] { Gone("SRC", "CABLE Input"), Up("A") }, 0);
+        Assert.Equal(new[] { "CABLE Input" }, r.Missing);
+        var all = new[] { Up("SRC", 8), Up("A") };
+        Assert.Equal(RecoveryAction.None, r.Evaluate(all, false, true, 1000));
+        Assert.Equal(RecoveryAction.Restart, r.Evaluate(all, false, false, 2000));
+    }
+
+    [Fact]
+    public void Stop_cancels_waiting_that_began_at_start()
+    {
+        var r = new DeviceRecovery();
+        r.WaitForDevices(new[] { Up("SRC", 8), Gone("A") }, 0);
+        r.Stopped();
+        Assert.Equal(RecoveryState.Stopped, r.State);
+        Assert.Empty(r.Missing);
+        Assert.Null(r.NextCheckAt);
+        Assert.Equal(RecoveryAction.None, r.Evaluate(new[] { Up("SRC", 8), Up("A") }, false, true, 10_000));
+    }
+
+    [Fact]
+    public void Failed_restart_after_a_start_wait_backs_off_like_the_running_case()
+    {
+        var r = new DeviceRecovery();
+        r.WaitForDevices(new[] { Up("SRC", 8), Gone("A") }, 0);
+        var all = new[] { Up("SRC", 8), Up("A") };
+        r.Evaluate(all, false, true, 1000);
+        Assert.Equal(RecoveryAction.Restart, r.Evaluate(all, false, false, 2000));
+        r.RestartFailed("Motor başlatılamadı: meşgul", 2000);
+        Assert.Equal(RecoveryState.Waiting, r.State);
+        Assert.Equal(2000, r.RetryMs);
+        Assert.Equal("Motor başlatılamadı: meşgul", r.Message);
+    }
 }

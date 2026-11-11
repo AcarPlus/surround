@@ -13,6 +13,9 @@ public enum RecoveryState { Stopped, Running, Waiting }
 
 public enum RecoveryAction { None, Stop, Restart }
 
+/// <summary>What a user start should do (<see cref="DeviceRecovery.PlanStart"/>).</summary>
+public enum StartDecision { Start, Wait, Fail }
+
 /// <summary>
 /// Decides what to do when audio devices change under a running engine (pure: no devices, no clock). The host feeds it
 /// device probes on every notification, stream failure and timer tick and carries out the returned action:
@@ -75,6 +78,34 @@ public sealed class DeviceRecovery
         Add(routed.Source.DeviceId);
         foreach (var o in routed.Outputs) Add(o.DeviceId);
         return ids;
+    }
+
+    /// <summary>
+    /// Decides a user start: a config error is a genuine failure; otherwise a required device that is not there yet means
+    /// wait for it (as if it had disappeared while running); otherwise start. Device-level problems of present devices
+    /// (wrong kind, too few channels) are not this method's business: the caller validates those when it gets <see cref="StartDecision.Start"/>.
+    /// </summary>
+    public static StartDecision PlanStart(IReadOnlyList<string> configErrors, IReadOnlyList<DeviceProbe> required) =>
+        configErrors.Count > 0 ? StartDecision.Fail
+        : required.Any(p => !p.Present) ? StartDecision.Wait
+        : StartDecision.Start;
+
+    /// <summary>
+    /// A user start found required devices missing: wait for them instead of failing. From now on <see cref="Evaluate"/>
+    /// restarts once they have all been present for the debounce time; <see cref="Stopped"/> cancels.
+    /// </summary>
+    public void WaitForDevices(IReadOnlyList<DeviceProbe> required, long nowMs)
+    {
+        foreach (var p in required) Remember(p);
+        State = RecoveryState.Waiting;
+        Missing = required.Where(p => !p.Present).Select(NameOf).ToList();
+        Message = null;
+        _formats.Clear();
+        _watched = new();
+        _autoRestarted = false;
+        _retryMs = _debounceMs;
+        _allPresentSince = null;
+        NextCheckAt = nowMs + PollMs;
     }
 
     /// <summary>The engine started (by the user, a config restart or <see cref="RecoveryAction.Restart"/>) with these devices.</summary>
