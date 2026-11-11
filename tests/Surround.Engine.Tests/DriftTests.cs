@@ -107,4 +107,58 @@ public class DriftTests
         Assert.InRange(reader.FillMs, 0, 3 * 40);
         Assert.True(ring.Count / ch < 3000);
     }
+
+    private static DriftResamplingReader Underrun(RingBuffer ring, LatencyGroup g, double target)
+    {
+        var r = new DriftResamplingReader(ring, 1, 48000, 48000, target, null, g);
+        ring.Write(new float[(int)(48000 * (target + 2) / 1000)]);
+        var buf = new float[480];
+        for (int i = 0; i < 20; i++) r.Render(buf); // drains the ring -> underrun
+        return r;
+    }
+
+    [Fact]
+    public void UnderrunOnOneOutputGrowsTargetOfAllOutputsInGroup()
+    {
+        var g = new LatencyGroup();
+        var a = Underrun(new RingBuffer(48000, 1), g, 40);
+        var bRing = new RingBuffer(48000, 1);
+        var b = new DriftResamplingReader(bRing, 1, 48000, 48000, 40, null, g);
+        Assert.True(a.Underruns >= 1);
+        Assert.True(g.ExtraMs > 0);
+        b.Render(new float[480]);
+        Assert.Equal(a.TargetMs, b.TargetMs, 6);
+        Assert.True(b.TargetMs > 40);
+    }
+
+    [Fact]
+    public void GroupExtraIsCappedAndDecaysAfterQuietPeriod()
+    {
+        long now = 0;
+        var g = new LatencyGroup(decayAfterMs: 1000, nowMs: () => now);
+        for (int i = 0; i < 50; i++) g.Grow(40, 40 + g.ExtraMs, 150);
+        Assert.InRange(g.ExtraMs, 1, LatencyGroup.MaxExtraMs);
+        double peak = g.ExtraMs;
+        now = 500; g.MaybeDecay();
+        Assert.Equal(peak, g.ExtraMs);          // still within the quiet window
+        now = 1500; g.MaybeDecay();
+        Assert.Equal(peak - LatencyGroup.DecayStepMs, g.ExtraMs, 6);
+        g.MaybeDecay();                         // next step needs another quiet period
+        Assert.Equal(peak - LatencyGroup.DecayStepMs, g.ExtraMs, 6);
+        for (int i = 0; i < 100; i++) { now += 1001; g.MaybeDecay(); }
+        Assert.Equal(0, g.ExtraMs);
+    }
+
+    [Fact]
+    public void ReadersFollowGroupDecay()
+    {
+        long now = 0;
+        var g = new LatencyGroup(1000, () => now);
+        var r = Underrun(new RingBuffer(48000, 1), g, 40);
+        double grown = r.TargetMs;
+        Assert.True(grown > 40);
+        now = 5000;
+        r.Render(new float[480]);
+        Assert.True(r.TargetMs < grown);
+    }
 }

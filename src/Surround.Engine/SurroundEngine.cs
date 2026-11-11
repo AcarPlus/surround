@@ -102,6 +102,7 @@ public sealed class SurroundEngine : IDisposable
             // A multichannel source may carry a real LFE at any time (the upmix only takes over while it is silent).
             var bass = PlanBass(fs, nativeMultichannel: n > 2);
 
+            var latencyGroup = new LatencyGroup();
             foreach (var o in _cfg.Outputs)
             {
                 var dev = en.GetDevice(o.DeviceId.Trim());
@@ -109,7 +110,7 @@ public sealed class SurroundEngine : IDisposable
                     .Where(s => SurroundConfig.SameId(s.OutputDeviceId, o.DeviceId))
                     .Select(s => BuildRoute(s, fs, bass))
                     .ToList();
-                var sink = new OutputSink(dev, o.BufferMs, fs, routes, _cfg.Processing.Limiter, _log, msg => Error?.Invoke(msg));
+                var sink = new OutputSink(dev, o.BufferMs, fs, routes, _cfg.Processing.Limiter, _log, msg => Error?.Invoke(msg), latencyGroup: latencyGroup);
                 _sinks.Add(sink);
                 _log?.Invoke($"Çıkış: {sink.Name} ({sink.DeviceRate} Hz, {sink.DeviceChannels} kanal), {routes.Count} hoparlör");
             }

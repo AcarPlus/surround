@@ -32,7 +32,7 @@ public sealed class OutputSink : IDisposable
     /// (the ring latency is then tracked via <see cref="RenderObserver"/> and compensated by the analysis instead).
     /// </param>
     public OutputSink(MMDevice device, double bufferMs, int sourceRate, IReadOnlyList<SpeakerRoute> routes, bool limiter, Action<string>? log = null, Action<string>? error = null,
-        bool steadyClock = false)
+        bool steadyClock = false, LatencyGroup? latencyGroup = null)
     {
         _device = device;
         _log = log;
@@ -50,7 +50,7 @@ public sealed class OutputSink : IDisposable
         // The limiter always runs (bypassed when off) so its look-ahead delay is the same on every output.
         _mixer = new SinkMixer(DeviceChannels, routes, sourceRate, new PeakLimiter(DeviceChannels, sourceRate) { Enabled = limiter });
         _reader = new DriftResamplingReader(_ring, DeviceChannels, sourceRate, DeviceRate, bufferMs,
-            steadyClock ? new DriftController(bufferMs, kp: 2e-5, ki: 1e-7) : null);
+            steadyClock ? new DriftController(bufferMs, kp: 2e-5, ki: 1e-7) : null, latencyGroup);
         BufferMs = bufferMs;
 
         _out = new WasapiOut(device, AudioClientShareMode.Shared, true, 30);
