@@ -91,6 +91,23 @@ public sealed class DeviceRecovery
         : StartDecision.Start;
 
     /// <summary>
+    /// "Start without the missing devices": a copy of <paramref name="cfg"/> where speakers (and outputs) on absent devices are
+    /// left out (i.e. muted), so the rest can play. Null when that is impossible: the source itself is absent, or nothing
+    /// would play. <paramref name="dropped"/> receives the names of the left-out speakers. The saved config is untouched.
+    /// </summary>
+    public static SurroundConfig? WithoutMissing(SurroundConfig cfg, IReadOnlyList<DeviceProbe> probes, out List<string> dropped)
+    {
+        dropped = new();
+        bool Gone(string? id) => probes.Any(p => !p.Present && SurroundConfig.SameId(p.Id, id));
+        if (Gone(cfg.Source.DeviceId)) return null;
+        var copy = SurroundConfig.Parse(cfg.ToJson());
+        dropped = copy.Speakers.Where(s => Gone(s.OutputDeviceId)).Select(s => s.Name).ToList();
+        copy.Speakers.RemoveAll(s => Gone(s.OutputDeviceId));
+        copy.Outputs.RemoveAll(o => Gone(o.DeviceId));
+        return copy.ForRouting().Speakers.Any(s => !s.Mute) ? copy : null;
+    }
+
+    /// <summary>
     /// A user start found required devices missing: wait for them instead of failing. From now on <see cref="Evaluate"/>
     /// restarts once they have all been present for the debounce time; <see cref="Stopped"/> cancels.
     /// </summary>
@@ -214,6 +231,21 @@ public sealed class DeviceRecovery
         if (!string.IsNullOrWhiteSpace(p.Name)) _names[p.Id] = p.Name!;
     }
 
+    /// <summary>Shown when neither Windows nor the saved config knows a missing device's name (never the raw endpoint id).</summary>
+    public const string UnknownDeviceName = "bilinmeyen cihaz";
+
+    /// <summary>Names saved in the config (<c>deviceName</c>) for devices Windows no longer reports.</summary>
+    public void SeedNames(SurroundConfig cfg)
+    {
+        void Seed(string? id, string? name)
+        {
+            if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name) && !_names.ContainsKey(id.Trim()))
+                _names[id.Trim()] = name!;
+        }
+        Seed(cfg.Source.DeviceId, cfg.Source.DeviceName);
+        foreach (var o in cfg.Outputs) Seed(o.DeviceId, o.DeviceName);
+    }
+
     private string NameOf(DeviceProbe p) =>
-        !string.IsNullOrWhiteSpace(p.Name) ? p.Name! : _names.TryGetValue(p.Id, out var n) ? n : p.Id;
+        !string.IsNullOrWhiteSpace(p.Name) ? p.Name! : _names.TryGetValue(p.Id, out var n) ? n : UnknownDeviceName;
 }

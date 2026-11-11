@@ -6,6 +6,9 @@ namespace Surround.Engine.Config;
 public sealed class SourceConfig
 {
     public string DeviceId { get; set; } = "";
+    /// <summary>Friendly name last seen for <see cref="DeviceId"/> (shown while the device is absent); the engine ignores it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeviceName { get; set; }
     /// <summary>"loopback" or "capture".</summary>
     public string Mode { get; set; } = "loopback";
 
@@ -17,6 +20,9 @@ public sealed class SourceConfig
 public sealed class OutputConfig
 {
     public string DeviceId { get; set; } = "";
+    /// <summary>Friendly name last seen for <see cref="DeviceId"/> (shown while the device is absent); the engine ignores it.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DeviceName { get; set; }
     public double LatencyMs { get; set; }
     public double BufferMs { get; set; } = 40;
 
@@ -187,7 +193,8 @@ public sealed class SurroundConfig
         copy.Processing = new();
         copy.UpmixOptions = new() { Mode = copy.UpmixOptions.IsGame ? UpmixOptions.Game : UpmixOptions.Film };
         copy.Source.Extra = null;
-        foreach (var o in copy.Outputs) o.Extra = null;
+        copy.Source.DeviceName = null;
+        foreach (var o in copy.Outputs) { o.Extra = null; o.DeviceName = null; }
         foreach (var s in copy.Speakers) { s.Extra = null; s.Name = ""; s.Eq = null; s.EqPreset = null; }
         return copy.ToJson();
     }

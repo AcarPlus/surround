@@ -60,6 +60,8 @@ public sealed partial class SurroundBackend : IDisposable
             case "listDevices": return await Task.Run(ListDevices);
             case "getConfig": return await Task.Run(GetConfig);
             case "takeConfigNotice": return _store.TakeNotice() is { } n ? new { backupPath = n.BackupPath } : null;
+            case "startWithoutMissing": await StartWithoutMissingAsync(); return null;
+            case "openLogFolder": OpenLogFolder(); return null;
             case "resetConfig": await Task.Run(_store.ResetToDefault); return null;
             case "saveConfig": return await SaveConfigAsync(Arg(args, 0));
             case "start": await StartAsync(); return null;
@@ -74,6 +76,16 @@ public sealed partial class SurroundBackend : IDisposable
             case "cancelCalibration": Volatile.Read(ref _calCts)?.Cancel(); return null;
             default: throw new BridgeException($"Bilinmeyen yöntem: {method}");
         }
+    }
+
+    private static void OpenLogFolder()
+    {
+        try
+        {
+            Directory.CreateDirectory(AppPaths.LogDir);
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{AppPaths.LogDir}\"") { UseShellExecute = true });
+        }
+        catch (Exception ex) { throw new BridgeException($"Kayıt klasörü açılamadı: {ex.Message}"); }
     }
 
     private static JsonElement Arg(JsonElement args, int i) =>
@@ -150,8 +162,15 @@ public sealed partial class SurroundBackend : IDisposable
             }
             // Always persist: the UI edits continuously and the document is a draft until started.
             if (cfg is null) return null;
+            await Task.Run(() => FillDeviceNames(cfg));
             _store.Save(cfg);
             ConfigSaved?.Invoke(cfg);
+            // Started "without the missing devices": the engine keeps following the saved config minus what is still absent.
+            if (_degraded && _host.IsRunning)
+            {
+                var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
+                cfg = DeviceRecovery.WithoutMissing(cfg, probes, out _) ?? cfg;
+            }
             // Waiting for devices: the restart uses this config, so its device list may have changed (e.g. a speaker removed).
             if (_recovery.State == RecoveryState.Waiting) SignalRecovery();
 
@@ -201,6 +220,7 @@ public sealed partial class SurroundBackend : IDisposable
     /// </summary>
     private async Task<(StartDecision Decision, List<string> Errors, List<DeviceProbe> Probes)> PlanStartAsync(SurroundConfig cfg)
     {
+        _recovery.SeedNames(cfg);
         var configErrors = await Task.Run(() => ConfigValidator.Validate(cfg));
         var probes = configErrors.Count > 0 ? new List<DeviceProbe>() : await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
         var decision = DeviceRecovery.PlanStart(configErrors, probes);
@@ -250,12 +270,63 @@ public sealed partial class SurroundBackend : IDisposable
             try { await _host.StartAsync(cfg); }
             catch (ConfigException ex) { throw new BridgeException(ex.Errors); }
             catch (Exception ex) { throw new BridgeException($"Motor başlatılamadı: {ex.Message}"); }
+            _degraded = false;
             _runningFingerprint = cfg.EngineFingerprint();
             await MarkStartedAsync(cfg);
             RunningChanged?.Invoke(true);
             await SyncDefaultDeviceAsync(cfg);
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>
+    /// The user chose to stop waiting for absent devices: starts with the devices that are there (speakers on absent ones
+    /// stay silent; the saved config is not changed). Fails when the source itself is absent or nothing would play.
+    /// </summary>
+    public async Task StartWithoutMissingAsync()
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            if (_host.IsRunning) return;
+            var cfg = _store.Load();
+            var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
+            var reduced = DeviceRecovery.WithoutMissing(cfg, probes, out var dropped)
+                ?? throw new BridgeException("Eksik cihaz olmadan başlatılamıyor: kaynak cihaz yok ya da çalacak hoparlör kalmıyor.");
+            var errors = await Task.Run(() => Validate(reduced));
+            if (errors.Count > 0) throw new BridgeException(errors);
+            try { await _host.StartAsync(reduced); }
+            catch (ConfigException ex) { throw new BridgeException(ex.Errors); }
+            catch (Exception ex) { throw new BridgeException($"Motor başlatılamadı: {ex.Message}"); }
+            _degraded = true;
+            _runningFingerprint = reduced.EngineFingerprint();
+            await MarkStartedAsync(reduced);
+            RunningChanged?.Invoke(true);
+            await SyncDefaultDeviceAsync(reduced);
+            AppLog.Info($"Eksik cihaz olmadan başlatıldı; sessiz hoparlörler: {string.Join(", ", dropped)}");
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Remembers each device's friendly name in the config (from Windows, else the previous file) so it can be shown while absent.</summary>
+    private void FillDeviceNames(SurroundConfig cfg)
+    {
+        Dictionary<string, string> known = new(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var prev = _store.Load();
+            if (!string.IsNullOrWhiteSpace(prev.Source.DeviceName)) known[prev.Source.DeviceId.Trim()] = prev.Source.DeviceName!;
+            foreach (var o in prev.Outputs.Where(o => !string.IsNullOrWhiteSpace(o.DeviceName))) known[o.DeviceId.Trim()] = o.DeviceName!;
+        }
+        catch { /* first save */ }
+        string? NameFor(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id)) return null;
+            string? live = DeviceEnumeration.Probe(id).Name;
+            return !string.IsNullOrWhiteSpace(live) ? live : known.GetValueOrDefault(id.Trim());
+        }
+        cfg.Source.DeviceName = NameFor(cfg.Source.DeviceId) ?? cfg.Source.DeviceName;
+        foreach (var o in cfg.Outputs) o.DeviceName = NameFor(o.DeviceId) ?? o.DeviceName;
     }
 
     public async Task StopAsync()

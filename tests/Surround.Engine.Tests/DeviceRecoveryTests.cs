@@ -182,11 +182,24 @@ public class DeviceRecoveryTests
     }
 
     [Fact]
-    public void Missing_device_names_fall_back_to_the_remembered_name_then_the_id()
+    public void Missing_device_names_fall_back_to_the_remembered_name_then_a_generic_label()
     {
         var r = Running(0, Up("SRC", 8), Up("A"));
         r.Evaluate(new[] { Gone("SRC"), Gone("A", "Hoparlör (USB)"), Gone("NEW") }, false, true, 0);
-        Assert.Equal(new[] { "Cihaz SRC", "Hoparlör (USB)", "NEW" }, r.Missing);
+        Assert.Equal(new[] { "Cihaz SRC", "Hoparlör (USB)", DeviceRecovery.UnknownDeviceName }, r.Missing);
+    }
+
+    [Fact]
+    public void Missing_device_uses_the_name_saved_in_the_config()
+    {
+        var cfg = SurroundConfig.Parse("""
+        { "source": { "deviceId": "SRC", "deviceName": "Kaynak" },
+          "outputs": [ { "deviceId": "USB1", "deviceName": "USB Hoparlör" } ] }
+        """);
+        var r = new DeviceRecovery(0);
+        r.SeedNames(cfg);
+        r.WaitForDevices(new[] { Gone("SRC"), Gone("USB1"), Gone("ZZZ") }, 0);
+        Assert.Equal(new[] { "Kaynak", "USB Hoparlör", DeviceRecovery.UnknownDeviceName }, r.Missing);
     }
 
     [Fact]
@@ -273,5 +286,33 @@ public class DeviceRecoveryTests
         Assert.Equal(RecoveryState.Waiting, r.State);
         Assert.Equal(2000, r.RetryMs);
         Assert.Equal("Motor başlatılamadı: meşgul", r.Message);
+    }
+
+    private const string TwoOutputs = """
+    { "source": { "deviceId": "SRC", "mode": "loopback" },
+      "outputs": [ { "deviceId": "A" }, { "deviceId": "B" } ],
+      "speakers": [
+        { "name": "a", "outputDeviceId": "A", "deviceChannel": 1, "source": { "FL": 1 } },
+        { "name": "b", "outputDeviceId": "B", "deviceChannel": 1, "source": { "FR": 1 } } ] }
+    """;
+
+    [Fact]
+    public void WithoutMissing_drops_speakers_and_outputs_on_absent_devices_only()
+    {
+        var cfg = SurroundConfig.Parse(TwoOutputs);
+        var r = DeviceRecovery.WithoutMissing(cfg, new[] { Up("SRC", 8), Up("A"), Gone("B") }, out var dropped);
+        Assert.NotNull(r);
+        Assert.Equal(new[] { "b" }, dropped);
+        Assert.Equal(new[] { "a" }, r!.Speakers.Select(s => s.Name).ToArray());
+        Assert.Equal(new[] { "A" }, r.Outputs.Select(o => o.DeviceId).ToArray());
+        Assert.Equal(2, cfg.Speakers.Count); // the saved config is untouched
+    }
+
+    [Fact]
+    public void WithoutMissing_is_impossible_without_source_or_without_any_playing_speaker()
+    {
+        var cfg = SurroundConfig.Parse(TwoOutputs);
+        Assert.Null(DeviceRecovery.WithoutMissing(cfg, new[] { Gone("SRC"), Up("A"), Up("B") }, out _));
+        Assert.Null(DeviceRecovery.WithoutMissing(cfg, new[] { Up("SRC", 8), Gone("A"), Gone("B") }, out _));
     }
 }

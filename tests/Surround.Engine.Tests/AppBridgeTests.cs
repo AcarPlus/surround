@@ -111,4 +111,41 @@ public class AppBridgeTests
         Assert.Equal(new[] { "A", "B" }, dtos.Select(d => d.DeviceId).ToArray());
         Assert.Equal(41, dtos[1].FillMs);
     }
+
+    [Theory]
+    [InlineData("""{ "outputs":[{"deviceId":"A","latencyMs":5000}], "speakers":[{"name":"x","outputDeviceId":"A","source":{"FL":1}}] }""", "latencyMs")]
+    [InlineData("""{ "outputs":[{"deviceId":"A"}], "speakers":[{"name":"x","outputDeviceId":"A","source":{"FL":1},"delayMs":2000}] }""", "delayMs")]
+    [InlineData("""{ "outputs":[{"deviceId":"A"}], "speakers":[{"name":"x","outputDeviceId":"A","source":{"FL":1},"gainDb":40}] }""", "gainDb")]
+    [InlineData("""{ "outputs":[{"deviceId":"A"}], "speakers":[{"name":"x","outputDeviceId":"A","source":{"FL":1},"gainDb":-100}] }""", "gainDb")]
+    public void ValidatorRejectsAbsurdDelaysAndGains(string json, string field)
+    {
+        var cfg = SurroundConfig.Parse(json);
+        cfg.Source.DeviceId = "SRC";
+        Assert.Contains(ConfigValidator.Validate(cfg), m => m.Contains(field));
+    }
+
+    [Fact]
+    public void RollingLogKeepsSevenDaysAndCapsFileSize()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "surround-log-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var now = new DateTime(2026, 11, 11, 12, 0, 0);
+        foreach (int d in new[] { 0, 3, 6, 7, 20 })
+            File.WriteAllText(Path.Combine(dir, $"surround-{now.AddDays(-d):yyyyMMdd}.log"), "x");
+        var log = new Surround.Engine.Logging.RollingLog(dir, () => now);
+        log.Write("BILGI", "merhaba\nsatir");
+        var names = Directory.GetFiles(dir).Select(Path.GetFileName).OrderBy(x => x).ToArray();
+        Assert.Equal(3, names.Length); // days 0,3,6 kept (7 days), 7 and 20 removed
+        Assert.DoesNotContain(names, n => n!.Contains("20261104") || n.Contains("20261022"));
+        string today = log.PathFor(now);
+        Assert.Contains("[BILGI] merhaba satir", File.ReadAllText(today));
+
+        File.WriteAllBytes(today, new byte[Surround.Engine.Logging.RollingLog.MaxBytes]);
+        log.Write("BILGI", "too much");
+        long len = new FileInfo(today).Length;
+        log.Write("BILGI", "still too much");
+        Assert.Equal(len, new FileInfo(today).Length); // the limit note is written once, then nothing
+        Assert.DoesNotContain("too much", File.ReadAllText(today).Substring((int)Surround.Engine.Logging.RollingLog.MaxBytes));
+        Directory.Delete(dir, true);
+    }
 }

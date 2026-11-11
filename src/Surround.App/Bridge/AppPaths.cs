@@ -11,6 +11,8 @@ public static class AppPaths
     public static string CacheDir { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Surround");
 
+    /// <summary>%AppData%\Surround\logs: günlük dosyaları (surround-YYYYMMDD.log).</summary>
+    public static string LogDir => Path.Combine(DataDir, "logs");
     public static string ConfigFile => Path.Combine(DataDir, "config.json");
     /// <summary>Uygulama ayarları (varsayılan cihaz, Windows ile başlat, tepsi ...); motor yapılandırmasından ayrı.</summary>
     public static string AppSettingsFile => Path.Combine(DataDir, "app.json");

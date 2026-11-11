@@ -23,6 +23,7 @@
     <!-- App-side logic without WebView2/WinForms: compiled into the tests directly. -->
     <Compile Include="..\..\src\Surround.App\Bridge\ConfigStore.cs" Link="AppLinked\ConfigStore.cs" />
     <Compile Include="..\..\src\Surround.App\Bridge\AppPaths.cs" Link="AppLinked\AppPaths.cs" />
+    <Compile Include="..\..\src\Surround.App\Bridge\AppLog.cs" Link="AppLinked\AppLog.cs" />
     <Compile Include="..\..\src\Surround.App\Bridge\EngineHost.cs" Link="AppLinked\EngineHost.cs" />
   </ItemGroup>
 

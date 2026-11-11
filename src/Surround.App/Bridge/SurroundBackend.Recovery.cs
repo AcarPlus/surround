@@ -39,6 +39,8 @@ public sealed partial class SurroundBackend
     private long _nextCheckAt; // Environment.TickCount64 ms; 0 = only on events
     private volatile bool _watching;
     private EngineStateDto _state = EngineStateDto.Stopped;
+    /// <summary>The engine runs "without the missing devices" (a reduced copy of the saved config).</summary>
+    private volatile bool _degraded;
 
     /// <summary>Raised on every running / waiting / stopped transition (and when the missing list changes), on a worker thread.</summary>
     public event Action<EngineStateDto>? StateChanged;
@@ -134,9 +136,13 @@ public sealed partial class SurroundBackend
         else
         {
             cfg = _store.Load();
+            _recovery.SeedNames(cfg);
             ids = DeviceRecovery.RequiredIds(cfg);
         }
         bool deviceEvent = changed.Any(c => ids.Any(i => SurroundConfig.SameId(i, c)));
+        if (deviceEvent || streamFailed)
+            AppLog.Info("Cihaz değişikliği: " + string.Join(", ", changed.Where(c => ids.Any(i => SurroundConfig.SameId(i, c)))
+                .Select(c => DeviceEnumeration.Probe(c) is { } p ? $"{p.Name ?? DeviceRecovery.UnknownDeviceName} ({(p.Present ? "var" : "yok")})" : c)) + (streamFailed ? " [akış hatası]" : ""));
         if (state == RecoveryState.Running && !deviceEvent && !streamFailed) return; // someone else's device
 
         var probes = await ProbeAsync(ids);
@@ -166,6 +172,7 @@ public sealed partial class SurroundBackend
         catch (ConfigException ex) { _recovery.RestartFailed(ex.Errors.FirstOrDefault() ?? ex.Message, Now); return; }
         catch (Exception ex) { _recovery.RestartFailed($"Motor başlatılamadı: {ex.Message}", Now); return; }
 
+        _degraded = false;
         _runningFingerprint = cfg.EngineFingerprint();
         await MarkStartedAsync(cfg);
         RunningChanged?.Invoke(true);
@@ -175,6 +182,7 @@ public sealed partial class SurroundBackend
     /// <summary>Under <c>_gate</c>, after the engine started with <paramref name="cfg"/>: watch its devices.</summary>
     private async Task MarkStartedAsync(SurroundConfig cfg)
     {
+        _recovery.SeedNames(cfg);
         var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
         _recovery.Started(probes, Now);
         PublishState();
@@ -183,6 +191,7 @@ public sealed partial class SurroundBackend
     /// <summary>Under <c>_gate</c>: the engine is (and stays) stopped.</summary>
     private void MarkStopped()
     {
+        _degraded = false;
         _recovery.Stopped();
         PublishState();
     }
@@ -202,6 +211,7 @@ public sealed partial class SurroundBackend
         _watching = _recovery.State != RecoveryState.Stopped;
         if (next.SameAs(Volatile.Read(ref _state))) return;
         Volatile.Write(ref _state, next);
+        AppLog.Info($"Durum: {next.State}" + (next.Missing.Count > 0 ? $" (eksik: {string.Join(", ", next.Missing)})" : "") + (next.Message is null ? "" : $" - {next.Message}"));
         StateChanged?.Invoke(next);
     }
 }

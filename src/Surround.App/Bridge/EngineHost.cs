@@ -135,9 +135,11 @@ public sealed class EngineHost : IDisposable
             _engine = CreateAndStart(cfg);
             _config = cfg;
             _running = true;
+            AppLog.Info($"Motor başladı ({cfg.Speakers.Count} hoparlör, {cfg.Outputs.Count} çıkış).");
         }
-        catch
+        catch (Exception ex)
         {
+            AppLog.Error($"Motor başlatılamadı: {ex.Message}");
             _engine = null;
             _config = null;
             _running = false;
@@ -161,10 +163,12 @@ public sealed class EngineHost : IDisposable
     {
         var engine = new SurroundEngine(cfg, msg =>
         {
+            AppLog.Info(msg);
             if (msg.StartsWith("Uyarı", StringComparison.Ordinal)) Error?.Invoke(msg);
         });
         engine.Error += msg =>
         {
+            AppLog.Error(msg);
             Error?.Invoke(msg);
             if (ReferenceEquals(Volatile.Read(ref _engine), engine)) StreamFailed?.Invoke();
         };
@@ -180,6 +184,7 @@ public sealed class EngineHost : IDisposable
         _running = false;
         _lastStatus = Array.Empty<SinkStatusDto>();
         if (engine is null) return;
+        AppLog.Info("Motor durdu.");
         try { engine.Dispose(); }
         catch (Exception ex) { Error?.Invoke($"Motor durdurulurken hata: {ex.Message}"); }
         // One last all-silent frame so the meters fall to the floor.

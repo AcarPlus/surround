@@ -32,7 +32,7 @@ public static class ConfigValidator
             var o = cfg.Outputs[i];
             if (string.IsNullOrWhiteSpace(o.DeviceId)) { e.Add($"outputs[{i}].deviceId boş olamaz."); continue; }
             if (!seen.Add(o.DeviceId.Trim())) e.Add($"outputs[{i}]: aynı cihaz birden fazla kez tanımlı.");
-            if (o.LatencyMs < 0 || !double.IsFinite(o.LatencyMs)) e.Add($"outputs[{i}].latencyMs geçersiz.");
+            if (!(o.LatencyMs >= 0 && o.LatencyMs <= MaxMs)) e.Add($"outputs[{i}].latencyMs 0-{MaxMs} ms aralığında olmalı (bulunan: {o.LatencyMs}).");
             if (!(o.BufferMs >= 10 && o.BufferMs <= 500)) e.Add($"outputs[{i}].bufferMs 10-500 aralığında olmalı.");
             if (mode == "loopback" && SurroundConfig.SameId(o.DeviceId, cfg.Source.DeviceId))
                 e.Add($"outputs[{i}]: loopback kaynak cihazı aynı zamanda çıkış olamaz (geri besleme döngüsü).");
@@ -51,8 +51,8 @@ public static class ConfigValidator
                 if (Channels.IndexOf(key) < 0) e.Add($"{n}: bilinmeyen kanal adı '{key}' (geçerli: {string.Join(", ", Channels.Names)}).");
                 if (!double.IsFinite(gain)) e.Add($"{n}: '{key}' kazancı geçersiz.");
             }
-            if (s.DelayMs < 0 || !double.IsFinite(s.DelayMs)) e.Add($"{n}: delayMs geçersiz.");
-            if (!double.IsFinite(s.GainDb)) e.Add($"{n}: gainDb geçersiz.");
+            if (!(s.DelayMs >= 0 && s.DelayMs <= MaxMs)) e.Add($"{n}: delayMs 0-{MaxMs} ms aralığında olmalı (bulunan: {s.DelayMs}).");
+            if (!(s.GainDb >= MinGainDb && s.GainDb <= MaxGainDb)) e.Add($"{n}: gainDb {MinGainDb}..{MaxGainDb} dB aralığında olmalı (bulunan: {s.GainDb}).");
             if (s.Eq != null) CheckEq(e, $"{n}: eq", s.Eq);
             if (!(s.HighPassHz == 0 || (s.HighPassHz >= MinHighPassHz && s.HighPassHz <= MaxHighPassHz)))
                 e.Add($"{n}: highPassHz 0 (kapalı) veya {MinHighPassHz}-{MaxHighPassHz} aralığında olmalı.");
@@ -79,6 +79,9 @@ public static class ConfigValidator
     }
 
     public const double MinHighPassHz = 40, MaxHighPassHz = 250, MaxEqDb = 12;
+
+    /// <summary>Upper bound for delays / latencies (ms) and the speaker gain range (dB).</summary>
+    public const double MaxMs = 1000, MinGainDb = -60, MaxGainDb = 24;
 
     private static void CheckRange(List<string> e, string field, double v, double min, double max)
     {

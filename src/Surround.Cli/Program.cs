@@ -61,6 +61,8 @@ static void PrintUsage()
           surround run --config <yol>               Motoru çalıştır (Ctrl+C ile durdur)
           surround tone --device <id> --channel <n> [--seconds 2]
                                                     Cihazın tek kanalında 440 Hz test sesi
+          surround probe --device <id> [--seconds 5] [--buffer 20]
+                                                    Bir çıkış cihazını loopback ile dinleyip paket boyutu/aralığı istatistiği (tanı)
           surround calibrate --config <yol> --mic <id> [--mic-loopback] [--speakers id1,id2] [--ref id]
                              [--repeats 2] [--level -20] [--low-band id,...]
                                                     Mikrofonla hoparlör gecikme/seviye ölçümü
