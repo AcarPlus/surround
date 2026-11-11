@@ -7,7 +7,7 @@ Motor (C#) ile arayüz (TS) arasındaki config alanları. JSON camelCase. Alan y
 ```
 yakalama → mantıksal 12 kanal (map: kaynak en fazla 7.1 doldurur; üst şeritler türetilir, bkz. docs/duzen.md)
          → upmix (açıksa; çok kanallı kaynakta yalnızca içerik stereo iken, bkz. docs/upmix.md)
-         → [genel işleme: preamp, 10 bant EQ, bas güçlendirme, netlik, dinamik güçlendirme, ortam]  (tüm kanallara aynı ayar, dinamik bağlı; kullanılmayan üst şeritler atlanır)
+         → [genel işleme: preamp (ya da otomatik), 10 bant EQ, parametrik bantlar, bas güçlendirme, netlik, dinamik güçlendirme, ortam]  (tüm kanallara aynı ayar, dinamik bağlı; kullanılmayan üst şeritler atlanır)
          → seviye ölçerleri
          → kanal katlama: hiçbir hoparlörün çalmadığı kanallar komşulara (FC→FL+FR, SL→BL, …)
          → bas yolu: highPassHz'li hoparlörlerden kesilen bas → bassReceiver hoparlörlere
@@ -23,11 +23,27 @@ yakalama → mantıksal 12 kanal (map: kaynak en fazla 7.1 doldurur; üst şerit
 | `preset` | string | "flat" | Yalnızca arayüz etiketi; motor yok sayar |
 | `preampDb` | -24..+12 | 0 | Giriş kazancı |
 | `eq` | 10 × dB, -12..+12 | sıfırlar | Bantlar: 31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k Hz. Uçlar raf (shelf), ortadakiler tepe (peaking, Q≈1.4) |
+| `autoPreamp` | bool | false (eski config'lerde alan yok = false) | true → etkin ön kazanç `-max(0, birleşik tepe)` dB olur, `preampDb` yok sayılır. Tepe: 10 bant + bas + netlik + `peq` toplam genlik yanıtının 20 Hz–20 kHz üzerindeki (1000 noktalı log ızgara) en yüksek değeri; -24 dB'de sınırlanır. Tek tanım: `FrequencyResponse.AutoPreampDb` (C#, otoriter); arayüz aynı formülü `ui/src/lib/eqCurve.ts`'te yansıtır ve yalnızca gösterir |
+| `peq` | en fazla 6 × bant, yok = boş | yok | Parametrik bantlar, 10 bant EQ'dan sonra uygulanır (bkz. aşağı). Canlı |
 | `bassBoostDb` | 0..12 | 0 | ~100 Hz alçak raf |
 | `clarityDb` | 0..12 | 0 | Varlık/netlik: ~3,5 kHz tepe + ~10 kHz yüksek raf (yarısı) |
 | `dynamicBoost` | 0..1 | 0 | Sıkıştırma miktarı + otomatik makyaj kazancı (gece/yüksek ses hissi) |
 | `ambience` | 0..1 | 0 | Çiftlerde (FL/FR, BL/BR, SL/SR, ikisi de kullanılıyorsa TFL/TFR ve TBL/TBR) M/S genişletme |
 | `limiter` | bool | true | Her çıkış cihazında tepe sınırlayıcı, -1 dBFS tavan |
+
+## Parametrik bant (`peq[]`)
+
+| Alan | Tip / aralık | Varsayılan | Anlam |
+|---|---|---|---|
+| `type` | `"peak"` \| `"lowShelf"` \| `"highShelf"` | `"peak"` | RBJ cookbook biquad (tepe: `Peaking(f, Q, g)`, raf: `LowShelf/HighShelf(f, g, Q)` — raflarda Q cookbook'taki Q'dur, 0,707 = Butterworth) |
+| `freqHz` | 20..20000 | 1000 | Merkez / köşe frekansı |
+| `gainDb` | -12..+12 | 0 | 0 dB bant atlanır |
+| `q` | 0,3..10 | 1 | |
+| `enabled` | bool | true | false → bant saklanır ama uygulanmaz |
+
+Doğrulayıcı: en fazla 6 bant; tür/frekans/kazanç/Q aralığı (Türkçe hata, `processing.peq[i].q 0.3..10 aralığında olmalı`). DSP ayrıca kırpar, bilinmeyen tür atlanır. Hoparlör başına kademe sayısı 10 + 6 = 16; genel işlemede 10 + 3 (bas, netlik ×2) + 6 = 19. Kimlik gibi ek (arayüz) üyeleri korunur (`Extra`).
+
+Kullanıcı ön ayarları arayüze aittir: kökte `userSoundPresets` ve `userSpeakerPresets` (diziler) motorun bilmediği üyeler olarak `Extra` içinde yüklenip kaydedilir (`ForRouting` de korur) ve `EngineFingerprint`'ten dışlanır; motor yok sayar. Şema: ui/src/api/types.ts.
 
 ## Hoparlör alanları (speakers[])
 
@@ -35,6 +51,7 @@ yakalama → mantıksal 12 kanal (map: kaynak en fazla 7.1 doldurur; üst şerit
 |---|---|---|---|
 | `eq` | 10 × dB veya yok | düz | Hoparlöre özel 10 bant EQ (aynı bantlar) |
 | `eqPreset` | string | yok | Yalnızca arayüz etiketi |
+| `peq` | en fazla 6 × bant | yok | Hoparlöre özel parametrik bantlar (10 bant EQ'dan sonra), aynı bant şeması. Canlı |
 | `highPassHz` | 0 veya 40..250 | 0 | Küçük hoparlör: bu frekansın altı kesilir (LR4), kesilen bas `bassReceiver`'lara gider |
 | `bassReceiver` | bool | false | Dahili sub (2.1 amfisi) ya da gerçek sub: kesilen bası ve (yerel çok kanallı kaynakta) LFE'yi alır |
 
@@ -45,7 +62,7 @@ Bas kuralları:
 
 ## Canlı güncelleme
 
-`processing`, hoparlör `eq`/`eqPreset` ve `upmixOptions.centerDb`/`surroundDb`/`heightDb`/`lfeEnabled`/`surroundDelayMs`/`surroundHighCutHz`/`diffusion` değişiklikleri motoru yeniden başlatmaz (`EngineFingerprint` bunları dışlar); `SurroundEngine.UpdateLive(cfg)` ile kesintisiz uygulanır. `highPassHz`/`bassReceiver` ve `upmixOptions.mode` değişikliği yeniden başlatır.
+`processing` (`peq`, `autoPreamp` dahil), hoparlör `eq`/`eqPreset`/`peq` ve `upmixOptions.centerDb`/`surroundDb`/`heightDb`/`lfeEnabled`/`surroundDelayMs`/`surroundHighCutHz`/`diffusion` değişiklikleri motoru yeniden başlatmaz (`EngineFingerprint` bunları dışlar); `SurroundEngine.UpdateLive(cfg)` ile kesintisiz uygulanır. `highPassHz`/`bassReceiver` ve `upmixOptions.mode` değişikliği yeniden başlatır.
 
 ## Köprü
 

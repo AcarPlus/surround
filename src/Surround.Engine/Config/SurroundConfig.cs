@@ -49,12 +49,37 @@ public sealed class SpeakerConfig
     /// <summary>UI label only; the engine ignores it.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? EqPreset { get; set; }
+    /// <summary>Per-speaker parametric bands (max 6), applied after the 10-band EQ; null = none. Live-updatable.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<PeqBand>? Peq { get; set; }
     /// <summary>0 = full range; 40..250 = LR4 high-pass, the cut bass goes to the bass receivers.</summary>
     public double HighPassHz { get; set; }
     /// <summary>Receives the bass cut from high-passed speakers (and LFE from a native multichannel source).</summary>
     public bool BassReceiver { get; set; }
 
     /// <summary>Unknown JSON members (UI-only data such as room layout) preserved across load/save; the engine ignores them.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+/// <summary>One parametric EQ band (RBJ biquad). Applied after the 10-band EQ; live-updatable.</summary>
+public sealed class PeqBand
+{
+    public const int MaxBands = 6;
+    public const string Peak = "peak", LowShelf = "lowShelf", HighShelf = "highShelf";
+    public const double MinFreqHz = 20, MaxFreqHz = 20000, MaxGainDb = 12, MinQ = 0.3, MaxQ = 10;
+
+    /// <summary>"peak", "lowShelf" or "highShelf".</summary>
+    public string Type { get; set; } = Peak;
+    public double FreqHz { get; set; } = 1000;
+    public double GainDb { get; set; }
+    public double Q { get; set; } = 1;
+    /// <summary>false = band is kept in the config but not applied.</summary>
+    public bool Enabled { get; set; } = true;
+
+    public static bool IsKnownType(string? t) => t is Peak or LowShelf or HighShelf;
+
+    /// <summary>Unknown JSON members (UI-only data such as an id) preserved across load/save; the engine ignores them.</summary>
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
 }
@@ -73,6 +98,14 @@ public sealed class ProcessingConfig
     public double PreampDb { get; set; }
     private double[] _eq = new double[Bands];
     public double[] Eq { get => _eq; set => _eq = value ?? new double[Bands]; }
+    /// <summary>
+    /// true: the effective preamp is -max(0, peak of the combined 10-band + bass + clarity + peq response, dB) instead of
+    /// <see cref="PreampDb"/> (see <see cref="Dsp.FrequencyResponse.AutoPreampDb"/>). Absent in old configs = false.
+    /// </summary>
+    public bool AutoPreamp { get; set; }
+    /// <summary>Parametric bands (max 6), applied after the 10-band EQ; null = none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<PeqBand>? Peq { get; set; }
     public double BassBoostDb { get; set; }
     public double ClarityDb { get; set; }
     /// <summary>0..1: compression amount with automatic makeup gain.</summary>
@@ -181,10 +214,14 @@ public sealed class SurroundConfig
             s.Name ??= "";
             s.OutputDeviceId ??= "";
             s.Source ??= new();
+            s.Peq = DropNullBands(s.Peq);
         }
+        Processing.Peq = DropNullBands(Processing.Peq);
         UpmixOptions.Mode ??= UpmixOptions.Film;
         Processing.Preset ??= "flat";
     }
+
+    private static List<PeqBand>? DropNullBands(List<PeqBand>? l) => l?.Where(b => b is not null).ToList();
 
     public static SurroundConfig Load(string path) => Parse(File.ReadAllText(path));
 
@@ -205,7 +242,7 @@ public sealed class SurroundConfig
         copy.Source.Extra = null;
         copy.Source.DeviceName = null;
         foreach (var o in copy.Outputs) { o.Extra = null; o.DeviceName = null; }
-        foreach (var s in copy.Speakers) { s.Extra = null; s.Name = ""; s.Eq = null; s.EqPreset = null; }
+        foreach (var s in copy.Speakers) { s.Extra = null; s.Name = ""; s.Eq = null; s.EqPreset = null; s.Peq = null; }
         return copy.ToJson();
     }
 

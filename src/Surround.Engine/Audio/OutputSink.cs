@@ -73,7 +73,7 @@ public sealed class OutputSink : IDisposable
     }
 
     /// <summary>Live changes: per-speaker EQ (aligned with the constructor's routes) and the limiter switch.</summary>
-    public void UpdateLive(IReadOnlyList<double[]?> eqPerRoute, bool limiter)
+    public void UpdateLive(IReadOnlyList<SinkMixer.SpeakerEq> eqPerRoute, bool limiter)
     {
         _mixer.SetEq(eqPerRoute);
         _mixer.LimiterEnabled = limiter;

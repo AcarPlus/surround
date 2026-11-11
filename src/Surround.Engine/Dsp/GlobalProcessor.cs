@@ -8,8 +8,8 @@ namespace Surround.Engine.Dsp;
 /// </summary>
 public sealed class ProcessingSettings
 {
-    // Stage layout: 10 EQ bands, bass boost low shelf, clarity peak, clarity high shelf.
-    public const int StageCount = ProcessingConfig.Bands + 3;
+    // Stage layout: 10 EQ bands, bass boost low shelf, clarity peak, clarity high shelf, 6 parametric bands.
+    public const int StageCount = ProcessingConfig.Bands + 3 + PeqBand.MaxBands;
     public const double BassBoostHz = 100, ClarityPeakHz = 3500, ClarityPeakQ = 1.0, ClarityShelfHz = 10000;
 
     public bool Enabled { get; private init; }
@@ -32,11 +32,11 @@ public sealed class ProcessingSettings
         return s;
     }
 
-    public static ProcessingSettings Build(ProcessingConfig? p, double fs)
-    {
-        if (p is null || !p.Enabled) return Bypass;
-        static double C(double v, double lo, double hi) => double.IsFinite(v) ? Math.Clamp(v, lo, hi) : 0;
+    private static double C(double v, double lo, double hi) => double.IsFinite(v) ? Math.Clamp(v, lo, hi) : 0;
 
+    /// <summary>All EQ stages of the processing config (10 bands, bass boost, clarity, peq), in <see cref="Stages"/> order.</summary>
+    public static BiquadCoefs[] BuildStages(ProcessingConfig p, double fs)
+    {
         var stages = new BiquadCoefs[StageCount];
         EqDesign.TenBand(fs, p.Eq).CopyTo(stages, 0);
         int k = ProcessingConfig.Bands;
@@ -44,6 +44,15 @@ public sealed class ProcessingSettings
         stages[k] = BiquadCoefs.LowShelf(fs, BassBoostHz, C(p.BassBoostDb, 0, 12));
         stages[k + 1] = BiquadCoefs.Peaking(fs, ClarityPeakHz, ClarityPeakQ, clarity);
         stages[k + 2] = BiquadCoefs.HighShelf(fs, ClarityShelfHz, clarity / 2);
+        EqDesign.Peq(fs, p.Peq).CopyTo(stages, k + 3);
+        return stages;
+    }
+
+    public static ProcessingSettings Build(ProcessingConfig? p, double fs)
+    {
+        if (p is null || !p.Enabled) return Bypass;
+        var stages = BuildStages(p, fs);
+        double preampDb = p.AutoPreamp ? FrequencyResponse.AutoPreampDb(stages, fs) : C(p.PreampDb, -24, 12);
 
         // dynamicBoost 0..1 → threshold -6..-30 dB, ratio 1..4; half of the reduction at 0 dBFS comes back as makeup.
         double amt = C(p.DynamicBoost, 0, 1);
@@ -53,7 +62,7 @@ public sealed class ProcessingSettings
         return new ProcessingSettings
         {
             Enabled = true,
-            Preamp = (float)Math.Pow(10, C(p.PreampDb, -24, 12) / 20),
+            Preamp = (float)Math.Pow(10, preampDb / 20),
             Stages = stages,
             HasEq = !EqDesign.IsFlat(stages),
             ThresholdDb = (float)thr,

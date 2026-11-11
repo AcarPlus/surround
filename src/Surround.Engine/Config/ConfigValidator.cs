@@ -54,6 +54,7 @@ public static class ConfigValidator
             if (!(s.DelayMs >= 0 && s.DelayMs <= MaxMs)) e.Add($"{n}: delayMs 0-{MaxMs} ms aralığında olmalı (bulunan: {s.DelayMs}).");
             if (!(s.GainDb >= MinGainDb && s.GainDb <= MaxGainDb)) e.Add($"{n}: gainDb {MinGainDb}..{MaxGainDb} dB aralığında olmalı (bulunan: {s.GainDb}).");
             if (s.Eq != null) CheckEq(e, $"{n}: eq", s.Eq);
+            if (s.Peq != null) CheckPeq(e, $"{n}: peq", s.Peq);
             if (!(s.HighPassHz == 0 || (s.HighPassHz >= MinHighPassHz && s.HighPassHz <= MaxHighPassHz)))
                 e.Add($"{n}: highPassHz 0 (kapalı) veya {MinHighPassHz}-{MaxHighPassHz} aralığında olmalı.");
             if (s.HighPassHz > 0 && s.BassReceiver)
@@ -63,6 +64,7 @@ public static class ConfigValidator
         var p = cfg.Processing;
         CheckRange(e, "processing.preampDb", p.PreampDb, -24, 12);
         CheckEq(e, "processing.eq", p.Eq);
+        if (p.Peq != null) CheckPeq(e, "processing.peq", p.Peq);
         CheckRange(e, "processing.bassBoostDb", p.BassBoostDb, 0, 12);
         CheckRange(e, "processing.clarityDb", p.ClarityDb, 0, 12);
         CheckRange(e, "processing.dynamicBoost", p.DynamicBoost, 0, 1);
@@ -97,6 +99,20 @@ public static class ConfigValidator
         if (eq.Length != ProcessingConfig.Bands) { e.Add($"{field}: {ProcessingConfig.Bands} bant olmalı (bulunan: {eq.Length})."); return; }
         for (int b = 0; b < eq.Length; b++)
             if (!(Math.Abs(eq[b]) <= MaxEqDb)) e.Add($"{field}[{b}] -{MaxEqDb}..+{MaxEqDb} dB aralığında olmalı (bulunan: {eq[b]}).");
+    }
+
+    private static void CheckPeq(List<string> e, string field, List<PeqBand> bands)
+    {
+        if (bands.Count > PeqBand.MaxBands) e.Add($"{field}: en fazla {PeqBand.MaxBands} parametrik bant olabilir (bulunan: {bands.Count}).");
+        for (int i = 0; i < bands.Count; i++)
+        {
+            var b = bands[i];
+            string f = $"{field}[{i}]";
+            if (!PeqBand.IsKnownType(b.Type)) e.Add($"{f}.type 'peak', 'lowShelf' veya 'highShelf' olmalı (bulunan: '{b.Type}').");
+            CheckRange(e, $"{f}.freqHz", b.FreqHz, PeqBand.MinFreqHz, PeqBand.MaxFreqHz);
+            CheckRange(e, $"{f}.gainDb", b.GainDb, -PeqBand.MaxGainDb, PeqBand.MaxGainDb);
+            CheckRange(e, $"{f}.q", b.Q, PeqBand.MinQ, PeqBand.MaxQ);
+        }
     }
 
     /// <summary>Checks that need to look at real (or faked) devices.</summary>
