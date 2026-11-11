@@ -56,11 +56,15 @@ export type SourceMode = 'loopback' | 'capture'
 
 export interface Source {
   deviceId: string
+  /** Cihazın son görülen adı (backend yazar; cihaz yokken gösterilir). */
+  deviceName?: string
   mode: SourceMode
 }
 
 export interface Output {
   deviceId: string
+  /** Cihazın son görülen adı (backend yazar; cihaz yokken gösterilir). */
+  deviceName?: string
   latencyMs: number
   bufferMs: number
 }

@@ -253,6 +253,20 @@ export function createMockApi(): SurroundApi {
     async saveConfig(c) {
       config = structuredClone(c)
     },
+    async takeConfigNotice() {
+      return typeof location !== 'undefined' && /[?&]bozuk/.test(location.search)
+        ? { backupPath: 'C:\…\Surround\config.bad-20260101-120000.json' }
+        : null
+    },
+    async resetConfig() {
+      console.info('[mock] resetConfig')
+    },
+    async startWithoutMissing() {
+      console.info('[mock] startWithoutMissing')
+    },
+    async openLogFolder() {
+      console.info('[mock] openLogFolder')
+    },
     async getAppSettings() {
       await wait(60)
       return { ...appSettings }

@@ -28,6 +28,7 @@ import { assignExisting, layoutSlots, type LayoutSpec } from '../lib/layout'
 import { ROLE_CUSTOM_MANUAL, ROLE_CUSTOM_MAP, computeMapSource, roleDef, rolePatch } from '../lib/roles'
 import { plannedName, standardPosition, type BuildResult } from '../lib/setup'
 import { findCable, type FixId } from '../lib/health'
+import { explainError } from '../lib/errors'
 import { matchSoundPreset, soundPresetPatch } from '../lib/presets'
 import {
   builtinProfile,
@@ -60,6 +61,8 @@ export interface Toast {
   message: string
   tone?: 'error'
   action?: ToastAction
+  /** Teknik ayrıntı (katlanabilir "Ayrıntı" içinde). */
+  detail?: string
 }
 
 /** Düzen şablonu önizlemesi: hangi hoparlör korunur, eklenir, çıkarılır. */
@@ -137,9 +140,23 @@ interface State {
   /** runState 'waiting' iken: geri gelmesi beklenen cihazların adları ve (varsa) bekleme nedeni. */
   waitingFor: string[]
   waitMessage: string | null
+  /** Bekleme başladığındaki zaman (ms); bekleme yokken null. 30 sn sonra "eksiksiz başlat" önerilir. */
+  waitingSince: number | null
   toast: Toast | null
+  /** Açılışta ayarlar yüklenemediyse hata; ana ekran yerine kurtarma ekranı gösterilir. */
+  initError: { message: string; detail?: string } | null
 
   init: () => Promise<void>
+  /** İç: ayarları ve cihazları yükler (init hatayı yakalar). */
+  loadAll: () => Promise<void>
+  /** Ayarı varsayılana döndürür (eski dosya yedek kalır) ve yeniden yükler. */
+  recoverWithDefaults: () => Promise<void>
+  /** Seçilen yedek dosyasını doğrular, kaydeder ve yeniden yükler. Hata metni ya da null. */
+  recoverFromBackup: (raw: unknown) => Promise<string | null>
+  /** Cihaz beklemeyi bırakıp mevcut cihazlarla başlatır. */
+  startWithoutMissing: () => Promise<void>
+  /** Hata gösterir: anlaşılır cümle + katlanabilir teknik ayrıntı. */
+  showError: (e: unknown, ms?: number) => void
   /** Backend'in `engineState` olayı: running / waiting (cihaz bekleniyor) / stopped. */
   setEngineState: (e: EngineState) => void
   /** Cihaz listesini yeniden okur (Windows'ta kanal sayısı/varsayılan değişince ekran güncellensin). */
@@ -208,7 +225,7 @@ interface State {
   exportConfig: () => Config
   /** Yedekten geri yükler (geri alınabilir). Geçersizse hata metni döner. */
   importConfig: (raw: unknown) => string | null
-  showToast: (msg: string, ms?: number, opts?: { action?: ToastAction; tone?: 'error' }) => void
+  showToast: (msg: string, ms?: number, opts?: { action?: ToastAction; tone?: 'error'; detail?: string }) => void
   dismissToast: () => void
 }
 
@@ -250,12 +267,7 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined
 
 /** Hata mesajını kullanıcıya gösterilecek tek satıra çevirir (köprü hataları satır listesi taşıyabilir). */
 export function describeError(e: unknown): string {
-  const errors = (e as { errors?: unknown })?.errors
-  if (Array.isArray(errors) && errors.length > 0) {
-    const first = String(errors[0])
-    return errors.length > 1 ? `${first} (+${errors.length - 1} hata daha)` : first
-  }
-  return e instanceof Error ? e.message : String(e)
+  return explainError(e).message
 }
 
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
@@ -313,6 +325,7 @@ export const useStore = create<State>()((set, get) => {
   /** Her tur kendi numarasıyla çalışır; durdurma ya da yeni tur eski döngüyü geçersiz kılar. */
   let tourToken = 0
   let touring = false
+  let listening = false
   let toastSeq = 0
   let toastTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -337,7 +350,7 @@ export const useStore = create<State>()((set, get) => {
   const scheduleSave = (delayMs: number) => {
     clearTimeout(saveTimer)
     saveTimer = setTimeout(() => {
-      api.saveConfig(buildConfig(get())).catch((e) => get().showToast(describeError(e), 6000, { tone: 'error' }))
+      api.saveConfig(buildConfig(get())).catch((e) => get().showError(e, 6000))
     }, delayMs)
   }
 
@@ -418,9 +431,58 @@ export const useStore = create<State>()((set, get) => {
     engine: null,
     waitingFor: [],
     waitMessage: null,
+    waitingSince: null,
     toast: null,
+    initError: null,
 
     async init() {
+      set({ initError: null })
+      try {
+        await get().loadAll()
+      } catch (e) {
+        set({ initError: explainError(e) })
+      }
+    },
+
+    async recoverWithDefaults() {
+      try {
+        await api.resetConfig()
+      } catch (e) {
+        set({ initError: explainError(e) })
+        return
+      }
+      await get().init()
+    },
+
+    async recoverFromBackup(raw) {
+      const checked = checkConfig(raw)
+      if (typeof checked === 'string') return checked
+      try {
+        await api.saveConfig(checked)
+      } catch (e) {
+        return `Yedek yüklenemedi: ${describeError(e)}`
+      }
+      await get().init()
+      return get().initError?.message ?? null
+    },
+
+    async startWithoutMissing() {
+      try {
+        await api.startWithoutMissing()
+        const e = await api.getEngineState().catch(() => null)
+        if (e) get().setEngineState(e)
+        else set({ runState: 'running', waitingFor: [], waitMessage: null, waitingSince: null })
+      } catch (e) {
+        get().showError(e, 7000)
+      }
+    },
+
+    showError(e, ms = 6000) {
+      const x = explainError(e)
+      get().showToast(x.message, ms, { tone: 'error', detail: x.detail })
+    },
+
+    async loadAll() {
       const [devices, cfg] = await Promise.all([api.listDevices(), api.getConfig()])
       const auto = Object.fromEntries(cfg.speakers.map((s) => [s.id, s.auto ?? { delay: true, gain: true }]))
       const speakers = cfg.speakers.map(({ auto: _auto, ...rest }) => rest)
@@ -445,17 +507,32 @@ export const useStore = create<State>()((set, get) => {
         future: [],
         ready: true,
       })
-      api.onStatus((status) => set({ status }))
-      api.onEngine((info) => set({ engine: info.sourceRate > 0 ? info : null }))
-      api.onEngineError((msg) => get().showToast(msg, 7000, { tone: 'error' }))
-      api.onEngineState((e) => get().setEngineState(e))
-      // Tepsiden seçilen profil: backend kaydetti ve uyguladı; arayüz de aynı değerlere geçer (geri alınabilir).
-      api.onProfileApplied((id) => {
-        const p = get().profiles.find((v) => v.id === id)
-        if (!p) return
-        get().selectProfile(id)
-        get().showToast(`Profil: ${p.name} (tepsiden)`, 2500)
-      })
+      if (!listening) {
+        listening = true
+        api.onStatus((status) => set({ status }))
+        api.onEngine((info) => set({ engine: info.sourceRate > 0 ? info : null }))
+        api.onEngineError((msg) => get().showError(new Error(msg), 7000))
+        api.onEngineState((e) => get().setEngineState(e))
+        // Tepsiden seçilen profil: backend kaydetti ve uyguladı; arayüz de aynı değerlere geçer (geri alınabilir).
+        api.onProfileApplied((id) => {
+          const p = get().profiles.find((v) => v.id === id)
+          if (!p) return
+          get().selectProfile(id)
+          get().showToast(`Profil: ${p.name} (tepsiden)`, 2500)
+        })
+      }
+      // Ayar dosyası okunamadıysa backend varsayılanı yükledi ve eskisini yedekledi: bir kez haber ver.
+      try {
+        const notice = await api.takeConfigNotice()
+        if (notice)
+          get().showToast(
+            `Ayar dosyası okunamadı; yedeği şuraya kaydedildi: ${notice.backupPath}. Varsayılan ayarlar yüklendi.`,
+            20000,
+            { tone: 'error' },
+          )
+      } catch {
+        /* eski backend */
+      }
       // Pencere sonradan açıldıysa (tepsiden başlatma) motor zaten çalışıyor ya da cihaz bekliyor olabilir.
       try {
         const e = await api.getEngineState()
@@ -466,9 +543,16 @@ export const useStore = create<State>()((set, get) => {
     },
 
     setEngineState(e) {
-      const idle = { waitingFor: [] as string[], waitMessage: null }
+      const idle = { waitingFor: [] as string[], waitMessage: null, waitingSince: null }
       if (e.state === 'waiting') {
-        set({ runState: 'waiting', status: [], engine: null, waitingFor: [...e.missing], waitMessage: e.message ?? null })
+        set({
+          runState: 'waiting',
+          status: [],
+          engine: null,
+          waitingFor: [...e.missing],
+          waitMessage: e.message ?? null,
+          waitingSince: get().waitingSince ?? Date.now(),
+        })
       } else if (e.state === 'running') {
         set({ runState: 'running', ...idle })
       } else if (get().runState !== 'starting') {
@@ -514,9 +598,9 @@ export const useStore = create<State>()((set, get) => {
         try {
           await api.stop()
         } catch (e) {
-          get().showToast(describeError(e), 6000, { tone: 'error' })
+          get().showError(e, 6000)
         }
-        set({ runState: 'stopped', status: [], engine: null, waitingFor: [], waitMessage: null })
+        set({ runState: 'stopped', status: [], engine: null, waitingFor: [], waitMessage: null, waitingSince: null })
         return
       }
       set({ runState: 'starting' })
@@ -530,7 +614,7 @@ export const useStore = create<State>()((set, get) => {
         else set({ runState: 'running' })
       } catch (e) {
         set({ runState: 'stopped', status: [] })
-        get().showToast(describeError(e), 7000, { tone: 'error' })
+        get().showError(e, 7000)
       }
     },
 
@@ -690,7 +774,7 @@ export const useStore = create<State>()((set, get) => {
           st.setScreen('calibration')
           break
         case 'open-sound-panel':
-          api.openSoundPanel().catch((e) => st.showToast(describeError(e), 6000, { tone: 'error' }))
+          api.openSoundPanel().catch((e) => st.showError(e, 6000))
           break
         case 'select-cable': {
           const cable = findCable(st.devices)
@@ -742,7 +826,7 @@ export const useStore = create<State>()((set, get) => {
           try {
             await api.playTone(s.outputDeviceId, s.deviceChannel)
           } catch (e) {
-            get().showToast(describeError(e), 5000, { tone: 'error' })
+            get().showError(e, 5000)
             break
           }
           // Test sesi 2 sn sürer; köprü hemen döner, sıradakine geçmeden bekle.
@@ -1088,7 +1172,7 @@ export const useStore = create<State>()((set, get) => {
         await api.playTone(s.outputDeviceId, s.deviceChannel)
         await new Promise((r) => setTimeout(r, 1500))
       } catch (e) {
-        get().showToast(describeError(e), 6000, { tone: 'error' })
+        get().showError(e, 6000)
       } finally {
         if (get().playing === id) set({ playing: null })
       }

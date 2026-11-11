@@ -21,6 +21,14 @@ export interface SurroundApi {
   listDevices(): Promise<Device[]>
   getConfig(): Promise<Config>
   saveConfig(config: Config): Promise<void>
+  /** Açılışta ayar dosyası okunamadıysa (bir kez) yedeğin yolu; yoksa null. */
+  takeConfigNotice(): Promise<{ backupPath: string } | null>
+  /** Ayarı varsayılana döndürür; eski dosya zaman damgalı yedek olarak kalır. */
+  resetConfig(): Promise<void>
+  /** Beklemeyi bırakıp mevcut cihazlarla başlatır; eksik cihazdaki hoparlörler sessiz kalır. */
+  startWithoutMissing(): Promise<void>
+  /** Günlük (log) klasörünü Gezgin'de açar. */
+  openLogFolder(): Promise<void>
   /** Windows entegrasyonu ayarları (varsayılan çıkışı çevirme, otomatik başlatma, tepsi). */
   getAppSettings(): Promise<AppSettings>
   saveAppSettings(settings: AppSettings): Promise<void>

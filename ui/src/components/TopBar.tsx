@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
+import { waitedLongEnough } from '../lib/waiting'
 import { cx } from './ui'
 import { ProfileMenu } from './ProfileMenu'
 import { IconMoon, IconPlay, IconRedo, IconStop, IconSun, IconUndo } from './icons'
@@ -80,6 +82,36 @@ function IconButton({ label, onClick, disabled, children }: { label: string; onC
   )
 }
 
+/** Cihaz uzun süredir bekleniyorsa: eksiksiz başlat ya da cihazı değiştir. */
+function WaitingActions() {
+  const runState = useStore((s) => s.runState)
+  const since = useStore((s) => s.waitingSince)
+  const waitingFor = useStore((s) => s.waitingFor)
+  const startWithoutMissing = useStore((s) => s.startWithoutMissing)
+  const setScreen = useStore((s) => s.setScreen)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (runState !== 'waiting') return
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [runState])
+  if (runState !== 'waiting' || waitingFor.length === 0 || !waitedLongEnough(since, now)) return null
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-warn/40 bg-warn/10 px-4 py-2 text-[13px]" role="status">
+      <span className="text-warn">Bu cihazlar uzun süredir yok: {waitingFor.join(', ')}.</span>
+      <button
+        onClick={() => void startWithoutMissing()}
+        className="rounded border border-warn/60 px-2.5 py-1 font-semibold text-warn hover:bg-warn/10"
+      >
+        Eksik cihaz olmadan başlat
+      </button>
+      <button onClick={() => setScreen('connection')} className="rounded px-2.5 py-1 font-semibold text-accent hover:bg-surface">
+        Cihaz seç
+      </button>
+    </div>
+  )
+}
+
 export function TopBar() {
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
@@ -91,6 +123,7 @@ export function TopBar() {
   const lastRedo = future[future.length - 1]?.label
 
   return (
+    <>
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-line bg-surface px-4">
       <div className="flex w-[104px] items-center gap-2">
         <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden className="text-accent">
@@ -120,5 +153,7 @@ export function TopBar() {
         </IconButton>
       </div>
     </header>
+    <WaitingActions />
+    </>
   )
 }

@@ -13,6 +13,7 @@ import { SettingsScreen } from './screens/SettingsScreen'
 import { SetupWizard } from './screens/SetupWizard'
 import { IconX } from './components/icons'
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { InitErrorScreen } from './components/InitErrorScreen'
 import { cx } from './components/ui'
 import { resolveShortcut } from './lib/shortcuts'
 
@@ -32,6 +33,7 @@ export function App() {
   const toast = useStore((s) => s.toast)
   const dismissToast = useStore((s) => s.dismissToast)
   const wizardOpen = useStore((s) => s.wizardOpen)
+  const initError = useStore((s) => s.initError)
 
   useEffect(() => {
     document.documentElement.dataset.theme = useStore.getState().theme
@@ -98,7 +100,11 @@ export function App() {
         <NavRail />
         <main className="min-w-0 flex-1 bg-bg">
           {!ready ? (
-            <div className="flex h-full items-center justify-center text-muted">Yükleniyor…</div>
+            initError ? (
+              <InitErrorScreen />
+            ) : (
+              <div className="flex h-full items-center justify-center text-muted">Yükleniyor…</div>
+            )
           ) : (
             // Yalnızca CSS ile giriş geçişi: çıkış animasyonu yok, böylece pencere arka plandayken
             // (requestAnimationFrame durur) ekran değişimi takılmaz.
@@ -131,7 +137,15 @@ export function App() {
             )}
             role={toast.tone === 'error' ? 'alert' : 'status'}
           >
-            <span className={cx(toast.tone === 'error' && 'text-err')}>{toast.message}</span>
+            <span className="min-w-0">
+              <span className={cx(toast.tone === 'error' && 'text-err')}>{toast.message}</span>
+              {toast.detail && (
+                <details className="mt-1 text-xs text-faint">
+                  <summary className="cursor-pointer">Ayrıntı</summary>
+                  <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words">{toast.detail}</pre>
+                </details>
+              )}
+            </span>
             {toast.action && (
               <button
                 type="button"

@@ -106,6 +106,7 @@ function SetupCard() {
   const exportConfig = useStore((s) => s.exportConfig)
   const importConfig = useStore((s) => s.importConfig)
   const showToast = useStore((s) => s.showToast)
+  const showError = useStore((s) => s.showError)
   const file = useRef<HTMLInputElement>(null)
 
   const download = () => {
@@ -136,6 +137,13 @@ function SetupCard() {
         </Button>
         <Button onClick={download}>Yedeği indir</Button>
         <Button onClick={() => file.current?.click()}>Yedekten yükle…</Button>
+        <Button
+          variant="ghost"
+          onClick={() => api.openLogFolder().catch((e) => showError(e))}
+          title="Hata ayıklama için kayıt dosyaları (son 7 gün; ses verisi içermez)"
+        >
+          Kayıt klasörünü aç
+        </Button>
         <input
           ref={file}
           type="file"

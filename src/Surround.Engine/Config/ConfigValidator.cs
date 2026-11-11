@@ -45,7 +45,7 @@ public static class ConfigValidator
             if (!cfg.Outputs.Any(o => SurroundConfig.SameId(o.DeviceId, s.OutputDeviceId)))
                 e.Add($"{n}: outputDeviceId outputs listesinde yok.");
             if (s.DeviceChannel < 1) e.Add($"{n}: deviceChannel 1 veya büyük olmalı.");
-            if (s.Source.Count == 0 && !s.Mute) e.Add($"{n}: source (karışım satiri) bos.");
+            if (s.Source.Count == 0 && !s.Mute) e.Add($"{n}: source (karışım satırı) boş.");
             foreach (var (key, gain) in s.Source)
             {
                 if (Channels.IndexOf(key) < 0) e.Add($"{n}: bilinmeyen kanal adı '{key}' (geçerli: {string.Join(", ", Channels.Names)}).");
