@@ -95,7 +95,9 @@ export function App() {
 
   return (
     <div className="flex h-full min-w-[1000px] flex-col">
-      <TopBar />
+      <ErrorBoundary compact>
+        <TopBar />
+      </ErrorBoundary>
       <div className="flex min-h-0 flex-1">
         <NavRail />
         <main className="min-w-0 flex-1 bg-bg">
@@ -120,9 +122,17 @@ export function App() {
             </ErrorBoundary>
           )}
         </main>
-        {screen === 'room' && <Inspector />}
+        {screen === 'room' && (
+          <ErrorBoundary compact>
+            <Inspector />
+          </ErrorBoundary>
+        )}
       </div>
-      {ready && wizardOpen && <SetupWizard />}
+      {ready && wizardOpen && (
+        <ErrorBoundary compact>
+          <SetupWizard />
+        </ErrorBoundary>
+      )}
       <AnimatePresence>
         {toast && (
           <motion.div

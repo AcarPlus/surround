@@ -1,7 +1,10 @@
 import { Component, type ReactNode } from 'react'
 
 /** Bir ekran çökerse tüm pencere boş kalmasın: hatayı gösterir, diğer ekranlara geçiş çalışmaya devam eder. */
-export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: string }, { error: Error | null }> {
+export class ErrorBoundary extends Component<
+  { children: ReactNode; resetKey?: string; /** Verilirse küçük satır içi yedek gösterilir (TopBar, Inspector, sihirbaz). */ compact?: boolean },
+  { error: Error | null }
+> {
   state: { error: Error | null } = { error: null }
 
   static getDerivedStateFromError(error: Error) {
@@ -14,6 +17,15 @@ export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: s
 
   render() {
     if (!this.state.error) return this.props.children
+    if (this.props.compact)
+      return (
+        <div role="alert" className="flex items-center gap-3 rounded border border-err/50 bg-surface px-3 py-2 text-xs">
+          <span className="text-err">Bu bölüm açılamadı —</span>
+          <button type="button" className="underline hover:text-fg" onClick={() => this.setState({ error: null })}>
+            Yeniden dene
+          </button>
+        </div>
+      )
     return (
       <div className="flex h-full items-center justify-center p-6">
         <div className="max-w-[520px] rounded-lg border border-err/50 bg-surface p-5">
