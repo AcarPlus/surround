@@ -8,7 +8,7 @@ motor sözleşmesi için `docs/api.md`, ölçüm yöntemi için `docs/kalibrasyo
 |---|---|
 | Ana sayfa | Büyük Başlat/Durdur, profil kartları, **Sistem kontrolü** (`ui/src/lib/health.ts`), oda önizlemesi, hoparlör listesi (test sesi, sustur) |
 | Oda | Oda planı (sürükle, ok tuşları 5 cm, Delete), hoparlör ekle (rol menüsü), düzen şablonu (önizlemeli), "Mesafeden hesapla", "Sırayla çal"; sağda sekmeli hoparlör paneli (Genel / Ses / Gelişmiş) |
-| Ses | Upmix (stereo → çevresel) ve genel ses işleme (ön ayar, karakter, 10 bant EQ, limiter) |
+| Ses | Upmix (stereo → çevresel; "Arka kanallar": gecikme, tiz kesme, ayrıştırma) ve genel ses işleme (ön ayar + kendi ön ayarların, karakter, otomatik ön kazanç, frekans yanıtı eğrisi, 10 bant EQ, parametrik bantlar, A/B, limiter) |
 | Kalibrasyon | Mikrofonla ölçüm (hazırlık → ölçüm → sonuç tablosu → uygula), mikrofon yoksa kulakla seviye eşitleme |
 | Bağlantı | VB-Cable rehberi, kaynak seçimi, kanal seviye ölçerleri, çıkış cihazlarının tampon/ek gecikme ve canlı durumu, düşük gecikme |
 | Ayarlar | Profiller, Windows ile bütünleşme, kurulum sihirbazı, yedek indir/yükle |
@@ -53,3 +53,19 @@ kulaklık mikrofonu, boş kurulum → sihirbaz açılır), `?bos` (boş kurulum)
 `?nocable`, `?cable2ch`, `?bekle` (Başlat'tan 5 sn sonra bir çıkış "çıkarılır", 5 sn sonra döner: üst çubukta "Cihaz bekleniyor").
 Cihaz beklerken (`runState: 'waiting'`) üst çubuktaki durum etiketi uyarı renginde eksik cihazları yazar, Başlat düğmesi
 "Durdur" olur (beklemeyi bitirir).
+
+## Gelişmiş EQ (Ses ekranı ve Denetçi)
+
+- **Eğri** (`ui/src/components/EqCurve.tsx`): gerçek birleşik genlik yanıtı (dB, log frekans 20 Hz–20 kHz): 10 bant + bas + netlik + parametrik + etkin ön kazanç.
+  Hesap `ui/src/lib/eqCurve.ts`'te, motorun RBJ biquad formüllerinin (frekanslar, Q, raf türleri) birebir aynasıdır; C# ile hesaplanmış referans noktalarla sınanır
+  (`eqCurve.test.ts` ↔ `PeqTests.ReferenceResponseForTheUiMirror`). Beyaz noktalar 10 bandın kazancıdır: dikey sürükle (0,5 dB adım), çift tık sıfırlar,
+  klavye ↑/↓ 0,5 dB, PgUp/PgDn 3 dB, Home sıfırlar. Elmaslar parametrik bantlardır: yatay = frekans, dikey = kazanç, tekerlek = Q;
+  klavye ↑/↓ kazanç, ←/→ frekans (1/12 oktav), +/− Q. Denetçide (hoparlör EQ'su) aynı bileşen kompakt boyuttadır.
+- **Parametrik bantlar** (`PeqEditor`): katlanabilir; en fazla 6 bant, tür (tepe / alçak raf / yüksek raf), frekans, kazanç, Q, aç/kapat. Config: `processing.peq`, `speakers[].peq` (bkz. docs/ses-isleme.md).
+- **Kendi ön ayarların**: "Ön ayarı kaydet" (ad ≤ 24 karakter, en fazla 20), seçiliyken üzerine yaz / yeniden adlandır / sil. Genel ses ön ayarları çip olarak yerleşiklerin yanında;
+  hoparlör EQ ön ayarları Denetçide listede "Kendi ön ayarların" grubunda. Config kökünde `userSoundPresets` ve `userSpeakerPresets` (diziler) olarak saklanır; yedek dışa/içe aktarma (`exportConfig`/`importConfig`) bunları kendiliğinden taşır.
+  `processing.preset` / `speaker.eqPreset` değeri `user:<id>`'dir. Şema: `ui/src/api/types.ts` (`UserSoundPreset`, `UserSpeakerPreset`).
+- **Otomatik ön kazanç**: `processing.autoPreamp`; açıkken ön kazanç motorca `-max(0, birleşik tepe)` olarak hesaplanır (arayüz aynı değeri salt okunur gösterir). Yeni yerleşik ön ayarlarda açık, eski config'lerde kapalı.
+- **A/B (işlemesiz dinle)**: basılı tutunca (ya da kısa tıklayınca aç/kapat) `processing.enabled: false` motora gider; ayar değişmez ve geri alma geçmişine yazılmaz.
+  Ayrı bir canlı-uygulama köprüsü olmadığından değişiklik `saveConfig` ile gider; config'e `abBypass: true` işareti de yazılır, uygulama A/B açıkken kapanırsa açılışta işleme geri açılır.
+  Ekrandan çıkınca A/B kapanır.

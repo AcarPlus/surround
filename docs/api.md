@@ -13,7 +13,7 @@ mühendislik alanları değiştiyse yeniden başlatılır (oda/konum gibi arayü
 
 ## Tipler (`ui/src/api/types.ts`)
 Motor yapılandırmasını yansıtır: `Source`, `Output`, `Speaker`, `Device`, `SinkStatus`, `Room`,
-`Config` (= source, upmix, upmixOptions, outputs, speakers, room, processing), `EngineInfo`, `EngineState` ve `LogicalChannel` (FL FR FC LFE BL BR SL SR TFL TFR TBL TBR; üst şeritler için bkz. docs/duzen.md).
+`Config` (= source, upmix, upmixOptions, outputs, speakers, room, processing; arayüz kök alanları: profiles, activeProfileId, userSoundPresets, userSpeakerPresets, abBypass, setupDone, lastCalibration — motor yok sayar ve korur), `EngineInfo`, `EngineState` ve `LogicalChannel` (FL FR FC LFE BL BR SL SR TFL TFR TBL TBR; üst şeritler için bkz. docs/duzen.md).
 Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, "ön" planda yukarıdadır.
 `deviceChannel` 1 tabanlıdır.
 
