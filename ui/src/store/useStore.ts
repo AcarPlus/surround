@@ -19,6 +19,9 @@ import {
   type Source,
   type Speaker,
   type UpmixOptions,
+  type UserSoundPreset,
+  type UserSpeakerPreset,
+  normalizePeq,
   defaultUpmixOptions,
   normalizeUpmixOptions,
   isHighLatencyKind,
@@ -30,7 +33,19 @@ import { plannedName, standardPosition, type BuildResult } from '../lib/setup'
 import { findCable, type FixId } from '../lib/health'
 import { explainError } from '../lib/errors'
 import { rejoinMessage } from '../lib/waiting'
-import { matchSoundPreset, soundPresetPatch } from '../lib/presets'
+import {
+  MAX_USER_PRESETS,
+  cleanPresetName,
+  makeUserSoundPreset,
+  makeUserSpeakerPreset,
+  matchSoundPreset,
+  normalizeUserSoundPresets,
+  normalizeUserSpeakerPresets,
+  soundPresetPatch,
+  userPresetKey,
+  userSoundPatch,
+  userSpeakerPatch,
+} from '../lib/presets'
 import {
   builtinProfile,
   cleanProfileName,
@@ -84,6 +99,8 @@ const HISTORY_KEYS = [
   'processing',
   'profiles',
   'activeProfileId',
+  'userSoundPresets',
+  'userSpeakerPresets',
   'auto',
   'setupDone',
   'lastCalibration',
@@ -118,6 +135,15 @@ interface State {
   profiles: Profile[]
   /** Etkin profilin kimliği (hiçbiri seçili değilse null). */
   activeProfileId: string | null
+  /** Kullanıcı genel ses ön ayarları (config kökünde `userSoundPresets`, yedeğe dahil). */
+  userSoundPresets: UserSoundPreset[]
+  /** Kullanıcı hoparlör EQ ön ayarları (config kökünde `userSpeakerPresets`). */
+  userSpeakerPresets: UserSpeakerPreset[]
+  /**
+   * "A/B (işlemesiz dinle)": açıkken motora `processing.enabled: false` gider; ayarın kendisi değişmez, geri alma
+   * geçmişine yazılmaz. Config'e yalnızca `abBypass` işaretiyle yazılır (açılışta işleme geri açılır).
+   */
+  abBypass: boolean
   /** Hoparlör başına gecikme/kazanç otomatik mi (yalnızca arayüz durumu). */
   auto: Record<string, AutoFlags>
   /** Kurulum sihirbazı en az bir kez tamamlandı (config'te saklanır). */
@@ -210,6 +236,21 @@ interface State {
   /** Ses işleme alanlarını değiştirir; ses karakterini etkileyen bir alan değişirse etiket 'Özel' olur. */
   setProcessing: (patch: Partial<Processing>) => void
   applySoundPreset: (id: string) => void
+  /** Geçerli genel ses ayarlarını adla kaydeder; kaydedildiyse true (ad boşsa ya da 20 sınırı dolduysa false). */
+  saveUserSoundPreset: (name: string) => boolean
+  /** Ön ayarın içeriğini geçerli ayarlarla değiştirir. */
+  overwriteUserSoundPreset: (id: string) => void
+  renameUserSoundPreset: (id: string, name: string) => void
+  deleteUserSoundPreset: (id: string) => void
+  applyUserSoundPreset: (id: string) => void
+  /** Hoparlörün EQ + parametrik bantlarını adla kaydeder. */
+  saveUserSpeakerPreset: (speakerId: string, name: string) => boolean
+  overwriteUserSpeakerPreset: (id: string, speakerId: string) => void
+  renameUserSpeakerPreset: (id: string, name: string) => void
+  deleteUserSpeakerPreset: (id: string) => void
+  applyUserSpeakerPreset: (id: string, speakerId: string) => void
+  /** A/B: genel işlemeyi geçici olarak atlar/geri açar (geçmişe yazılmaz, anında uygulanır). */
+  setAbBypass: (on: boolean) => void
   /** Profili uygular: ses işleme + upmix + upmix ayrıntıları tek commit'te (motor canlı uygular). */
   selectProfile: (id: string) => void
   /** Mevcut ayarları yeni kullanıcı profili olarak kaydeder ve etkin yapar. Kaydedildiyse true. */
@@ -320,6 +361,13 @@ export function checkConfig(raw: unknown): Config | string {
 }
 
 export const useStore = create<State>()((set, get) => {
+  /** Hoparlörün parametrik bantlarını doğrular (yoksa alan hiç yazılmaz). */
+  const withPeq = (sp: Speaker): Speaker => {
+    const { peq, ...rest } = sp
+    const n = normalizePeq(peq)
+    return n ? { ...rest, peq: n } : rest
+  }
+
   const snapshot = (s: State): Snapshot => Object.fromEntries(HISTORY_KEYS.map((k) => [k, s[k]])) as Snapshot
 
   let lastPush = { key: '', t: 0 }
@@ -341,8 +389,11 @@ export const useStore = create<State>()((set, get) => {
     outputs: s.outputs.filter((o) => s.speakers.some((sp) => sp.outputDeviceId === o.deviceId)),
     speakers: s.speakers.map((sp) => ({ ...sp, auto: s.auto[sp.id] ?? { delay: true, gain: true } })),
     room: s.room,
-    processing: s.processing,
+    processing: s.abBypass ? { ...s.processing, enabled: false } : s.processing,
     profiles: s.profiles,
+    ...(s.userSoundPresets.length ? { userSoundPresets: s.userSoundPresets } : {}),
+    ...(s.userSpeakerPresets.length ? { userSpeakerPresets: s.userSpeakerPresets } : {}),
+    ...(s.abBypass ? { abBypass: true } : {}),
     ...(s.activeProfileId ? { activeProfileId: s.activeProfileId } : {}),
     ...(s.setupDone ? { setupDone: true } : {}),
     ...(s.lastCalibration ? { lastCalibration: s.lastCalibration } : {}),
@@ -415,6 +466,9 @@ export const useStore = create<State>()((set, get) => {
     processing: defaultProcessing(),
     profiles: normalizeProfiles(undefined),
     activeProfileId: null,
+    userSoundPresets: [],
+    userSpeakerPresets: [],
+    abBypass: false,
     auto: {},
     setupDone: false,
     lastCalibration: null,
@@ -486,9 +540,15 @@ export const useStore = create<State>()((set, get) => {
     async loadAll() {
       const [devices, cfg] = await Promise.all([api.listDevices(), api.getConfig()])
       const auto = Object.fromEntries(cfg.speakers.map((s) => [s.id, s.auto ?? { delay: true, gain: true }]))
-      const speakers = cfg.speakers.map(({ auto: _auto, ...rest }) => rest)
+      const speakers = cfg.speakers.map(({ auto: _auto, ...rest }) => withPeq(rest))
       const profiles = normalizeProfiles(cfg.profiles)
+      // A/B açıkken uygulama kapandıysa config'te işleme kapalı kalmıştır; işaretten geri açılır.
+      const abLeftover = cfg.abBypass === true
+      const loaded = normalizeProcessing(cfg.processing)
       set({
+        abBypass: false,
+        userSoundPresets: normalizeUserSoundPresets(cfg.userSoundPresets),
+        userSpeakerPresets: normalizeUserSpeakerPresets(cfg.userSpeakerPresets),
         devices,
         source: cfg.source,
         upmix: cfg.upmix,
@@ -496,7 +556,7 @@ export const useStore = create<State>()((set, get) => {
         outputs: cfg.outputs,
         speakers: recalc(speakers, cfg.room.listener, auto),
         room: cfg.room,
-        processing: normalizeProcessing(cfg.processing),
+        processing: abLeftover ? { ...loaded, enabled: true } : loaded,
         profiles,
         activeProfileId:
           cfg.activeProfileId && profiles.some((p) => p.id === cfg.activeProfileId) ? cfg.activeProfileId : null,
@@ -508,6 +568,7 @@ export const useStore = create<State>()((set, get) => {
         future: [],
         ready: true,
       })
+      if (abLeftover) scheduleSave(100)
       if (!listening) {
         listening = true
         api.onStatus((status) => set({ status }))
@@ -915,7 +976,7 @@ export const useStore = create<State>()((set, get) => {
       let outs = outputs
       if (patch.outputDeviceId) outs = ensureOutput(outs, patch.outputDeviceId)
       // EQ sürüklemesi canlı uygulanır; kayıt sıklığını sınırla.
-      const live = 'eq' in patch || 'eqPreset' in patch
+      const live = 'eq' in patch || 'peq' in patch || 'eqPreset' in patch
       const key = Object.keys(patch).sort().join(',')
       commit(
         { speakers: speakers.map((s) => (s.id === id ? { ...s, ...patch } : s)), outputs: outs },
@@ -1101,13 +1162,132 @@ export const useStore = create<State>()((set, get) => {
         ...patch,
         preset: patch.preset ?? cur.preset,
       }
-      if (changesSound && patch.preset === undefined) next.preset = matchSoundPreset(next)
+      if (changesSound && patch.preset === undefined) next.preset = matchSoundPreset(next, get().userSoundPresets)
       commit({ processing: next }, 150, `Ses ayarı:${Object.keys(patch).join(',')}`)
     },
 
     applySoundPreset(id) {
       const patch = soundPresetPatch(id)
       if (patch) commit({ processing: { ...get().processing, ...patch } }, 150, 'Ses ön ayarı')
+    },
+
+    saveUserSoundPreset(name) {
+      const clean = cleanPresetName(name)
+      const { userSoundPresets, processing } = get()
+      if (!clean || userSoundPresets.length >= MAX_USER_PRESETS) return false
+      const preset = makeUserSoundPreset(processing, clean)
+      commit(
+        { userSoundPresets: [...userSoundPresets, preset], processing: { ...processing, preset: userPresetKey(preset.id) } },
+        400,
+        'Ses ön ayarı kaydet',
+      )
+      return true
+    },
+
+    overwriteUserSoundPreset(id) {
+      const { userSoundPresets, processing } = get()
+      const old = userSoundPresets.find((u) => u.id === id)
+      if (!old) return
+      const preset = makeUserSoundPreset(processing, old.name, id)
+      commit(
+        {
+          userSoundPresets: userSoundPresets.map((u) => (u.id === id ? preset : u)),
+          processing: { ...processing, preset: userPresetKey(id) },
+        },
+        400,
+        'Ses ön ayarını güncelle',
+      )
+    },
+
+    renameUserSoundPreset(id, name) {
+      const clean = cleanPresetName(name)
+      const { userSoundPresets } = get()
+      if (!clean || !userSoundPresets.some((u) => u.id === id)) return
+      commit({ userSoundPresets: userSoundPresets.map((u) => (u.id === id ? { ...u, name: clean } : u)) }, 400, 'Ses ön ayarı adı')
+    },
+
+    deleteUserSoundPreset(id) {
+      const { userSoundPresets, processing } = get()
+      if (!userSoundPresets.some((u) => u.id === id)) return
+      const next = userSoundPresets.filter((u) => u.id !== id)
+      const preset = processing.preset === userPresetKey(id) ? matchSoundPreset(processing, next) : processing.preset
+      commit({ userSoundPresets: next, processing: { ...processing, preset } }, 400, 'Ses ön ayarını sil')
+    },
+
+    applyUserSoundPreset(id) {
+      const u = get().userSoundPresets.find((v) => v.id === id)
+      if (u) commit({ processing: { ...get().processing, ...userSoundPatch(u) } }, 150, 'Ses ön ayarı')
+    },
+
+    saveUserSpeakerPreset(speakerId, name) {
+      const clean = cleanPresetName(name)
+      const { userSpeakerPresets, speakers } = get()
+      const sp = speakers.find((v) => v.id === speakerId)
+      if (!clean || !sp || userSpeakerPresets.length >= MAX_USER_PRESETS) return false
+      const preset = makeUserSpeakerPreset(sp, clean)
+      commit(
+        {
+          userSpeakerPresets: [...userSpeakerPresets, preset],
+          speakers: speakers.map((v) => (v.id === speakerId ? { ...v, eqPreset: userPresetKey(preset.id) } : v)),
+        },
+        400,
+        'Hoparlör ön ayarı kaydet',
+      )
+      return true
+    },
+
+    overwriteUserSpeakerPreset(id, speakerId) {
+      const { userSpeakerPresets, speakers } = get()
+      const old = userSpeakerPresets.find((u) => u.id === id)
+      const sp = speakers.find((v) => v.id === speakerId)
+      if (!old || !sp) return
+      const preset = makeUserSpeakerPreset(sp, old.name, id)
+      commit(
+        {
+          userSpeakerPresets: userSpeakerPresets.map((u) => (u.id === id ? preset : u)),
+          speakers: speakers.map((v) => (v.id === speakerId ? { ...v, eqPreset: userPresetKey(id) } : v)),
+        },
+        400,
+        'Hoparlör ön ayarını güncelle',
+      )
+    },
+
+    renameUserSpeakerPreset(id, name) {
+      const clean = cleanPresetName(name)
+      const { userSpeakerPresets } = get()
+      if (!clean || !userSpeakerPresets.some((u) => u.id === id)) return
+      commit(
+        { userSpeakerPresets: userSpeakerPresets.map((u) => (u.id === id ? { ...u, name: clean } : u)) },
+        400,
+        'Hoparlör ön ayarı adı',
+      )
+    },
+
+    deleteUserSpeakerPreset(id) {
+      const { userSpeakerPresets, speakers } = get()
+      if (!userSpeakerPresets.some((u) => u.id === id)) return
+      commit(
+        {
+          userSpeakerPresets: userSpeakerPresets.filter((u) => u.id !== id),
+          speakers: speakers.map((v) => (v.eqPreset === userPresetKey(id) ? { ...v, eqPreset: 'custom' } : v)),
+        },
+        400,
+        'Hoparlör ön ayarını sil',
+      )
+    },
+
+    applyUserSpeakerPreset(id, speakerId) {
+      const u = get().userSpeakerPresets.find((v) => v.id === id)
+      if (u) get().updateSpeaker(speakerId, userSpeakerPatch(u))
+    },
+
+    setAbBypass(on) {
+      const { abBypass, processing } = get()
+      if (on === abBypass || (on && !processing.enabled)) return
+      // Geçmişe yazılmaz (commit kullanılmaz); doğrudan kaydedilir, böylece motor hemen uygular.
+      set({ abBypass: on })
+      clearTimeout(saveTimer)
+      api.saveConfig(buildConfig(get())).catch((e) => get().showError(e, 6000))
     },
 
     selectProfile(id) {
@@ -1188,7 +1368,7 @@ export const useStore = create<State>()((set, get) => {
         if (typeof checked === 'string') return checked
         const c = checked
         const auto = Object.fromEntries(c.speakers.map((s) => [s.id, s.auto ?? { delay: true, gain: true }]))
-        const speakers = c.speakers.map(({ auto: _a, ...rest }) => rest)
+        const speakers = c.speakers.map(({ auto: _a, ...rest }) => withPeq(rest))
         const profiles = normalizeProfiles(c.profiles)
         commit(
           {
@@ -1199,6 +1379,8 @@ export const useStore = create<State>()((set, get) => {
             speakers,
             room: c.room,
             processing: normalizeProcessing(c.processing),
+            userSoundPresets: normalizeUserSoundPresets(c.userSoundPresets),
+            userSpeakerPresets: normalizeUserSpeakerPresets(c.userSpeakerPresets),
             profiles,
             activeProfileId:
               c.activeProfileId && profiles.some((p) => p.id === c.activeProfileId) ? c.activeProfileId : null,

@@ -39,7 +39,7 @@ describe('yerleşik profiller', () => {
     const p = builtinProfile('builtin-game')!
     expect(p.upmixOptions.mode).toBe('game')
     expect(p.processing.dynamicBoost).toBe(0.5)
-    expect(p.processing.clarityDb).toBe(4)
+    expect(p.processing.clarityDb).toBe(2)
   })
 
   it('Müzik: film modu, surround -4, üst -6, Müzik ön ayarı', () => {
@@ -119,5 +119,26 @@ describe('normalizeProfiles', () => {
   it('ad temizliği', () => {
     expect(cleanProfileName('   ')).toBeNull()
     expect(cleanProfileName('a'.repeat(50))).toHaveLength(24)
+  })
+
+  it('yeni alanlar (arka kanal, peq, otomatik ön kazanç) karşılaştırılır; eski profiller varsayılanla yüklenir', () => {
+    const film = builtinProfile('builtin-film')!
+    const cur = profilePatch(film)
+    expect(isProfileModified(film, cur)).toBe(false)
+    for (const u of [{ surroundDelayMs: 3 }, { surroundHighCutHz: 6000 }, { diffusion: 0.4 }]) {
+      expect(isProfileModified(film, { ...cur, upmixOptions: { ...cur.upmixOptions, ...u } })).toBe(true)
+    }
+    const peq = [{ id: 'a', type: 'peak' as const, freqHz: 900, gainDb: 3, q: 1 }]
+    expect(isProfileModified(film, { ...cur, processing: { ...cur.processing, peq } })).toBe(true)
+    expect(isProfileModified(film, { ...cur, processing: { ...cur.processing, autoPreamp: !cur.processing.autoPreamp } })).toBe(true)
+    // Kimlik farkı değişiklik sayılmaz.
+    const withPeq = { ...film, processing: { ...film.processing, peq } }
+    const other = { ...cur, processing: { ...cur.processing, peq: [{ ...peq[0], id: 'b' }] } }
+    expect(isProfileModified(withPeq, other)).toBe(false)
+    // Eski profil: yeni alanlar yok.
+    const old = normalizeProfiles([{ id: 'old', name: 'Eski', upmix: true, processing: { eq: [1], preampDb: -2 }, upmixOptions: { mode: 'game' } }])[3]
+    expect(old.processing.autoPreamp).toBe(false)
+    expect(old.processing.peq).toEqual([])
+    expect(old.upmixOptions.surroundDelayMs).toBe(10)
   })
 })

@@ -1,7 +1,18 @@
 import { useState } from 'react'
 import { CHANNEL_LABELS, HEIGHT_CHANNELS, LOGICAL_CHANNELS, flatEq, isHighLatencyKind, type Speaker } from '../api/types'
 import { EqEditor } from './EqEditor'
-import { CUSTOM_ID, CUSTOM_LABEL, SPEAKER_PRESETS, speakerPresetPatch, speakerPresetValue } from '../lib/presets'
+import { EqCurve } from './EqCurve'
+import { PeqEditor } from './PeqEditor'
+import { PresetManager } from './PresetManager'
+import {
+  CUSTOM_ID,
+  CUSTOM_LABEL,
+  SPEAKER_PRESETS,
+  isUserPresetKey,
+  speakerPresetPatch,
+  speakerPresetValue,
+  userPresetKey,
+} from '../lib/presets'
 import { LISTENER_ID, selectSpeaker, useStore } from '../store/useStore'
 import { computeAuto } from '../lib/geometry'
 import {
@@ -363,7 +374,15 @@ function EqBassSection({ sp }: { sp: Speaker }) {
   const speakers = useStore((s) => s.speakers)
   const updateSpeaker = useStore((s) => s.updateSpeaker)
   const hp = sp.highPassHz ?? 0
-  const presetValue = speakerPresetValue(sp)
+  const user = useStore((s) => s.userSpeakerPresets)
+  const applyUser = useStore((s) => s.applyUserSpeakerPreset)
+  const saveUser = useStore((s) => s.saveUserSpeakerPreset)
+  const overwriteUser = useStore((s) => s.overwriteUserSpeakerPreset)
+  const renameUser = useStore((s) => s.renameUserSpeakerPreset)
+  const deleteUser = useStore((s) => s.deleteUserSpeakerPreset)
+  const [peqSel, setPeqSel] = useState<string | null>(null)
+  const presetValue = speakerPresetValue(sp, user)
+  const activeUser = user.find((u) => userPresetKey(u.id) === presetValue) ?? null
   const anyHighPass = speakers.some((s) => (s.highPassHz ?? 0) > 0)
   const anyReceiver = speakers.some((s) => s.bassReceiver)
 
@@ -376,8 +395,13 @@ function EqBassSection({ sp }: { sp: Speaker }) {
             ariaLabel="Hoparlör ön ayarı"
             value={presetValue}
             onChange={(v) => {
+              if (isUserPresetKey(v)) {
+                const u = user.find((x) => userPresetKey(x.id) === v)
+                if (u) applyUser(u.id, sp.id)
+                return
+              }
               const patch = speakerPresetPatch(v)
-              if (patch) updateSpeaker(sp.id, patch)
+              if (patch) updateSpeaker(sp.id, { ...patch, peq: undefined })
             }}
           >
             {SPEAKER_PRESETS.map((p) => (
@@ -385,8 +409,26 @@ function EqBassSection({ sp }: { sp: Speaker }) {
                 {p.label}
               </option>
             ))}
+            {user.length > 0 && (
+              <optgroup label="Kendi ön ayarların">
+                {user.map((u) => (
+                  <option key={u.id} value={userPresetKey(u.id)}>
+                    {u.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
             {presetValue === CUSTOM_ID && <option value={CUSTOM_ID}>{CUSTOM_LABEL}</option>}
           </Select>
+          <PresetManager
+            compact
+            count={user.length}
+            active={activeUser}
+            onSave={(name) => saveUser(sp.id, name)}
+            onOverwrite={(id) => overwriteUser(id, sp.id)}
+            onRename={renameUser}
+            onDelete={deleteUser}
+          />
         </Field>
 
         <div>
@@ -395,17 +437,36 @@ function EqBassSection({ sp }: { sp: Speaker }) {
             <button
               type="button"
               className="text-faint hover:text-fg disabled:opacity-40 disabled:hover:text-faint"
-              disabled={!sp.eq}
-              onClick={() => updateSpeaker(sp.id, { eq: undefined, eqPreset: 'flat' })}
+              disabled={!sp.eq && !sp.peq?.length}
+              onClick={() => updateSpeaker(sp.id, { eq: undefined, peq: undefined, eqPreset: 'flat' })}
             >
               Sıfırla
             </button>
           </div>
+          <EqCurve
+            compact
+            eq={sp.eq ?? flatEq()}
+            onEqChange={(eq) => updateSpeaker(sp.id, { eq, eqPreset: CUSTOM_ID })}
+            peq={sp.peq ?? []}
+            onPeqChange={(peq) => updateSpeaker(sp.id, { peq: peq.length ? peq : undefined, eqPreset: CUSTOM_ID })}
+            selectedId={peqSel}
+            onSelect={setPeqSel}
+            className="mb-1.5"
+          />
           <EqEditor
             compact
             value={sp.eq ?? flatEq()}
             onChange={(eq) => updateSpeaker(sp.id, { eq, eqPreset: CUSTOM_ID })}
           />
+          <div className="mt-2">
+            <PeqEditor
+              compact
+              bands={sp.peq ?? []}
+              onChange={(peq) => updateSpeaker(sp.id, { peq: peq.length ? peq : undefined, eqPreset: CUSTOM_ID })}
+              selectedId={peqSel}
+              onSelect={setPeqSel}
+            />
+          </div>
         </div>
 
         <Field label="Küçük hoparlör (bas kes)">

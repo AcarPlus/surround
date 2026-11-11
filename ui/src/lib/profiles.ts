@@ -5,7 +5,7 @@ import {
   type Profile,
   type UpmixOptions,
 } from '../api/types'
-import { matchSoundPreset, soundPresetPatch } from './presets'
+import { matchSoundPreset, samePeq, soundPresetPatch } from './presets'
 
 /** Profilin kapsadığı ayarlar: ses işleme, upmix anahtarı ve upmix ayrıntıları. */
 export interface ProfileState {
@@ -55,7 +55,7 @@ export function builtinProfiles(): Profile[] {
 export const builtinProfile = (id: string): Profile | undefined => builtinProfiles().find((p) => p.id === id)
 
 const clone = (s: ProfileState): ProfileState => ({
-  processing: { ...s.processing, eq: [...s.processing.eq] },
+  processing: { ...s.processing, eq: [...s.processing.eq], peq: s.processing.peq.map((b) => ({ ...b })) },
   upmix: s.upmix,
   upmixOptions: { ...s.upmixOptions },
 })
@@ -84,9 +84,10 @@ export function isProfileModified(profile: Profile, cur: ProfileState): boolean 
   const a = normalizeProcessing(profile.processing)
   const b = cur.processing
   if (a.enabled !== b.enabled || a.limiter !== b.limiter) return true
-  if (!near(a.preampDb, b.preampDb) || !near(a.bassBoostDb, b.bassBoostDb) || !near(a.clarityDb, b.clarityDb)) return true
+  if ((!a.autoPreamp && !near(a.preampDb, b.preampDb)) || !near(a.bassBoostDb, b.bassBoostDb) || !near(a.clarityDb, b.clarityDb)) return true
   if (!near(a.dynamicBoost, b.dynamicBoost) || !near(a.ambience, b.ambience)) return true
   if (a.eq.some((v, i) => !near(v, b.eq[i] ?? 0))) return true
+  if (a.autoPreamp !== b.autoPreamp || !samePeq(a.peq, b.peq)) return true
   if (profile.upmix !== cur.upmix) return true
   const u = normalizeUpmixOptions(profile.upmixOptions)
   const v = cur.upmixOptions
@@ -95,7 +96,10 @@ export function isProfileModified(profile: Profile, cur: ProfileState): boolean 
     u.lfeEnabled !== v.lfeEnabled ||
     !near(u.centerDb, v.centerDb) ||
     !near(u.surroundDb, v.surroundDb) ||
-    !near(u.heightDb, v.heightDb)
+    !near(u.heightDb, v.heightDb) ||
+    !near(u.surroundDelayMs, v.surroundDelayMs) ||
+    !near(u.surroundHighCutHz, v.surroundHighCutHz) ||
+    !near(u.diffusion, v.diffusion)
   )
 }
 
