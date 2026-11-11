@@ -75,6 +75,10 @@ public static class ConfigValidator
         CheckRange(e, "upmixOptions.centerDb", u.CenterDb, UpmixOptions.MinDb, UpmixOptions.MaxDb);
         CheckRange(e, "upmixOptions.surroundDb", u.SurroundDb, UpmixOptions.MinDb, UpmixOptions.MaxDb);
         CheckRange(e, "upmixOptions.heightDb", u.HeightDb, UpmixOptions.MinHeightDb, UpmixOptions.MaxHeightDb);
+        CheckRange(e, "upmixOptions.surroundDelayMs", u.SurroundDelayMs, 0, UpmixOptions.MaxSurroundDelayMs);
+        if (!(u.SurroundHighCutHz == 0 || (u.SurroundHighCutHz >= UpmixOptions.MinHighCutHz && u.SurroundHighCutHz <= UpmixOptions.MaxHighCutHz)))
+            e.Add($"upmixOptions.surroundHighCutHz 0 (kapalı) veya {UpmixOptions.MinHighCutHz}-{UpmixOptions.MaxHighCutHz} aralığında olmalı (bulunan: {u.SurroundHighCutHz}).");
+        CheckRange(e, "upmixOptions.diffusion", u.Diffusion, 0, 1);
         return e;
     }
 

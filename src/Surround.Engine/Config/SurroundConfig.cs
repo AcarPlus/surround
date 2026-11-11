@@ -112,6 +112,16 @@ public sealed class UpmixOptions
     /// </summary>
     public double HeightDb { get; set; } = DefaultHeightDb;
 
+    public const double DefaultSurroundDelayMs = 10, MaxSurroundDelayMs = 25;
+    public const double MinHighCutHz = 3000, MaxHighCutHz = 16000;
+    public const double DefaultDiffusion = 1;
+    /// <summary>Extra delay of the side/back channels produced by the upmix (precedence), ms, 0..25. Live.</summary>
+    public double SurroundDelayMs { get; set; } = DefaultSurroundDelayMs;
+    /// <summary>0 = off, else 3000..16000 Hz: gentle 2nd-order low-pass on the side/back channels produced by the upmix. Live.</summary>
+    public double SurroundHighCutHz { get; set; }
+    /// <summary>0..1: how much of the side/back ambience is all-pass decorrelated (1 = original behaviour; 0 = dry, direct). Live.</summary>
+    public double Diffusion { get; set; } = DefaultDiffusion;
+
     public bool IsGame => string.Equals(Mode?.Trim(), Game, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Unknown JSON members preserved across load/save; the engine ignores them.</summary>

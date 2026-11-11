@@ -15,8 +15,11 @@ hoparlörü olmayan kanalları kullanılan komşulara katlamak. Kod: `src/Surrou
 | `surroundDb` | -12..+6 | 0 | Yan/arka kanallara yönlenen her şeyin seviyesi | Evet |
 | `lfeEnabled` | bool | true | Orta sinyalden LFE türet | Evet |
 | `heightDb` | -24..+6 | -3 | Türetilen üst şeritlerin (TFL/TFR/TBL/TBR) seviyesi; upmix kapalıyken/yerel içerikte de geçerli (bkz. docs/duzen.md) | Evet |
+| `surroundDelayMs` | 0..25 | 10 | Yan/arka kanalların ek (öncelik) gecikmesi; değişince eski ve yeni çıkış ~30 ms çapraz geçişle karışır (tık/perde kayması yok). Oyun ve film | Evet |
+| `surroundHighCutHz` | 0 (kapalı) veya 3000..16000 | 0 | Yan/arka kanallara 2. derece Butterworth alçak geçiren ("sinema" yumuşatması, sert ucuz uydular için). Açma/kapama çapraz geçişli, kesim frekansı log ekseninde kayar. Oyun ve film; üst şeritlere uygulanmaz | Evet |
+| `diffusion` | 0..1 | 1 | Ayrıştırma (dağınıklık): yan/arka ortamda all-pass ile ayrıştırılmış sinyalin payı, `H' = d·H + (1-d)·A`. 1 = eski davranış (örnek örnek aynı), 0 = kuru/doğrudan ortam (tek taraflı çiftte side = A, back = 0; tek hoparlörlü tarafta doğrudan A). Düşürmek yankı hissini azaltır (all-pass zinciri düşük frekansta ~40 ms grup gecikmesi ekler). Oyun ve film | Evet |
 
-Canlı alanlar `EngineFingerprint`'ten dışlanır, `SurroundEngine.UpdateLive` ile uygulanır; kazançlar 30 ms'de yumuşatılır.
+Üç arka kanal alanı (`surroundDelayMs`, `surroundHighCutHz`, `diffusion`) yan/arka çıkışları üreten `SurroundRenderer`’a canlı gider (`Configure`, tampon başına); ilk uygulamada değerler anında alınır, sonrakiler yumuşak geçer. Canlı alanlar `EngineFingerprint`'ten dışlanır, `SurroundEngine.UpdateLive` ile uygulanır; kazançlar 30 ms'de yumuşatılır.
 Aralık dışı değerler `ConfigValidator` hatasıdır.
 
 ## Uyarlanır stereo algılama (`AdaptiveUpmix`, `StereoDetector`)
@@ -86,7 +89,7 @@ Her taraf için iki farklı 3 kademeli Schroeder all-pass zinciri (g = 0,5; sol:
 sağ: 2,3/4,9/8,3 ve 3,1/5,9/9,7 ms). Tamamlayıcı çift: `yan = (H1·A + H2·A)/2`, `arka = (H1·A − H2·A)/2`.
 Güçlerin toplamı girişin gücüne eşit; ayrıca `yan + arka = H1·A` (düz genlik), yani katlanan bir düzende hiçbir şey
 kaybolmaz ve tarak süzgeci oluşmaz. Sol/sağ ve yan/arka hep farklı süzgeç alır. Tarafta tek surround hoparlör varsa
-oraya düz `H1·A` gider. Tüm yan/arka çıkışlar 10 ms gecikir (öncelik etkisi görüntüyü önde tutar).
+oraya düz `H1·A` gider. Tüm yan/arka çıkışlar `surroundDelayMs` (varsayılan 10 ms) gecikir (öncelik etkisi görüntüyü önde tutar), sonra isteğe bağlı `surroundHighCutHz` alçak geçirenden geçer; `diffusion` < 1 iken H1/H2 doğrudan ortamla karışır.
 Durum değişkenleri 1e-20 altında sıfırlanır (sessizlikte denormal yok; `Biquad` da 1e-25 altında temizler).
 
 ## Düzen farkındalığı ve kanal katlama (`ChannelFold`)

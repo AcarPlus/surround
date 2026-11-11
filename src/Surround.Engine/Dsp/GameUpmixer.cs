@@ -65,6 +65,7 @@ public sealed class GameUpmixer : IStereoUpmixer
     public void Process(ReadOnlySpan<float> input, Span<float> output, int frames)
     {
         var st = _settings;
+        _sur.Configure(st);
         float lfeTarget = _lfeAllowed ? st.LfeGain : 0f;
         Span<float> lev = stackalloc float[Ch];
 

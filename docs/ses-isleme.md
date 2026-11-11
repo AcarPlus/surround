@@ -45,7 +45,7 @@ Bas kuralları:
 
 ## Canlı güncelleme
 
-`processing`, hoparlör `eq`/`eqPreset` ve `upmixOptions.centerDb`/`surroundDb`/`heightDb`/`lfeEnabled` değişiklikleri motoru yeniden başlatmaz (`EngineFingerprint` bunları dışlar); `SurroundEngine.UpdateLive(cfg)` ile kesintisiz uygulanır. `highPassHz`/`bassReceiver` ve `upmixOptions.mode` değişikliği yeniden başlatır.
+`processing`, hoparlör `eq`/`eqPreset` ve `upmixOptions.centerDb`/`surroundDb`/`heightDb`/`lfeEnabled`/`surroundDelayMs`/`surroundHighCutHz`/`diffusion` değişiklikleri motoru yeniden başlatmaz (`EngineFingerprint` bunları dışlar); `SurroundEngine.UpdateLive(cfg)` ile kesintisiz uygulanır. `highPassHz`/`bassReceiver` ve `upmixOptions.mode` değişikliği yeniden başlatır.
 
 ## Köprü
 

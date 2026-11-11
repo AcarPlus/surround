@@ -31,6 +31,13 @@ public readonly struct BiquadCoefs
         return new(1 + alpha * a, -2 * cos, 1 - alpha * a, 1 + alpha / a, -2 * cos, 1 - alpha / a);
     }
 
+    /// <summary>RBJ low-pass (used for the live-adjustable rear high-cut; never identity).</summary>
+    public static BiquadCoefs LowPass(double fs, double f, double q = 0.70710678)
+    {
+        double w0 = W0(fs, f), cos = Math.Cos(w0), alpha = Math.Sin(w0) / (2 * q);
+        return new((1 - cos) / 2, 1 - cos, (1 - cos) / 2, 1 + alpha, -2 * cos, 1 - alpha);
+    }
+
     public static BiquadCoefs LowShelf(double fs, double f, double gainDb, double q = 0.70710678)
     {
         if (gainDb == 0) return Identity;
