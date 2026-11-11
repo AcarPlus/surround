@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { defaultProcessing, defaultUpmixOptions, type Device, type Speaker } from '../api/types'
-import { checkHealth, type HealthInput } from './health'
+import { checkHealth, findCable, type HealthInput } from './health'
 
 const dev = (id: string, name: string, channels = 2): Device => ({
   id,
@@ -116,5 +116,48 @@ describe('checkHealth', () => {
     )
     expect(r).toContain('underrun-2nd')
     expect(r).toContain('not-calibrated')
+  })
+})
+
+describe('findCable', () => {
+  const renamed = [
+    dev('c2', 'Surround Çıkış (VB-Audio Virtual Cable)', 2),
+    dev('c8', 'Surround Giriş (VB-Audio Virtual Cable)', 8),
+    dev('spk', 'Hoparlör (Realtek)'),
+  ]
+  it('yeniden adlandırılmış uç noktalarda en çok kanallıyı seçer', () => {
+    expect(findCable(renamed)?.id).toBe('c8')
+    expect(findCable([...renamed].reverse())?.id).toBe('c8')
+  })
+  it('varsayılan adlarda da çalışır; 16ch varsa en çok kanallı olan', () => {
+    const d = [dev('a', 'CABLE Input (VB-Audio Virtual Cable)', 8), dev('b', 'CABLE In 16ch (VB-Audio Virtual Cable)', 16)]
+    expect(findCable(d)?.id).toBe('b')
+    expect(findCable([d[0]])?.id).toBe('a')
+  })
+  it('Voicemeeter, kayıt cihazı ve ilgisiz cihazları atlar; yoksa undefined', () => {
+    const vm = dev('vm', 'VoiceMeeter Input (VB-Audio VoiceMeeter VAIO)', 8)
+    const cap: Device = { ...dev('cap', 'CABLE Output (VB-Audio Virtual Cable)', 8), flow: 'capture' }
+    expect(findCable([vm, cap, dev('spk', 'Hoparlör')])).toBeUndefined()
+  })
+  it('sihirbazın cableOk kontrolü doğru uç noktaya bakar', () => {
+    const c = findCable(renamed)!
+    expect(c.channels >= 6).toBe(true)
+  })
+})
+
+describe('sistem kontrolü, yeniden adlandırılmış kablo', () => {
+  const devices = [
+    dev('spk', 'Hoparlör'),
+    dev('c2', 'Surround Çıkış (VB-Audio Virtual Cable)', 2),
+    dev('c8', 'Surround Giriş (VB-Audio Virtual Cable)', 8),
+  ]
+  it('kaynak 8 kanallı uç noktaysa uyarı yok', () => {
+    const r = checkHealth(base({ devices, source: { deviceId: 'c8', mode: 'loopback' } })).map((i) => i.id)
+    expect(r).not.toContain('source-not-cable')
+    expect(r).not.toContain('cable-2ch')
+  })
+  it('kaynak 2 kanallı uç noktaysa 8 kanallıya geçirmeyi önerir', () => {
+    const r = checkHealth(base({ devices, source: { deviceId: 'c2', mode: 'loopback' } }))
+    expect(r.map((i) => i.id)).toContain('source-not-cable')
   })
 })

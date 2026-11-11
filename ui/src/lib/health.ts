@@ -47,9 +47,18 @@ const has = (sp: Speaker, ch: LogicalChannel) => (sp.source[ch] ?? 0) > 0
 const anyOn = (speakers: Speaker[], ...chs: LogicalChannel[]) =>
   speakers.some((s) => !s.mute && chs.some((c) => has(s, c)))
 
+/** VB-Audio sanal kablo uç noktası mı? Uç nokta adları kullanıcı tarafından değiştirilebilir ama bağdaştırıcı adı ("(VB-Audio Virtual Cable)") kalır. */
+const isCableName = (name: string) => /vb-?audio|vb-?cable|cable/i.test(name) && !/voicemeeter/i.test(name)
+
+/**
+ * Sanal kablo çıkış (render) uç noktası: ada göre değil, kanal sayısına göre seçilir. Yeniden adlandırılmış
+ * kurulumlarda 2 kanallı ve 8 kanallı uç nokta yan yana durur; surround için en çok kanallı olan gerekir.
+ */
 export function findCable(devices: Device[]): Device | undefined {
-  const renders = devices.filter((d) => d.flow === 'render' && /cable/i.test(d.name))
-  return renders.find((d) => !/16ch/i.test(d.name)) ?? renders[0]
+  const renders = devices.filter((d) => d.flow === 'render' && isCableName(d.name))
+  let best: Device | undefined
+  for (const d of renders) if (!best || d.channels > best.channels) best = d
+  return best
 }
 
 export function checkHealth(h: HealthInput): HealthItem[] {
