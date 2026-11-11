@@ -24,7 +24,7 @@ public sealed record EngineStateDto(string State, IReadOnlyList<string> Missing,
 /// notifications and stream failures only record what happened and wake <see cref="RecoveryLoopAsync"/>; the loop takes
 /// <c>_gate</c> (so it never races start/stop/saveConfig/calibration), probes the devices and lets
 /// <see cref="DeviceRecovery"/> decide. The engine itself is only ever touched through <see cref="EngineHost"/>, i.e. on
-/// its worker thread. While waiting the default-device guard stays engaged; a user stop restores it as usual.
+/// its worker thread. While waiting, the user's previous default output is restored (so sound is not lost into an unread cable) and engaged again when the engine restarts.
 /// </summary>
 public sealed partial class SurroundBackend
 {
@@ -145,7 +145,11 @@ public sealed partial class SurroundBackend
             case RecoveryAction.Stop:
                 await _host.StopAsync();
                 _runningFingerprint = null;
-                RunningChanged?.Invoke(false); // the page's status/meters go "off"; the default output stays switched
+                RunningChanged?.Invoke(false); // the page's status/meters go "off"
+                // Waiting must not mean silence: nothing reads the virtual cable now, so the user's own default output
+                // comes back (Restore leaves roles alone that the user or Windows already moved). A successful
+                // restart re-engages the cable via SyncDefaultDeviceAsync in TryRestartAsync.
+                await Task.Run(_guard.Restore);
                 break;
             case RecoveryAction.Restart:
                 await TryRestartAsync(cfg ?? _store.Load());

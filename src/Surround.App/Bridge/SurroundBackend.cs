@@ -415,11 +415,12 @@ public sealed partial class SurroundBackend : IDisposable
         catch (Exception ex) { registryError = ex.Message; }
 
         // Toggled while running: act now instead of at the next start/stop. (During a calibration the engine is stopped;
-        // the restart after it re-reads the setting.) Waiting for devices counts as running: the guard is engaged meanwhile.
+        // the restart after it re-reads the setting.) While waiting for devices nothing reads the cable, so
+        // the default output is not switched then (it is engaged when the engine starts); turning the switch off restores it.
         if (before.SwitchDefaultDevice != after.SwitchDefaultDevice
             && (_host.IsRunning || EngineState.State == EngineStateDto.WaitingName))
         {
-            if (after.SwitchDefaultDevice) await SyncDefaultDeviceAsync(_store.Load());
+            if (after.SwitchDefaultDevice) { if (_host.IsRunning) await SyncDefaultDeviceAsync(_store.Load()); }
             else await Task.Run(_guard.Restore);
         }
 
