@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f1115">
+<title>Surround · Telefon mikrofonu</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --line:#262a33; --text:#e8eaed; --dim:#9aa0aa; --acc:#4f8cff; --ok:#3ecf8e; --warn:#f5b041; --err:#ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 480px; margin: 0 auto; padding: 20px 16px 40px; }
+  h1 { font-size: 20px; margin: 4px 0 2px; }
+  .sub { color: var(--dim); font-size: 14px; margin-bottom: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  button { width: 100%; border: 0; border-radius: 12px; padding: 16px; font-size: 18px; font-weight: 600; color: #fff; background: var(--acc); }
+  button:disabled { opacity: .45; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); font-weight: 500; font-size: 16px; padding: 12px; margin-top: 10px; }
+  .state { font-size: 18px; font-weight: 600; }
+  .msg { color: var(--dim); margin-top: 4px; min-height: 1.4em; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin-top: 12px; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--acc); transition: width .3s; }
+  .meter { height: 10px; background: var(--line); border-radius: 5px; overflow: hidden; margin-top: 10px; }
+  .meter > i { display: block; height: 100%; width: 0; background: var(--ok); }
+  .prompt { border-color: var(--acc); background: #172238; font-weight: 600; }
+  .warn { color: var(--warn); font-size: 14px; margin-top: 8px; }
+  .err { color: var(--err); }
+  pre { white-space: pre-wrap; font: 14px/1.5 ui-monospace, Menlo, Consolas, monospace; margin: 0; }
+  ol { padding-left: 20px; margin: 6px 0 0; color: var(--dim); font-size: 15px; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; background: var(--dim); margin-right: 8px; vertical-align: middle; }
+  .dot.on { background: var(--ok); } .dot.rec { background: var(--err); animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Surround · Telefon mikrofonu</h1>
+  <div class="sub">Telefonun bilgisayardaki kalibrasyonun mikrofonu olur. Ses bu telefonda işlenmez, bilgisayara gönderilir.</div>
+
+  <div class="card" id="setup">
+    <ol>
+      <li>Dinlediğin yere otur; telefonu <b>kulak hizasında</b> tut ya da bir şeye yasla.</li>
+      <li>Telefonun alt kenarı (mikrofon) <b>tavana</b> baksın, elinle kapatma.</li>
+      <li>Ölçüm sürerken konuşma, telefonu oynatma.</li>
+    </ol>
+    <div style="height:14px"></div>
+    <button id="mic">Mikrofonu aç</button>
+    <div class="warn" id="micWarn" hidden></div>
+  </div>
+
+  <div class="card prompt" id="prompt" hidden></div>
+
+  <div class="card">
+    <div class="state"><span class="dot" id="dot"></span><span id="state">Bağlanıyor…</span></div>
+    <div class="msg" id="msg"></div>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="meter" title="Mikrofon seviyesi"><i id="meter"></i></div>
+    <div style="height:14px"></div>
+    <button id="start" disabled>Ölçümü başlat</button>
+  </div>
+
+  <div class="card" id="resultCard" hidden><pre id="result"></pre></div>
+</main>
+<script>
+(() => {
+  const base = location.pathname.replace(/\/+$/, '');
+  const $ = (id) => document.getElementById(id);
+  let ctx = null, stream = null, recording = false, chunks = [], rate = 0, wake = null, uploading = false, lastSeq = -1;
+
+  async function post(path, body, type) {
+    const r = await fetch(base + path, { method: 'POST', body: body ?? '{}', headers: { 'Content-Type': type || 'application/json' } });
+    if (!r.ok) throw new Error(await r.text());
+    return r;
+  }
+
+  async function keepAwake() {
+    try { if ('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch (e) { /* not fatal */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && stream) keepAwake(); });
+
+  $('mic').onclick = async () => {
+    $('micWarn').hidden = true;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: {
+        echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
+    } catch (e) {
+      $('micWarn').hidden = false;
+      $('micWarn').textContent = !window.isSecureContext
+        ? 'Tarayıcı bu sayfaya mikrofon vermiyor (güvenli bağlantı yok). Adresin https:// ile başladığından emin ol.'
+        : 'Mikrofon izni verilmedi. Adres çubuğundaki kilit/ayar simgesinden mikrofona izin ver.';
+      return;
+    }
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    rate = ctx.sampleRate;
+    const src = ctx.createMediaStreamSource(stream);
+    const node = ctx.createScriptProcessor(4096, 1, 1);
+    node.onaudioprocess = (e) => {
+      const x = e.inputBuffer.getChannelData(0);
+      if (recording) chunks.push(new Float32Array(x));
+      let peak = 0;
+      for (let i = 0; i < x.length; i++) { const a = Math.abs(x[i]); if (a > peak) peak = a; }
+      const db = 20 * Math.log10(peak + 1e-9);
+      $('meter').style.width = Math.max(0, Math.min(100, (db + 70) / 70 * 100)) + '%';
+      $('meter').style.background = peak > 0.98 ? 'var(--err)' : 'var(--ok)';
+    };
+    src.connect(node);
+    node.connect(ctx.destination); // silent; keeps the processor running
+    const settings = stream.getAudioTracks()[0].getSettings ? stream.getAudioTracks()[0].getSettings() : {};
+    await post('/api/hello', JSON.stringify({ device: navigator.userAgent, sampleRate: rate, settings }));
+    $('setup').hidden = true;
+    keepAwake();
+    $('start').disabled = false;
+  };
+
+  $('start').onclick = async () => {
+    $('start').disabled = true;
+    try { await post('/api/start'); } catch (e) { $('msg').textContent = e.message; $('start').disabled = false; }
+  };
+
+  async function upload() {
+    uploading = true;
+    await new Promise((r) => setTimeout(r, 500)); // the last sweep's tail
+    recording = false;
+    let n = 0; for (const c of chunks) n += c.length;
+    const all = new Float32Array(n);
+    let o = 0; for (const c of chunks) { all.set(c, o); o += c.length; }
+    chunks = [];
+    try { await post('/api/upload?rate=' + rate, all.buffer, 'application/octet-stream'); }
+    catch (e) { $('msg').textContent = 'Kayıt gönderilemedi: ' + e.message; }
+    uploading = false;
+  }
+
+  const labels = { ready: 'Hazır', record: 'Kayıt başlıyor', recording: 'Ölçülüyor', upload: 'Kayıt gönderiliyor', analyzing: 'Analiz ediliyor' };
+
+  async function poll() {
+    let s;
+    try {
+      const r = await fetch(base + '/api/state', { cache: 'no-store' });
+      s = await r.json();
+    } catch (e) {
+      $('state').textContent = 'Bilgisayara ulaşılamıyor';
+      $('dot').className = 'dot';
+      setTimeout(poll, 1000);
+      return;
+    }
+    if (s.state === 'record' && !recording) {
+      if (!ctx) { $('msg').textContent = 'Önce “Mikrofonu aç”a dokun.'; }
+      else {
+        chunks = []; recording = true;
+        try { await ctx.resume(); await post('/api/recording'); } catch (e) { recording = false; }
+      }
+    }
+    if (s.state === 'upload' && recording && !uploading) upload();
+    if ((s.state === 'ready') && recording && !uploading) { recording = false; chunks = []; }
+
+    $('state').textContent = labels[s.state] || s.state;
+    $('dot').className = 'dot ' + (s.state === 'recording' || s.state === 'record' ? 'rec' : 'on');
+    $('msg').textContent = s.error || s.message || (ctx ? 'Bilgisayardan ya da buradan başlatabilirsin.' : '');
+    $('msg').className = 'msg' + (s.error ? ' err' : '');
+    $('bar').style.width = (s.percent || 0) + '%';
+    $('prompt').hidden = !s.prompt; $('prompt').textContent = s.prompt || '';
+    $('resultCard').hidden = !s.result; $('result').textContent = s.result || '';
+    if (ctx) $('start').disabled = s.state !== 'ready';
+    lastSeq = s.seq;
+    setTimeout(poll, s.state === 'ready' ? 600 : 250);
+  }
+  poll();
+})();
+</script>
+</body>
+</html>

@@ -5,7 +5,8 @@ namespace Surround.Engine.Dsp;
 /// a share of the engine's bass bus (bass receivers) and a 10-band EQ.
 /// </summary>
 public sealed record SpeakerRoute(string Name, int DeviceChannel, float[] MixRow, double GainDb, bool Mute, int DelaySamples,
-    double HighPassHz = 0, float BassShare = 0, double[]? Eq = null, IReadOnlyList<Config.PeqBand>? Peq = null);
+    double HighPassHz = 0, float BassShare = 0, double[]? Eq = null, IReadOnlyList<Config.PeqBand>? Peq = null,
+    IReadOnlyList<Config.PeqBand>? RoomEq = null);
 
 /// <summary>
 /// Builds device-channel frames from logical frames (7.1 + height lanes) and pushes them into the sink's ring buffer. Producer side only.
@@ -58,7 +59,7 @@ public sealed class SinkMixer
             _bassShare[k] = s.BassShare;
             _hp[k] = s.HighPassHz > 0 ? LinkwitzRiley.HighPass(sampleRate, s.HighPassHz) : null;
             _eqZ[k] = new double[EqZ];
-            eq[k] = BuildEq(s.Eq, s.Peq);
+            eq[k] = BuildEq(s.Eq, s.Peq, s.RoomEq);
             k++;
         }
         _eq = eq;
@@ -75,15 +76,15 @@ public sealed class SinkMixer
         set { if (_limiter != null) _limiter.Enabled = value; }
     }
 
-    private BiquadCoefs[]? BuildEq(double[]? gainsDb, IReadOnlyList<Config.PeqBand>? peq)
+    private BiquadCoefs[]? BuildEq(double[]? gainsDb, IReadOnlyList<Config.PeqBand>? peq, IReadOnlyList<Config.PeqBand>? roomEq)
     {
-        if (gainsDb is null && (peq is null || peq.Count == 0)) return null;
-        var st = EqDesign.TenBandWithPeq(_fs, gainsDb, peq);
+        if (gainsDb is null && (peq is null || peq.Count == 0) && (roomEq is null || roomEq.Count == 0)) return null;
+        var st = EqDesign.TenBandWithPeq(_fs, gainsDb, peq, roomEq);
         return EqDesign.IsFlat(st) ? null : st;
     }
 
     /// <summary>Per-speaker EQ state for live updates: 10-band gains and parametric bands (either may be null).</summary>
-    public readonly record struct SpeakerEq(double[]? Gains, IReadOnlyList<Config.PeqBand>? Peq);
+    public readonly record struct SpeakerEq(double[]? Gains, IReadOnlyList<Config.PeqBand>? Peq, IReadOnlyList<Config.PeqBand>? RoomEq = null);
 
     /// <summary>
     /// Replaces the per-speaker EQs while running. <paramref name="eqPerRoute"/> is aligned with the constructor's
@@ -96,7 +97,8 @@ public sealed class SinkMixer
     {
         var eq = new BiquadCoefs[]?[_idx.Length];
         for (int k = 0; k < eq.Length; k++)
-            eq[k] = _routeOf[k] < eqPerRoute.Count ? BuildEq(eqPerRoute[_routeOf[k]].Gains, eqPerRoute[_routeOf[k]].Peq) : null;
+            eq[k] = _routeOf[k] < eqPerRoute.Count
+                ? BuildEq(eqPerRoute[_routeOf[k]].Gains, eqPerRoute[_routeOf[k]].Peq, eqPerRoute[_routeOf[k]].RoomEq) : null;
         _eq = eq;
     }
 

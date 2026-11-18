@@ -141,9 +141,9 @@ public static class EqDesign
     /// Parametric bands as a fixed <see cref="Config.PeqBand.MaxBands"/>-stage cascade (identity for unused, disabled,
     /// 0 dB or invalid bands; values are clamped to the validator's ranges; bands beyond the sixth are ignored).
     /// </summary>
-    public static BiquadCoefs[] Peq(double fs, IReadOnlyList<Config.PeqBand>? bands)
+    public static BiquadCoefs[] Peq(double fs, IReadOnlyList<Config.PeqBand>? bands, int stages = Config.PeqBand.MaxBands)
     {
-        var st = new BiquadCoefs[Config.PeqBand.MaxBands];
+        var st = new BiquadCoefs[stages];
         Array.Fill(st, BiquadCoefs.Identity);
         if (bands is null) return st;
         static double C(double v, double lo, double hi, double fallback) => double.IsFinite(v) ? Math.Clamp(v, lo, hi) : fallback;
@@ -166,15 +166,18 @@ public static class EqDesign
     }
 
     /// <summary>10-band EQ followed by the parametric bands (the per-speaker cascade; <see cref="StagesWithPeq"/> long).</summary>
-    public static BiquadCoefs[] TenBandWithPeq(double fs, IReadOnlyList<double>? gainsDb, IReadOnlyList<Config.PeqBand>? peq)
+    public static BiquadCoefs[] TenBandWithPeq(double fs, IReadOnlyList<double>? gainsDb, IReadOnlyList<Config.PeqBand>? peq,
+        IReadOnlyList<Config.PeqBand>? roomEq = null)
     {
         var st = new BiquadCoefs[StagesWithPeq];
         TenBand(fs, gainsDb).CopyTo(st, 0);
         Peq(fs, peq).CopyTo(st, Config.ProcessingConfig.Bands);
+        Peq(fs, roomEq, Config.PeqBand.MaxRoomBands).CopyTo(st, Config.ProcessingConfig.Bands + Config.PeqBand.MaxBands);
         return st;
     }
 
-    public const int StagesWithPeq = Config.ProcessingConfig.Bands + Config.PeqBand.MaxBands;
+    /// <summary>The per-speaker cascade: 10-band EQ, the user's parametric bands, then the automatic room correction.</summary>
+    public const int StagesWithPeq = Config.ProcessingConfig.Bands + Config.PeqBand.MaxBands + Config.PeqBand.MaxRoomBands;
 
     public static bool IsFlat(BiquadCoefs[] stages)
     {

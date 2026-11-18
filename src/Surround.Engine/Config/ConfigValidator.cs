@@ -55,6 +55,7 @@ public static class ConfigValidator
             if (!(s.GainDb >= MinGainDb && s.GainDb <= MaxGainDb)) e.Add($"{n}: gainDb {MinGainDb}..{MaxGainDb} dB aralığında olmalı (bulunan: {s.GainDb}).");
             if (s.Eq != null) CheckEq(e, $"{n}: eq", s.Eq);
             if (s.Peq != null) CheckPeq(e, $"{n}: peq", s.Peq);
+            if (s.RoomEq != null) CheckPeq(e, $"{n}: roomEq", s.RoomEq, PeqBand.MaxRoomBands);
             if (!(s.HighPassHz == 0 || (s.HighPassHz >= MinHighPassHz && s.HighPassHz <= MaxHighPassHz)))
                 e.Add($"{n}: highPassHz 0 (kapalı) veya {MinHighPassHz}-{MaxHighPassHz} aralığında olmalı.");
             if (s.HighPassHz > 0 && s.BassReceiver)
@@ -101,9 +102,9 @@ public static class ConfigValidator
             if (!(Math.Abs(eq[b]) <= MaxEqDb)) e.Add($"{field}[{b}] -{MaxEqDb}..+{MaxEqDb} dB aralığında olmalı (bulunan: {eq[b]}).");
     }
 
-    private static void CheckPeq(List<string> e, string field, List<PeqBand> bands)
+    private static void CheckPeq(List<string> e, string field, List<PeqBand> bands, int max = PeqBand.MaxBands)
     {
-        if (bands.Count > PeqBand.MaxBands) e.Add($"{field}: en fazla {PeqBand.MaxBands} parametrik bant olabilir (bulunan: {bands.Count}).");
+        if (bands.Count > max) e.Add($"{field}: en fazla {max} parametrik bant olabilir (bulunan: {bands.Count}).");
         for (int i = 0; i < bands.Count; i++)
         {
             var b = bands[i];

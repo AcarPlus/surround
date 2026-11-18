@@ -30,9 +30,13 @@ public static class CalibrationRunner
     /// <summary>Message of a speaker on the loopback source device (Windows renders it directly; it cannot be measured).</summary>
     public const string SourceDeviceMessage = "Kaynak cihazdaki hoparlör ölçülemez.";
 
-    /// <summary>Blocks until done. Throws <see cref="OperationCanceledException"/> when <paramref name="ct"/> fires.</summary>
+    /// <summary>
+    /// Blocks until done. Throws <see cref="OperationCanceledException"/> when <paramref name="ct"/> fires. A phone
+    /// request (<see cref="CalibrationRequest.IsPhone"/>) needs <paramref name="external"/>: the program is then clocked by
+    /// the first output device's loopback and the phone's own recording is aligned afterwards (<see cref="ExternalAlignment"/>).
+    /// </summary>
     public static CalibrationResult Run(SurroundConfig cfg, CalibrationRequest req, Action<CalibrationProgress>? progress = null,
-        CancellationToken ct = default, Action<string>? log = null)
+        CancellationToken ct = default, Action<string>? log = null, IExternalMicrophone? external = null)
     {
         progress?.Invoke(new CalibrationProgress(CalibrationPhase.Preparing, null, 0, 0, "Hazırlanıyor"));
         var sel = Resolve(cfg, req);
@@ -41,6 +45,7 @@ public static class CalibrationRunner
         int repeats = Math.Clamp(req.Repeats, 1, MaxRepeats);
         double levelDb = Math.Clamp(req.LevelDb, -40, -6);
         if (string.IsNullOrWhiteSpace(req.MicDeviceId)) throw new ArgumentException("Mikrofon seçilmedi.");
+        if (req.IsPhone && external is null) throw new ArgumentException("Telefon bağlı değil.");
 
         using var en = new MMDeviceEnumerator();
         // Program rate = the source's rate, so the resampling path matches normal playback.
@@ -55,20 +60,89 @@ public static class CalibrationRunner
             deviceIds.FindIndex(d => SurroundConfig.SameId(d, t.Speaker.OutputDeviceId)))).ToList();
         var plan = new CalibrationPlan(rate, speakers, refIdx, repeats, levelDb);
 
-        var session = new Session(plan, targets, deviceIds, cfg, req, en, log);
+        var session = new Session(plan, targets, deviceIds, cfg, req, en, log, phone: external != null && req.IsPhone);
+        ExternalRecording? rec = null;
+        bool begun = false;
         try
         {
             session.Open();
+            if (session.Phone)
+            {
+                progress?.Invoke(new CalibrationProgress(CalibrationPhase.Preparing, null, 0, 0, "Telefon kayda başlıyor"));
+                external!.Begin(ct);
+                begun = true;
+            }
             session.Start();
             session.Wait(progress, ct);
+        }
+        catch
+        {
+            if (begun) { try { external!.Abort(); } catch { } }
+            throw;
         }
         finally { session.Dispose(); }
 
         ct.ThrowIfCancellationRequested();
-        var result = CalibrationAnalyzer.Analyze(plan, session.Recording, (int)Math.Min(session.Recorded, session.Recording.Length),
-            session.MicRate, req.MicDeviceId, session.Extras(log), progress, ct);
+        var extras = session.Extras(log);
+        CalibrationResult result;
+        if (session.Phone)
+        {
+            progress?.Invoke(new CalibrationProgress(CalibrationPhase.Analyzing, null, 0, plan.Steps.Count, "Telefondan kayıt alınıyor"));
+            rec = external!.Finish(ct);
+            if (rec.Samples.Length == 0 || rec.SampleRate < 8000) throw new InvalidOperationException("Telefondan boş kayıt geldi.");
+            var al = ExternalAlignment.Find(plan, rec.Samples, rec.Samples.Length, rec.SampleRate, ct);
+            log?.Invoke(FormattableString.Invariant($"telefon: {rec.SampleRate} Hz, saat farkı {al.ClockPpm} ppm, referans {al.ReferenceHits}/{al.Steps}"));
+            result = CalibrationAnalyzer.Analyze(plan, rec.Samples, rec.Samples.Length, rec.SampleRate, req.MicDeviceId,
+                extras, progress, ct, new AnalysisOptions { Map = al.Map, MaxLatencySec = ExternalAlignment.WindowSec, Responses = true });
+            var notes = new List<string> { FormattableString.Invariant($"Telefon {rec.SampleRate} Hz, saat farkı {al.ClockPpm:0} ppm.") };
+            if (!string.IsNullOrWhiteSpace(rec.Note)) notes.Add(rec.Note!);
+            if (al.ReferenceHits < al.Steps) notes.Add($"Referans {al.Steps} adımın {al.ReferenceHits} tanesinde bulundu.");
+            result = result with { Note = string.Join(" ", notes) };
+        }
+        else
+        {
+            result = CalibrationAnalyzer.Analyze(plan, session.Recording, (int)Math.Min(session.Recorded, session.Recording.Length),
+                session.MicRate, req.MicDeviceId, extras, progress, ct, new AnalysisOptions { Responses = req.Responses });
+        }
+        if (req.ApplyCorrections) result = WithoutCorrections(result, cfg, targets, refIdx, plan.Rate);
         return WithSkipped(result, sel);
     }
+
+    /// <summary>
+    /// Verification run: the speakers played with their delay, gain and roomEq. Reports what is heard now as the residual
+    /// and converts the measurement back to the raw values (as if played without corrections), so the same suggestion
+    /// logic applies to both kinds of run.
+    /// </summary>
+    internal static CalibrationResult WithoutCorrections(CalibrationResult r, SurroundConfig cfg, List<Target> targets, int refIdx, int rate)
+    {
+        var refS = targets[refIdx].Speaker;
+        double D(SpeakerConfig s) => CorrectionDelaySamples(cfg, s, rate) * 1000.0 / rate;
+        var byId = targets.ToDictionary(t => t.Id, t => t.Speaker);
+        var speakers = r.Speakers.Select(m =>
+        {
+            if (!byId.TryGetValue(m.SpeakerId, out var s)) return m;
+            double[]? resp = m.ResponseDb;
+            if (resp != null && r.ResponseHz != null)
+            {
+                var st = EqDesign.Peq(rate, s.RoomEq, PeqBand.MaxRoomBands);
+                resp = resp.Select((v, i) => Math.Round(v - FrequencyResponse.MagnitudeDb(st, rate, r.ResponseHz[i]) - s.GainDb, 2)).ToArray();
+            }
+            if (!m.Ok || m.SpeakerId == targets[refIdx].Id) return m with { ResponseDb = resp };
+            return m with
+            {
+                ArrivalMs = Math.Round(m.ArrivalMs - (D(s) - D(refS)), 3),
+                LevelDb = Math.Round(m.LevelDb - (s.GainDb - refS.GainDb), 2),
+                ResidualArrivalMs = m.ArrivalMs,
+                ResidualLevelDb = m.LevelDb,
+                ResponseDb = resp,
+            };
+        }).ToList();
+        return r with { Speakers = speakers, Verified = true };
+    }
+
+    /// <summary>The delay a verification run plays a speaker with: the engine's effective delay, in program frames.</summary>
+    internal static int CorrectionDelaySamples(SurroundConfig cfg, SpeakerConfig s, int rate) =>
+        (int)Math.Round(Math.Max(0, cfg.EffectiveDelayMs(s)) * rate / 1000.0);
 
     /// <summary>Speaker id: the UI's <c>id</c> member; the CLI may also pass the speaker's name.</summary>
     public static string? IdOf(SpeakerConfig s) =>
@@ -168,10 +242,18 @@ public static class CalibrationRunner
         private int _nextBoundary;
 
         public Session(CalibrationPlan plan, List<Target> targets, List<string> deviceIds, SurroundConfig cfg, CalibrationRequest req,
-            MMDeviceEnumerator en, Action<string>? log)
+            MMDeviceEnumerator en, Action<string>? log, bool phone = false)
         {
             _plan = plan; _targets = targets; _deviceIds = deviceIds; _cfg = cfg; _req = req; _en = en; _log = log;
+            Phone = phone;
         }
+
+        /// <summary>
+        /// The microphone is a phone: the local "microphone" is only the clock — the loopback of the first output device
+        /// (it renders the program, so its packets come at that device's pace, like a source capture).
+        /// </summary>
+        public bool Phone { get; }
+        private bool ClockIsLoopback => _req.MicLoopback || Phone;
 
         public float[] Recording { get; private set; } = Array.Empty<float>();
         public long Recorded => Interlocked.Read(ref _recorded);
@@ -179,15 +261,16 @@ public static class CalibrationRunner
 
         public void Open()
         {
-            try { _micDevice = _en.GetDevice(_req.MicDeviceId.Trim()); }
-            catch { throw new ArgumentException($"Mikrofon bulunamadı: {_req.MicDeviceId}"); }
+            string micId = Phone ? _deviceIds[0] : _req.MicDeviceId.Trim();
+            try { _micDevice = _en.GetDevice(micId); }
+            catch { throw new ArgumentException($"Mikrofon bulunamadı: {micId}"); }
             if (_micDevice.State != DeviceState.Active) throw new ArgumentException($"'{_micDevice.FriendlyName}' etkin değil.");
-            if (_req.MicLoopback && _micDevice.DataFlow != DataFlow.Render)
+            if (ClockIsLoopback && _micDevice.DataFlow != DataFlow.Render)
                 throw new ArgumentException($"'{_micDevice.FriendlyName}' bir çıkış cihazı değil (loopback testi çıkış cihazı ister).");
-            if (!_req.MicLoopback && _micDevice.DataFlow != DataFlow.Capture)
+            if (!ClockIsLoopback && _micDevice.DataFlow != DataFlow.Capture)
                 throw new ArgumentException($"'{_micDevice.FriendlyName}' bir kayıt cihazı değil.");
 
-            _capture = _req.MicLoopback ? new LoopbackCapture(_micDevice, CaptureBufferMs) : new WasapiCapture(_micDevice, true, CaptureBufferMs);
+            _capture = ClockIsLoopback ? new LoopbackCapture(_micDevice, CaptureBufferMs) : new WasapiCapture(_micDevice, true, CaptureBufferMs);
             _fmt = _capture.WaveFormat;
             if (!SampleConverter.IsSupported(_fmt)) throw new NotSupportedException($"Mikrofon formatı desteklenmiyor: {_fmt}");
 
@@ -216,7 +299,10 @@ public static class CalibrationRunner
                     }
                     var row = new float[Channels.Count];
                     row[i] = 1f; // speaker i plays program lane i
-                    routes.Add(new SpeakerRoute(s.Name, s.DeviceChannel - 1, row, 0, false, 0));
+                    routes.Add(_req.ApplyCorrections
+                        ? new SpeakerRoute(s.Name, s.DeviceChannel - 1, row, s.GainDb, false,
+                            CorrectionDelaySamples(_cfg, s, _plan.Rate), RoomEq: s.RoomEq)
+                        : new SpeakerRoute(s.Name, s.DeviceChannel - 1, row, 0, false, 0));
                 }
                 var o = _cfg.Outputs.FirstOrDefault(x => SurroundConfig.SameId(x.DeviceId, _deviceIds[d]));
                 double bufferMs = o is { BufferMs: >= 10 and <= 500 } ? o.BufferMs : 40;
@@ -241,7 +327,7 @@ public static class CalibrationRunner
             }
             _glitchAt = new long[_plan.Steps.Count + 1][];
 
-            if (_req.MicLoopback)
+            if (ClockIsLoopback)
             {
                 // Loopback delivers no packets while the device renders nothing (see SurroundEngine).
                 _keepAlive = new WasapiOut(_micDevice, AudioClientShareMode.Shared, true, 50);
@@ -373,8 +459,9 @@ public static class CalibrationRunner
                 Latency = new LatencyTrack(_plan.Rate, MicRate, _micTicks, _micFrames, _micCount, _sinkTicks, _sinkConsumed,
                     _sinkCounts.ToArray(), _targetMs),
                 StepGlitched = glitched,
-                ClipPositions = _clips,
+                ClipPositions = Phone ? null : _clips,
                 Log = log,
+                ClockRate = Phone ? MicRate : null,
             };
         }
 

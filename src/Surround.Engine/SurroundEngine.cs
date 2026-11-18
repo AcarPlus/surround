@@ -185,7 +185,7 @@ public sealed class SurroundEngine : IDisposable
             if (!HasLfe(s)) row[Channels.LFE] = bass.LfeFold;
         }
         int delay = (int)Math.Round(Math.Max(0, _cfg.EffectiveDelayMs(s)) * fs / 1000.0);
-        return new SpeakerRoute(s.Name, s.DeviceChannel - 1, row, s.GainDb, s.Mute, delay, s.HighPassHz, share, s.Eq, s.Peq);
+        return new SpeakerRoute(s.Name, s.DeviceChannel - 1, row, s.GainDb, s.Mute, delay, s.HighPassHz, share, s.Eq, s.Peq, s.RoomEq);
     }
 
     /// <summary>
@@ -207,7 +207,7 @@ public sealed class SurroundEngine : IDisposable
         {
             var eqs = routed.Speakers
                 .Where(s => SurroundConfig.SameId(s.OutputDeviceId, routed.Outputs[i].DeviceId))
-                .Select(s => new SinkMixer.SpeakerEq(s.Eq, s.Peq))
+                .Select(s => new SinkMixer.SpeakerEq(s.Eq, s.Peq, s.RoomEq))
                 .ToList();
             _sinks[i].UpdateLive(eqs, routed.Processing.Limiter);
         }

@@ -52,6 +52,12 @@ public sealed class SpeakerConfig
     /// <summary>Per-speaker parametric bands (max 6), applied after the 10-band EQ; null = none. Live-updatable.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<PeqBand>? Peq { get; set; }
+    /// <summary>
+    /// Automatic room/match correction from the microphone calibration (max <see cref="PeqBand.MaxRoomBands"/>), applied
+    /// after <see cref="Peq"/>; kept apart from the user's own EQ. null = none. Live-updatable.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<PeqBand>? RoomEq { get; set; }
     /// <summary>0 = full range; 40..250 = LR4 high-pass, the cut bass goes to the bass receivers.</summary>
     public double HighPassHz { get; set; }
     /// <summary>Receives the bass cut from high-passed speakers (and LFE from a native multichannel source).</summary>
@@ -66,6 +72,8 @@ public sealed class SpeakerConfig
 public sealed class PeqBand
 {
     public const int MaxBands = 6;
+    /// <summary>Bands of a speaker's automatic correction (<see cref="SpeakerConfig.RoomEq"/>).</summary>
+    public const int MaxRoomBands = 8;
     public const string Peak = "peak", LowShelf = "lowShelf", HighShelf = "highShelf";
     public const double MinFreqHz = 20, MaxFreqHz = 20000, MaxGainDb = 12, MinQ = 0.3, MaxQ = 10;
 
@@ -215,6 +223,7 @@ public sealed class SurroundConfig
             s.OutputDeviceId ??= "";
             s.Source ??= new();
             s.Peq = DropNullBands(s.Peq);
+            s.RoomEq = DropNullBands(s.RoomEq);
         }
         Processing.Peq = DropNullBands(Processing.Peq);
         UpmixOptions.Mode ??= UpmixOptions.Film;
@@ -242,7 +251,7 @@ public sealed class SurroundConfig
         copy.Source.Extra = null;
         copy.Source.DeviceName = null;
         foreach (var o in copy.Outputs) { o.Extra = null; o.DeviceName = null; }
-        foreach (var s in copy.Speakers) { s.Extra = null; s.Name = ""; s.Eq = null; s.EqPreset = null; s.Peq = null; }
+        foreach (var s in copy.Speakers) { s.Extra = null; s.Name = ""; s.Eq = null; s.EqPreset = null; s.Peq = null; s.RoomEq = null; }
         return copy.ToJson();
     }
 

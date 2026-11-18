@@ -188,7 +188,7 @@ public class CalibrationTests(ITestOutputHelper output)
             new[] { new SpeakerCalibration("a", true, 0, 0, 40, 0, false, null), new SpeakerCalibration("b", false, 0, 0, 3, 0, true, "w") }), web);
         Assert.Equal("""{"referenceSpeakerId":"a","micDeviceId":"m","noiseFloorDb":-80,"micClipped":false,"speakers":[""" +
             """{"speakerId":"a","ok":true,"arrivalMs":0,"levelDb":0,"snrDb":40,"spreadMs":0,"lowBand":false},""" +
-            """{"speakerId":"b","ok":false,"arrivalMs":0,"levelDb":0,"snrDb":3,"spreadMs":0,"lowBand":true,"message":"w"}]}""", r);
+            """{"speakerId":"b","ok":false,"arrivalMs":0,"levelDb":0,"snrDb":3,"spreadMs":0,"lowBand":true,"message":"w"}],"verified":false}""", r);
     }
 
     [Fact]

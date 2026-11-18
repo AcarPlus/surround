@@ -84,6 +84,44 @@ public sealed class CalibrationExtras
     public IReadOnlyList<long>? ClipPositions { get; init; }
     /// <summary>Diagnostics: one line per analysed sweep (raw latency, fill excess, SNR, level).</summary>
     public Action<string>? Log { get; init; }
+    /// <summary>
+    /// Rate of the clock the <see cref="Latency"/> track was recorded against, when that is not the microphone
+    /// (external microphone: the clock is a render device's loopback). null = the microphone.
+    /// </summary>
+    public int? ClockRate { get; init; }
+}
+
+/// <summary>Where program frame p lies in the recording: micPos = <see cref="Offset"/> + p · <see cref="Scale"/>.</summary>
+public sealed record RecordingMap(double Offset, double Scale)
+{
+    public double At(double programFrame) => Offset + programFrame * Scale;
+}
+
+/// <summary>Analysis switches beyond the defaults of a local microphone run.</summary>
+public sealed class AnalysisOptions
+{
+    /// <summary>null = the recording starts at program frame 0, at the nominal rate ratio (local microphone).</summary>
+    public RecordingMap? Map { get; init; }
+    /// <summary>Search window for an arrival after its (mapped) push.</summary>
+    public double MaxLatencySec { get; init; } = CalibrationPlan.MaxLatencySec;
+    /// <summary>Also report each speaker's smoothed frequency response on <see cref="ResponseGrid"/>.</summary>
+    public bool Responses { get; init; }
+}
+
+/// <summary>
+/// The fixed frequency grid of measured responses: 1/12 octave from 100 Hz (89 points, up to ~16.1 kHz). Each value is
+/// the 1/6-octave power average of the gated impulse response's spectrum around the point.
+/// </summary>
+public static class ResponseGrid
+{
+    public const double StartHz = 100;
+    public const int PointsPerOctave = 12, Count = 89;
+    /// <summary>Gate: from 2 ms before the direct sound, 60 ms flat, then a 20 ms half-cosine fade.</summary>
+    public const double PreSec = 0.002, FlatSec = 0.060, FadeSec = 0.020;
+
+    public static double Hz(int i) => StartHz * Math.Pow(2, i / (double)PointsPerOctave);
+
+    public static double[] Frequencies() => Enumerable.Range(0, Count).Select(Hz).ToArray();
 }
 
 /// <summary>
@@ -106,20 +144,24 @@ public static class CalibrationAnalyzer
 
     private sealed record Shape(float[] Window, double WeightHz, double BackSec, double LobeSec, double PreSec, double PostSec);
 
-    private readonly record struct Event(bool Found, double Arrival, double Snr, double LevelDb, bool Clipped);
+    private readonly record struct Event(bool Found, double Arrival, double Snr, double LevelDb, bool Clipped, double[]? Power);
 
     public static CalibrationResult Analyze(CalibrationPlan plan, float[] mic, int micLength, int micRate, string micDeviceId,
-        CalibrationExtras? extras = null, Action<CalibrationProgress>? progress = null, CancellationToken ct = default)
+        CalibrationExtras? extras = null, Action<CalibrationProgress>? progress = null, CancellationToken ct = default,
+        AnalysisOptions? options = null)
     {
         ct.ThrowIfCancellationRequested();
         micLength = Math.Min(micLength, mic.Length);
         double ratio = micRate / (double)plan.Rate;
+        var map = options?.Map ?? new RecordingMap(0, ratio);
+        double clockRatio = (extras?.ClockRate ?? micRate) / (double)plan.Rate;
+        bool wantResp = options?.Responses == true;
         double cap = Math.Min(plan.Sweep.F2, 0.45 * micRate);
         var reference = plan.Sweep.Render(micRate, plan.Amplitude, cap);
 
         int pre = (int)Math.Round(0.01 * micRate);
         int guard = (int)Math.Round(0.005 * micRate);
-        int win = (int)Math.Round(CalibrationPlan.MaxLatencySec * micRate);
+        int win = (int)Math.Round((options?.MaxLatencySec ?? CalibrationPlan.MaxLatencySec) * micRate);
         // After the latency window, a stretch of each sweep's own IR serves as an in-run noise estimate: a noise-
         // cancelling (ENC) mic may gate the silent lead-in to digital zero but not the noise while the sweep plays.
         int quietFrom = pre + win + guard, quietTo = pre + win + (int)Math.Round(0.1 * micRate);
@@ -136,10 +178,13 @@ public static class CalibrationAnalyzer
         var broad = Make(new Band(150, 300, 0.65 * cap, 0.9 * cap), 0.02, 0.0003, 0.002, 0.005);
         var level = Make(new Band(200, 400, Math.Min(4000, 0.5 * cap), Math.Min(6000, 0.7 * cap)), 0.02, 0.0003, 0.002, 0.005);
         var low = Make(new Band(25, 40, 120, 180), 0.06, 0.008, 0.01, 0.04);
+        var full = wantResp ? dec.BandWindow(40, 60, 0.9 * cap, 0.97 * cap, micRate, out _) : null;
+        var resp = wantResp ? new ResponseAnalyzer(micRate) : null;
+        var ir = wantResp ? new float[segLen] : null;
 
         // Noise: the silent lead-in through the same deconvolution (only lags with full sweep support).
-        long noiseStart = (long)Math.Round(plan.NoiseStartFrame * ratio);
-        int noiseLen = (int)Math.Min(segLen, Math.Round(plan.NoiseFrames * ratio));
+        long noiseStart = (long)Math.Round(map.At(plan.NoiseStartFrame));
+        int noiseLen = (int)Math.Min(segLen, Math.Round(plan.NoiseFrames * map.Scale));
         double noisePow = 0;
         for (int i = 0; i < noiseLen; i++)
         {
@@ -169,8 +214,9 @@ public static class CalibrationAnalyzer
         var envT = new float[segLen];
         var envL = new float[segLen];
 
-        Event Analyze(double pos, CalibrationSpeaker spk, Shape timing)
+        Event Analyze(double frame, CalibrationSpeaker spk, Shape timing)
         {
+            double pos = map.At(frame);
             long b = (long)Math.Floor(pos) - pre;
             dec.Load(mic, micLength, b, segLen);
             dec.Envelope(timing.Window, envT, segLen);
@@ -196,8 +242,15 @@ public static class CalibrationAnalyzer
                 levelDb = 10 * Math.Log10(Math.Max(energy / lvlShape.WeightHz, 1e-30));
             }
 
+            double[]? power = null;
+            if (found && resp != null && !spk.LowBand)
+            {
+                dec.Impulse(full!, ir!, segLen);
+                power = resp.Power(ir!, segLen, t.Arrival);
+            }
+
             double arrival = t.Arrival + b - pos;
-            double excess = extras?.Latency?.ExcessAt(spk.Sink, pos + plan.Sweep.Seconds / 2 * micRate) ?? 0;
+            double excess = extras?.Latency?.ExcessAt(spk.Sink, (frame + plan.Sweep.Seconds / 2 * plan.Rate) * clockRatio) ?? 0;
             arrival -= excess * micRate / 1000.0;
             extras?.Log?.Invoke(FormattableString.Invariant(
                 $"{spk.Id}: push {pos / micRate:0.000} s, gecikme {(t.Arrival + b - pos) * 1000.0 / micRate:0.000} ms, halka fazlası {excess:0.000} ms, SNR {snr:0.0} dB, seviye {levelDb:0.00} dB"));
@@ -205,13 +258,13 @@ public static class CalibrationAnalyzer
             int ci = clips.BinarySearch(b);
             if (ci < 0) ci = ~ci;
             bool clipped = ci < clips.Count && clips[ci] < b + segLen;
-            return new Event(found, arrival, snr, levelDb, clipped);
+            return new Event(found, arrival, snr, levelDb, clipped, power);
         }
 
         var spk = plan.Speakers;
         int refIdx = plan.Reference;
         var steps = plan.Steps;
-        if (steps.Count > 0) extras?.Latency?.Fit((long)(steps[0].StartFrame * ratio), micLength);
+        if (steps.Count > 0) extras?.Latency?.Fit((long)(steps[0].StartFrame * clockRatio), (long)(plan.TotalFrames * clockRatio) + 1);
         var evR = new Event[steps.Count];
         var evS = new Event[steps.Count];
         var stepLow = new bool[steps.Count];
@@ -223,8 +276,8 @@ public static class CalibrationAnalyzer
                 $"Analiz ediliyor ({i + 1}/{steps.Count})"));
             stepLow[i] = spk[refIdx].LowBand || spk[st.Test].LowBand;
             var timing = stepLow[i] ? low : broad;
-            evR[i] = Analyze(st.StartFrame * ratio, spk[refIdx], timing);
-            evS[i] = Analyze((st.StartFrame + plan.OffsetFrames) * ratio, spk[st.Test], timing);
+            evR[i] = Analyze(st.StartFrame, spk[refIdx], timing);
+            evS[i] = Analyze(st.StartFrame + plan.OffsetFrames, spk[st.Test], timing);
         }
 
         ct.ThrowIfCancellationRequested();
@@ -246,7 +299,12 @@ public static class CalibrationAnalyzer
                 double snr = Median(own.Select(e => e.Snr).ToList());
                 bool ok = own.Any(Usable);
                 AddSignalMessages(msgs, own, snr, own.Any(e => e.Found), isRef: true);
-                results.Add(new SpeakerCalibration(spk[s].Id, ok, 0, 0, Round(snr, 1), 0, spk[s].LowBand, Join(msgs)));
+                // A drifting reference level means the recorder changes its gain (automatic gain control).
+                var refLv = own.Where(Usable).Select(e => e.LevelDb).ToList();
+                if (refLv.Count > 2 && refLv.Max() - refLv.Min() > 2)
+                    msgs.Add($"Referans seviyesi ölçüm boyunca {refLv.Max() - refLv.Min():0.0} dB oynadı; kayıt cihazının otomatik kazancı açık olabilir.");
+                results.Add(new SpeakerCalibration(spk[s].Id, ok, 0, 0, Round(snr, 1), 0, spk[s].LowBand, Join(msgs))
+                    { ResponseDb = wantResp ? ResponseAnalyzer.Average(own.Where(Usable).Select(e => e.Power)) : null });
                 continue;
             }
 
@@ -271,11 +329,13 @@ public static class CalibrationAnalyzer
             if (tok && lowBand) msgs.Add("Bas bandında ölçüldü; zamanlama daha az güvenilir.");
             results.Add(new SpeakerCalibration(spk[s].Id, tok,
                 tok ? Round(Median(arr), 3) : 0, tok ? Round(Median(lvl), 2) : 0,
-                Round(tsnr, 1), Round(spread, 3), lowBand, Join(msgs)));
+                Round(tsnr, 1), Round(spread, 3), lowBand, Join(msgs))
+                { ResponseDb = wantResp ? ResponseAnalyzer.Average(testEv.Where(Usable).Select(e => e.Power)) : null });
         }
 
         progress?.Invoke(new CalibrationProgress(CalibrationPhase.Done, null, steps.Count, steps.Count, "Kalibrasyon tamamlandı."));
-        return new CalibrationResult(spk[refIdx].Id, micDeviceId, Round(noiseFloorDb, 1), micClipped, results);
+        return new CalibrationResult(spk[refIdx].Id, micDeviceId, Round(noiseFloorDb, 1), micClipped, results)
+            { ResponseHz = wantResp ? ResponseGrid.Frequencies().Select(f => Math.Round(f, 1)).ToArray() : null };
     }
 
     private static void AddSignalMessages(List<string> msgs, List<Event> ev, double snr, bool detected, bool isRef)
@@ -398,6 +458,23 @@ internal sealed class SweepDeconvolver
             _xRe[k] = a * _gRe[k] - b * _gIm[k];
             _xIm[k] = a * _gIm[k] + b * _gRe[k];
         }
+    }
+
+    /// <summary>Real impulse response of the loaded segment in band <paramref name="w"/>, first <paramref name="count"/> lags.</summary>
+    public void Impulse(float[] w, float[] dest, int count)
+    {
+        Array.Clear(_re); Array.Clear(_im);
+        for (int k = 1; k < _n / 2; k++)
+        {
+            float g = w[k];
+            if (g == 0) continue;
+            // Hermitian spectrum → real result.
+            _re[k] = _xRe[k] * g; _im[k] = _xIm[k] * g;
+            _re[_n - k] = _xRe[k] * g; _im[_n - k] = -_xIm[k] * g;
+        }
+        _fft.Transform(_re, _im, inverse: true);
+        float inv = 1f / _n;
+        for (int i = 0; i < count && i < _n; i++) dest[i] = _re[i] * inv;
     }
 
     /// <summary>Envelope (|analytic IR|) of the loaded segment in band <paramref name="w"/>, first <paramref name="count"/> lags.</summary>

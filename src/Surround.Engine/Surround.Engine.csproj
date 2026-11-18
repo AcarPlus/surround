@@ -16,4 +16,8 @@
     <InternalsVisibleTo Include="Surround.Engine.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Phone\phone.html" />
+  </ItemGroup>
+
 </Project>
