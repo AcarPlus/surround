@@ -469,6 +469,8 @@ export interface PhoneLinkStatus {
   /** Telefon tarayıcısının kapatmadığı ses işlemeleri vb. */
   note?: string | null
   error?: string | null
+  /** Windows Güvenlik Duvarı telefonu içeri alıyor mu (null = bilinmiyor). */
+  firewall?: boolean | null
 }
 
 export type CalibrationPhase = 'preparing' | 'noise' | 'measuring' | 'analyzing' | 'done'

@@ -431,9 +431,16 @@ export function createMockApi(): SurroundApi {
     async phoneLinkStart() {
       if (!phone.running) {
         const url = 'https://192.168.1.20:47810/c/onizleme1234'
-        setPhone({ running: true, url, urls: [url], state: 'ready' })
-        setTimeout(() => setPhone({ connected: true, device: 'Android Chrome (önizleme)' }), 1500)
+        // ?duvar: güvenlik duvarı engelliyor; "İzin ver" sonrası telefon bağlanır.
+        setPhone({ running: true, url, urls: [url], state: 'ready', firewall: !query('duvar') })
+        if (!query('duvar')) setTimeout(() => setPhone({ connected: true, device: 'Android Chrome (önizleme)' }), 1500)
       }
+      return phone
+    },
+    async phoneLinkAllowFirewall() {
+      await new Promise((r) => setTimeout(r, 600))
+      setPhone({ firewall: true })
+      setTimeout(() => setPhone({ connected: true, device: 'Android Chrome (önizleme)' }), 1200)
       return phone
     },
     async phoneLinkStop() {

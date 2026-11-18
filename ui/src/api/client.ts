@@ -62,6 +62,8 @@ export interface SurroundApi {
   /** Telefon mikrofonu: yerel ağda HTTPS bağlantısını açar (QR adresi döner); açıksa aynısını döner. */
   phoneLinkStart(): Promise<PhoneLinkStatus>
   phoneLinkStop(): Promise<void>
+  /** Güvenlik duvarına tek kural ekler (yerel ağ, Surround portları); Windows bir kez yönetici onayı sorar. */
+  phoneLinkAllowFirewall(): Promise<PhoneLinkStatus>
   phoneLinkStatus(): Promise<PhoneLinkStatus>
   /** Telefon ekranında gösterilecek yönerge (ör. sonraki konum); null temizler. */
   phoneLinkPrompt(text: string | null): Promise<void>

@@ -174,6 +174,7 @@ export function createBridgeApi(): SurroundApi {
     onCalibration: (cb) => subscribe(calibrationListeners, cb),
     phoneLinkStart: () => call<PhoneLinkStatus>('phoneLinkStart'),
     phoneLinkStop: () => call<void>('phoneLinkStop'),
+    phoneLinkAllowFirewall: () => call<PhoneLinkStatus>('phoneLinkAllowFirewall'),
     phoneLinkStatus: () => call<PhoneLinkStatus>('phoneLinkStatus'),
     phoneLinkPrompt: (text) => call<void>('phoneLinkPrompt', text),
     onPhoneLink: (cb) => subscribe(phoneListeners, cb),

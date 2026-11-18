@@ -17,6 +17,8 @@ public sealed partial class SurroundBackend
     /// <summary>"Start" was pressed on the phone; the page starts the measurement it has set up.</summary>
     public event Action? PhoneStartRequested;
 
+    private static string ExePath => Environment.ProcessPath ?? throw new BridgeException("Program yolu bulunamadı.");
+
     public static string PhoneCertFile => Path.Combine(AppPaths.DataDir, "phone-cert.pfx");
 
     private PhoneLink Phone()
@@ -36,13 +38,35 @@ public sealed partial class SurroundBackend
         switch (method)
         {
             case "phoneLinkStart":
-                try { return await Task.Run(() => Phone().Start()); }
+                try
+                {
+                    return await Task.Run(() =>
+                    {
+                        var link = Phone();
+                        link.Start();
+                        link.Firewall = PhoneFirewall.IsAllowed(ExePath);
+                        return link.Status();
+                    });
+                }
                 catch (Exception ex) { throw new BridgeException($"Telefon bağlantısı açılamadı: {ex.Message}"); }
+            case "phoneLinkAllowFirewall":
+                return await Task.Run(() =>
+                {
+                    var link = Phone();
+                    if (!PhoneFirewall.Allow(ExePath, out var err))
+                    {
+                        link.Firewall = PhoneFirewall.IsAllowed(ExePath);
+                        throw new BridgeException(err ?? "Güvenlik duvarı izni verilemedi.");
+                    }
+                    AppLog.Info("telefon: güvenlik duvarı kuralı eklendi");
+                    link.Firewall = PhoneFirewall.IsAllowed(ExePath) ?? true;
+                    return link.Status();
+                });
             case "phoneLinkStop":
                 lock (_phoneLock) _phone?.Stop();
                 return null;
             case "phoneLinkStatus":
-                lock (_phoneLock) return _phone?.Status() ?? new PhoneLinkStatus(false, null, Array.Empty<string>(), false, PhoneState.Ready, null, null, null);
+                lock (_phoneLock) return _phone?.Status() ?? new PhoneLinkStatus(false, null, Array.Empty<string>(), false, PhoneState.Ready, null, null, null, null);
             case "phoneLinkPrompt":
                 var a = Arg(args, 0);
                 lock (_phoneLock) _phone?.SetPrompt(a.ValueKind == JsonValueKind.String ? a.GetString() : null);

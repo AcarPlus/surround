@@ -26,8 +26,9 @@ public static class PhoneState
 }
 
 /// <summary>Status of the link for the PC's own UI.</summary>
+/// <param name="Firewall">Windows Firewall lets the phone in (null = unknown); see <see cref="PhoneFirewall"/>.</param>
 public sealed record PhoneLinkStatus(bool Running, string? Url, IReadOnlyList<string> Urls, bool Connected, string State,
-    string? Device, string? Note, string? Error);
+    string? Device, string? Note, string? Error, bool? Firewall = null);
 
 /// <summary>
 /// The phone microphone (docs/kalibrasyon.md, "Telefonla"): a small HTTPS server on the LAN that serves the phone page and
@@ -126,7 +127,16 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
     public PhoneLinkStatus Status() { lock (_lock) return StatusLocked(); }
 
     private PhoneLinkStatus StatusLocked() => new(_listener != null, _urls.FirstOrDefault(), _urls.ToList(),
-        _listener != null && DateTime.UtcNow - _lastSeen < SeenWindow, _state, _device, _note, _error);
+        _listener != null && DateTime.UtcNow - _lastSeen < SeenWindow, _state, _device, _note, _error, _firewall);
+
+    private bool? _firewall;
+
+    /// <summary>Set by the host after checking (or fixing) the firewall; shown in the status.</summary>
+    public bool? Firewall
+    {
+        get { lock (_lock) return _firewall; }
+        set { lock (_lock) _firewall = value; Notify(); }
+    }
 
     public bool Connected { get { lock (_lock) return _listener != null && DateTime.UtcNow - _lastSeen < SeenWindow; } }
 

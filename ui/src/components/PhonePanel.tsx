@@ -52,6 +52,43 @@ export function usePhoneLink(active: boolean) {
   return { status, error }
 }
 
+/** Güvenlik duvarı telefonu engelliyorsa: tek tuşla izin (Windows bir kez yönetici onayı sorar). */
+function FirewallFix() {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  return (
+    <div className="rounded-md border border-warn/60 bg-warn/10 p-3">
+      <p className="flex items-start gap-2 text-[13px] font-semibold text-warn">
+        <IconWarn className="mt-0.5 shrink-0" /> Windows Güvenlik Duvarı telefonun bağlanmasını engelliyor
+      </p>
+      <p className="mt-1 text-xs text-muted">
+        Tek tıkla izin ver: Windows bir kez “Evet/Hayır” sorar. İzin yalnızca bu bilgisayarın yerel ağındaki cihazlara ve
+        Surround’un telefon portlarına açılır.
+      </p>
+      <Button
+        size="sm"
+        variant="primary"
+        className="mt-2"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true)
+          setErr(null)
+          try {
+            await api.phoneLinkAllowFirewall()
+          } catch (e) {
+            setErr(describeError(e))
+          } finally {
+            setBusy(false)
+          }
+        }}
+      >
+        {busy ? 'Onay bekleniyor…' : 'İzin ver'}
+      </Button>
+      {err && <p className="mt-1.5 text-xs text-warn">{err}</p>}
+    </div>
+  )
+}
+
 export function PhonePanel({ status, error }: { status: PhoneLinkStatus | null; error: string | null }) {
   const [showAll, setShowAll] = useState(false)
   if (error)
@@ -65,6 +102,7 @@ export function PhonePanel({ status, error }: { status: PhoneLinkStatus | null; 
     <div className="flex flex-wrap items-start gap-4">
       <QrCode text={status.url} size={176} />
       <div className="min-w-[220px] flex-1 space-y-2 text-[13px]">
+        {status.firewall === false && !status.connected && <FirewallFix />}
         <div className="flex items-center gap-2">
           {status.connected ? <Badge tone="ok">Telefon bağlı</Badge> : <Badge tone="warn">Telefon bekleniyor</Badge>}
           {status.connected && status.device && <span className="truncate text-xs text-faint">{shortDevice(status.device)}</span>}
@@ -94,8 +132,8 @@ export function PhonePanel({ status, error }: { status: PhoneLinkStatus | null; 
               </div>
             ))}
             <p>
-              Sayfa açılmıyorsa: Windows Güvenlik Duvarı ilk seferde izin sorar (“Özel ağlar”a izin ver); telefon misafir
-              ağdaysa bilgisayarı göremez. Birden çok adres varsa telefonun ağındakini elle yaz.
+              Sayfa açılmıyorsa (“yanıt vermesi çok uzun sürdü”): telefon bu bilgisayarla aynı modeme bağlı olmalı; misafir
+              Wi-Fi bilgisayarı göremez. Birden çok adres varsa telefonun ağındakini elle yaz.
             </p>
             <Button size="sm" variant="ghost" onClick={() => void api.phoneLinkStop()}>
               Bağlantıyı kapat

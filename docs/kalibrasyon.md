@@ -63,7 +63,11 @@ Mikrofonu olmayan ya da kulaklık mikrofonu dinleme noktasına uzanmayan kullan�
   mikrofonu yalnızca güvenli bağlamda (HTTPS) verir; sertifika kendinden imzalıdır (`%AppData%\Surround\phone-cert.pfx`,
   ECDSA P-256, 2 yıl, SAN = bu PC'nin yerel IPv4 adresleri; adres değişince yenilenir). Telefon ilk açılışta bir kez
   "bağlantı gizli değil" uyarısı gösterir. Her yol QR'daki rastgele belirteci (`/c/<token>`) taşır; diğeri 404.
-  Windows Güvenlik Duvarı ilk dinlemede izin sorar.
+  Windows Güvenlik Duvarı (özellikle ağ "Ortak" işaretliyse) bağlantıyı sessizce düşürür; telefonda "yanıt vermesi çok
+  uzun sürdü" görünür. `PhoneFirewall.IsAllowed` bunu kural tablosundan algılar (`firewall: false`), QR panelindeki
+  "İzin ver" (`phoneLinkAllowFirewall`) tek UAC onayıyla bu programın tüm kurallarını (Windows'un iptal edilen sorudan
+  sonra eklediği engelleme kuralları dahil) siler ve tek bir kural ekler: gelen TCP 47810–47819, yalnız yerel alt ağ,
+  tüm profiller.
 - **Telefon sayfası** (`Phone/phone.html`, gömülü): `getUserMedia` (yankı giderme, gürültü bastırma, otomatik kazanç
   KAPALI istenir; tarayıcı kapatmazsa `hello` ile bildirilir ve sonuçta not olarak görünür), ekran uyanık tutulur
   (Wake Lock). Durumu 250–600 ms'de bir yoklar: `record` → kaydı başlatır ve `api/recording` ile onaylar; `upload` →

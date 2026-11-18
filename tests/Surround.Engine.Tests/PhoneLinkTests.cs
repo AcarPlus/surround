@@ -114,3 +114,24 @@ public class PhoneLinkTests : IDisposable
         throw new TimeoutException($"state {state} never came");
     }
 }
+
+public class PhoneFirewallTests
+{
+    [Fact]
+    public void Arguments_ReplaceThisProgramsRules_WithOneLocalSubnetAllowRule()
+    {
+        var a = PhoneFirewall.Arguments(@"C:\Users\x\AppData\Local\Surround\current\Surround.exe");
+        Assert.Contains(@"delete rule name=all program=""C:\Users\x\AppData\Local\Surround\current\Surround.exe""", a);
+        Assert.Contains("dir=in action=allow", a);
+        Assert.Contains("localport=47810-47819", a);
+        Assert.Contains("remoteip=localsubnet profile=any", a);
+        Assert.Throws<ArgumentException>(() => PhoneFirewall.Arguments("C:\a\" & del x"));
+    }
+
+    [Fact]
+    public void IsAllowed_UnknownProgram_IsNotAllowed()
+    {
+        // Reads the real firewall (no changes): a program with no rules is not let in (or the API is unavailable).
+        Assert.NotEqual(true, PhoneFirewall.IsAllowed(@"C:\nowhere\surround-test-" + Guid.NewGuid().ToString("N") + ".exe"));
+    }
+}

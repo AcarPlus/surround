@@ -74,7 +74,7 @@ public sealed partial class SurroundBackend : IDisposable
             case "openSoundPanel": OpenSoundPanel(); return null;
             case "calibrate": return await CalibrateAsync(Arg(args, 0));
             case "cancelCalibration": Volatile.Read(ref _calCts)?.Cancel(); return null;
-            case "phoneLinkStart" or "phoneLinkStop" or "phoneLinkStatus" or "phoneLinkPrompt": return await PhoneLinkAsync(method, args);
+            case "phoneLinkStart" or "phoneLinkStop" or "phoneLinkStatus" or "phoneLinkPrompt" or "phoneLinkAllowFirewall": return await PhoneLinkAsync(method, args);
             default: throw new BridgeException($"Bilinmeyen yöntem: {method}");
         }
     }
