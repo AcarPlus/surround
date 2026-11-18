@@ -26,6 +26,8 @@ try
             return CmdProbe(Require(opts, "device"),
                 opts.TryGetValue("seconds", out var ps) ? double.Parse(ps, System.Globalization.CultureInfo.InvariantCulture) : 5,
                 opts.TryGetValue("buffer", out var pb) ? int.Parse(pb) : 20);
+        case "cable-verify": return CmdCableVerify(Require(opts, "exe"));
+        case "cable-71": return CmdCable71(Require(opts, "device"));
         case "calibrate": return CmdCalibrate(Require(opts, "config"), Require(opts, "mic"), micLoopback, opts);
         case "tone":
             return CmdTone(Require(opts, "device"), int.Parse(Require(opts, "channel")),
@@ -202,6 +204,23 @@ static int CmdCalibrate(string path, string mic, bool micLoopback, Dictionary<st
             $"{name,-24} {(s.Ok ? "evet" : "HAYIR"),5} {s.ArrivalMs,9:0.000} {s.LevelDb,9:0.00} {s.SnrDb,7:0.0} {s.SpreadMs,8:0.000} {(s.LowBand ? "evet" : ""),4}  {s.Message}"));
     }
     return res.Speakers.All(s => s.Ok) ? 0 : 3;
+}
+
+static int CmdCableVerify(string exe)
+{
+    bool ok = CableInstaller.IsTrusted(exe, out var why);
+    Console.WriteLine(ok ? "güvenilir (VB-Audio imzalı)" : $"güvenilir DEĞİL: {why}");
+    return ok ? 0 : 2;
+}
+
+static int CmdCable71(string deviceId)
+{
+    SpeakerLayout.SetSevenOne(deviceId);
+    using var en = new NAudio.CoreAudioApi.MMDeviceEnumerator();
+    using var d = en.GetDevice(deviceId);
+    var f = d.AudioClient.MixFormat;
+    Console.WriteLine($"{d.FriendlyName}: {f.Channels} kanal, {f.SampleRate} Hz");
+    return f.Channels == 8 ? 0 : 2;
 }
 
 static int CmdTone(string deviceId, int channel, double seconds)

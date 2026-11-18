@@ -457,6 +457,11 @@ export const PHONE_MIC = 'phone'
 
 export type PhoneState = 'ready' | 'record' | 'recording' | 'upload' | 'analyzing'
 
+/** api.cableSetup sonucu. */
+export type CableSetupResult =
+  | { state: 'done'; deviceId: string; channels: number; installed: boolean }
+  | { state: 'reboot'; installed: boolean }
+
 export interface PhoneLinkStatus {
   running: boolean
   /** QR koduna konan adres (https, yerel ağ). */

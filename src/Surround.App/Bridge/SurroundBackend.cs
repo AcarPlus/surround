@@ -72,6 +72,7 @@ public sealed partial class SurroundBackend : IDisposable
             case "getEngineState": return EngineState;
             case "playTone": return await Task.Run(() => PlayTone(Arg(args, 0).GetString() ?? "", Arg(args, 1).GetInt32()));
             case "openSoundPanel": OpenSoundPanel(); return null;
+            case "cableSetup": return await CableSetupAsync();
             case "calibrate": return await CalibrateAsync(Arg(args, 0));
             case "cancelCalibration": Volatile.Read(ref _calCts)?.Cancel(); return null;
             case "phoneLinkStart" or "phoneLinkStop" or "phoneLinkStatus" or "phoneLinkPrompt" or "phoneLinkAllowFirewall": return await PhoneLinkAsync(method, args);

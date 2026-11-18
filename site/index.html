@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surround · İndir</title>
+<meta name="description" content="Surround: Windows'ta tüm hoparlörlerinizi tek bir çevresel ses sistemine çeviren ücretsiz uygulama. Tek tıkla kurulum.">
+<meta name="theme-color" content="#0e1013">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%23d4f25a' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23d4f25a'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0e1013; --panel: #161a1f; --line: #262b33; --fg: #eef0f2; --muted: #9aa3ad; --faint: #6b737d;
+    --accent: #d4f25a; --accent-fg: #141808; --warn: #f5b041;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f6f7f4; --panel: #ffffff; --line: #e1e4dc; --fg: #15181b; --muted: #555d66; --faint: #8a929b;
+      --accent: #5c7a00; --accent-fg: #ffffff; --warn: #a35f00; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); }
+  body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: inherit; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 0 16px; }
+  header { display: flex; align-items: center; gap: 10px; padding: 22px 0; font-weight: 650; font-size: 18px; }
+  header svg { flex: none; }
+  header .gh { margin-left: auto; font-weight: 500; font-size: 14px; color: var(--muted); text-decoration: none; }
+  header .gh:hover { color: var(--fg); }
+  .hero { padding: 40px 0 28px; }
+  h1 { font-size: clamp(30px, 6vw, 46px); line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 14px; }
+  .lead { font-size: 18px; color: var(--muted); max-width: 620px; margin: 0 0 28px; }
+  .cta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; background: var(--accent); color: var(--accent-fg);
+    font-weight: 700; font-size: 18px; padding: 15px 26px; border-radius: 12px; text-decoration: none; }
+  .btn:hover { filter: brightness(1.06); }
+  .btn:focus-visible, .ghost:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .meta { font-size: 14px; color: var(--faint); }
+  .ghost { color: var(--muted); font-size: 14px; }
+  section { padding: 26px 0; border-top: 1px solid var(--line); }
+  h2 { font-size: 20px; margin: 0 0 16px; }
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .steps li { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .n { display: inline-flex; width: 26px; height: 26px; border-radius: 50%; align-items: center; justify-content: center;
+    background: var(--accent); color: var(--accent-fg); font-weight: 700; font-size: 14px; margin-bottom: 8px; }
+  .steps b { display: block; margin-bottom: 4px; }
+  .steps p { margin: 0; color: var(--muted); font-size: 15px; }
+  .feat { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin: 0; padding: 0; list-style: none; }
+  .feat li { padding-left: 22px; position: relative; color: var(--muted); }
+  .feat li::before { content: ""; position: absolute; left: 0; top: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+  .feat strong { color: var(--fg); font-weight: 600; }
+  .note { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; color: var(--muted); font-size: 15px; }
+  .note + .note { margin-top: 10px; }
+  .note b { color: var(--fg); }
+  footer { padding: 28px 0 40px; color: var(--faint); font-size: 13px; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" stroke-width="3" style="color:var(--accent)"/><circle cx="16" cy="16" r="6" fill="currentColor" style="color:var(--accent)"/></svg>
+    Surround
+    <a class="gh" href="https://github.com/AcarPlus/surround">GitHub</a>
+  </header>
+
+  <div class="hero">
+    <h1>Evdeki tüm hoparlörler,<br>tek bir çevresel ses sistemi.</h1>
+    <p class="lead">Surround, Windows'ta farklı cihazlara bağlı hoparlörleri (kablolu, Bluetooth, çok kanallı kart) birlikte çalıştırır, sesi 7.1'e açar ve telefonunuzun mikrofonuyla senkronlar.</p>
+    <div class="cta">
+      <a class="btn" id="dl" href="https://github.com/AcarPlus/surround/releases/latest/download/Surround-win-Setup.exe">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
+        Windows için indir
+      </a>
+      <span class="meta" id="ver">Windows 10/11 · ücretsiz</span>
+    </div>
+  </div>
+
+  <section>
+    <h2>Kurulum: tek tık, bir onay</h2>
+    <ol class="steps">
+      <li><span class="n">1</span><b>İndir ve çalıştır</b><p>Surround kendi kendine kurulur ve açılır. Yönetici izni gerekmez.</p></li>
+      <li><span class="n">2</span><b>“Hepsini kur”a bas</b><p>Sanal 7.1 kabloyu (VB-Cable) resmi sitesinden indirip kurar, 7.1'e ayarlar ve kaynak yapar. Windows bir kez “Evet” sorar.</p></li>
+      <li><span class="n">3</span><b>Hoparlörleri tanıt</b><p>Sihirbaz hangi cihaza ne bağlı olduğunu sorar; istersen telefonla kalibre et (QR kod).</p></li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Neler yapar</h2>
+    <ul class="feat">
+      <li><strong>Ayrı cihazlar birlikte:</strong> her hoparlör kendi cihazında, gecikmeleri eşitlenmiş.</li>
+      <li><strong>Telefonla kalibrasyon:</strong> QR'ı okut, gecikme, seviye ve tını otomatik ayarlanır.</li>
+      <li><strong>Bluetooth desteği:</strong> yüzlerce ms gecikmeli hoparlörler de senkron.</li>
+      <li><strong>Stereo → 7.1:</strong> film, oyun ve müzik için yükseltme profilleri.</li>
+      <li><strong>EQ ve ön ayarlar:</strong> parametrik EQ, A/B karşılaştırma.</li>
+      <li><strong>Kendini toparlar:</strong> cihaz çıkıp takılınca devam eder, tepsiden profil seçilir.</li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="note"><b>Windows “bilinmeyen yayıncı” uyarısı verirse:</b> uygulama imzasız olduğu için SmartScreen sorar. <b>Ek bilgi → Yine de çalıştır</b>.</div>
+    <div class="note"><b>Kurulumsuz kullanım:</b> <a class="ghost" href="https://github.com/AcarPlus/surround/releases/latest/download/Surround-win-Portable.zip">taşınabilir ZIP</a>. Tüm sürümler ve değişiklikler: <a class="ghost" href="https://github.com/AcarPlus/surround/releases">sürüm sayfası</a>.</div>
+    <div class="note"><b>Not:</b> FxSound gibi başka bir ses işleme uygulaması aynı anda açıksa ses yankılı gelebilir; Surround kullanırken kapatın. VB-Cable, VB-Audio'nun bağışla desteklenen ücretsiz sürücüsüdür (<a class="ghost" href="https://vb-audio.com/Cable/">vb-audio.com</a>).</div>
+  </section>
+
+  <footer>Surround açık kaynaktır · <a href="https://github.com/AcarPlus/surround">github.com/AcarPlus/surround</a></footer>
+</div>
+<script>
+  // Show the latest version next to the button; the link itself always points at the latest release.
+  fetch('https://api.github.com/repos/AcarPlus/surround/releases/latest')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((rel) => {
+      if (!rel || !rel.tag_name) return;
+      const setup = (rel.assets || []).find((a) => a.name === 'Surround-win-Setup.exe');
+      const mb = setup ? ' · ' + Math.round(setup.size / 1048576) + ' MB' : '';
+      document.getElementById('ver').textContent = 'Sürüm ' + rel.tag_name.replace(/^v/, '') + mb + ' · Windows 10/11 · ücretsiz';
+    })
+    .catch(() => {});
+</script>
+</body>
+</html>

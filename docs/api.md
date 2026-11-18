@@ -25,6 +25,7 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 | `start()` / `stop()` | Motoru çalıştır / durdur |
 | `getStatus()` | Çıkış başına `SinkStatus[]` (çalışmıyorsa boş) |
 | `playTone(deviceId, channel)` | Test sesi |
+| `cableSetup()` | Tek tıkla VB-Cable (README, "İndirme ve tek tıkla kurulum"): yoksa indirir, imzasını doğrular, tek UAC ile kurar; 7.1 yapar; `switchDefaultDevice`'ı açar. Döner: `{ state: "done", deviceId, channels, installed }` ya da `{ state: "reboot", installed }` (Windows yeniden başlamalı). Aynı anda iki kez çağrılırsa hata |
 | `onStatus(cb)` | Çalışırken ~250 ms'de bir durum (köprüde); unsubscribe döner |
 | `onLevels(cb)` | Mantıksal kanal tepe seviyeleri (dBFS, `LevelFrame`: kanal adı → dB nesnesi), ~20 Hz; motorda upmix ve genel işleme sonrası, kanal katlamadan önce ölçülür. Biçim aynı, artık 12 anahtar (FL..SR + TFL TFR TBL TBR); hiçbir hoparlörün kullanmadığı üst şerit -90 gösterir |
 | `onEngine(cb)` | `EngineInfo` (`upmix: "off" \| "stereo" \| "native"`, `sourceChannels`, `sourceRate`, `upmixLatencyMs`), durumla aynı sıklıkta; her duruşta (kalibrasyonun durdurması ve başarısız yeniden başlatma dahil) `"off"` (`sourceRate: 0`) ve boş `status` |

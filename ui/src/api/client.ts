@@ -3,6 +3,7 @@ import type {
   CalibrationProgress,
   CalibrationRequest,
   CalibrationResult,
+  CableSetupResult,
   PhoneLinkStatus,
   Config,
   Device,
@@ -40,6 +41,11 @@ export interface SurroundApi {
   playTone(deviceId: string, channel: number): Promise<void>
   /** Windows ses denetim masasını açar (mmsys.cpl); VB-Cable'ı 7.1 yapmak için. */
   openSoundPanel(): Promise<void>
+  /**
+   * Tek tıkla VB-Cable: yoksa resmi siteden indirip imzasını doğrular ve kurar (Windows bir kez yönetici onayı sorar),
+   * 7.1'e ayarlar, Surround çalışırken varsayılan çıkış yapar. 'reboot': kuruldu ama Windows yeniden başlamalı.
+   */
+  cableSetup(): Promise<CableSetupResult>
   /** Çalışırken ~1 sn aralıkla çağrılır. Dönen fonksiyon aboneliği iptal eder. */
   onStatus(cb: (status: SinkStatus[]) => void): () => void
   /** Kaynak seviye ölçerleri için (tasarım aşamasında eklendi). */

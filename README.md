@@ -60,15 +60,29 @@ dotnet run --project src/Surround.App
 `SURROUND_DEV_URL` yalnızca Debug derlemede dikkate alınır. Debug'ta DevTools ve sağ tık menüsü açıktır; Release'te kapalıdır
 (Ctrl+R, F5, Ctrl+P gibi tarayıcı kısayolları da kapalı). `ui/dist` yoksa uygulama bunu pencerede belirtir.
 
-## Kurulum notu (VB-Cable)
+## İndirme ve tek tıkla kurulum
 
-Windows sesini yakalamak için sanal bir kablo gerekir (ör. VB-Cable):
+İndirme sayfası: https://acarplus.github.io/surround/ (`site/index.html`, `.github/workflows/pages.yml` ile GitHub Pages'e
+yayınlanır). Düğme her zaman son sürümün `Surround-win-Setup.exe`'sine gider
+(`releases/latest/download/...`). Setup Surround'u kullanıcı klasörüne kurar ve açar.
 
-1. VB-Cable'ı kurun. "CABLE Input" oynatma cihazı oluşur.
-2. "CABLE Input"u Windows varsayılan oynatma cihazı yapın (uygulama bunu sizin yerinize değiştirmez).
-3. Yapılandırmada `source.mode` değerini `loopback`, `deviceId` değerini "CABLE Input" yapın.
-   Alternatif: `mode: "capture"` ile "CABLE Output" kayıt cihazı kullanılabilir.
-4. Kaynak cihaz aynı zamanda çıkış olarak kullanılamaz (geri besleme koruması).
+Uygulamada (Bağlantı ekranı / kurulum sihirbazı) **"Hepsini kur"** (`cableSetup`,
+`src/Surround.App/Bridge/SurroundBackend.Cable.cs`):
+
+1. VB-Cable yoksa resmi sunucudan sürücü paketini indirir (`CableInstaller.PackUrl`; adres değişmişse vb-audio.com/Cable
+   sayfasındaki en yeni `VBCABLE_Driver_PackNN.zip`). VB-Cable bağışla desteklenen bir sürücüdür; lisansı gereği Setup'a
+   gömülmez.
+2. `VBCABLE_Setup_x64.exe`'nin Authenticode imzasını doğrular (WinVerifyTrust + imzalayan "BUREL VINCENT", VB-Audio'nun
+   sahibi); doğrulanmazsa çalıştırmaz. Sonra `-i -h` ile sessiz ve yönetici olarak çalıştırır (tek UAC onayı).
+3. Cihaz 30 sn içinde görünmezse "bilgisayarı yeniden başlat" der (VB-Audio kurulumdan sonra yeniden başlatma önerir);
+   yeniden başlattıktan sonra aynı düğme kalan adımları yapar.
+4. Kabloyu 7.1 yapar (`SpeakerLayout.SetSevenOne`: Ses panelindeki "Yapılandır" ile aynı; hoparlör maskesi + 8 kanallı
+   cihaz biçimi) ve "Başlat'ta varsayılan çıkışı kablo yap, Durdur'da geri al" ayarını açar (kalıcı varsayılan yapılmaz:
+   Surround kapalıyken ses kesilirdi). Arayüz kabloyu loopback kaynağı olarak seçer.
+
+Elle: VB-Cable'ı kurun, "CABLE Input"u Ses panelinden 7.1 yapın, kaynak olarak `loopback` + "CABLE Input" seçin. Kaynak
+cihaz aynı zamanda çıkış olarak kullanılamaz (geri besleme koruması). Komut satırından sınamak için:
+`cable-verify --exe <dosya>` (imza denetimi), `cable-71 --device <id>` (7.1 ayarı).
 
 ## Komutlar
 

@@ -15,6 +15,7 @@ import {
   type LevelFrame,
   type LogicalChannel,
   type PhoneLinkStatus,
+  type CableSetupResult,
   type SinkStatus,
   type Speaker,
 } from './types'
@@ -331,6 +332,13 @@ export function createMockApi(): SurroundApi {
     },
     async openSoundPanel() {
       console.info('[mock] openSoundPanel')
+    },
+    async cableSetup(): Promise<CableSetupResult> {
+      await new Promise((r) => setTimeout(r, 1500))
+      const cable = devices.find((d) => d.flow === 'render' && /cable/i.test(d.name))
+      if (!cable) return { state: 'reboot', installed: true }
+      cable.channels = 8
+      return { state: 'done', deviceId: cable.id, channels: 8, installed: false }
     },
     onStatus(cb) {
       statusListeners.add(cb)

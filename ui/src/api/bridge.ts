@@ -10,6 +10,7 @@ import {
   type EngineState,
   type LevelFrame,
   type PhoneLinkStatus,
+  type CableSetupResult,
   type SinkStatus,
 } from './types'
 
@@ -163,6 +164,7 @@ export function createBridgeApi(): SurroundApi {
     getStatus: () => call<SinkStatus[]>('getStatus'),
     playTone: (deviceId, channel) => call<void>('playTone', deviceId, channel),
     openSoundPanel: () => call<void>('openSoundPanel'),
+    cableSetup: () => call<CableSetupResult>('cableSetup'),
     onStatus: (cb) => subscribe(statusListeners, cb),
     onLevels: (cb) => subscribe(levelListeners, cb),
     onEngine: (cb) => subscribe(engineListeners, cb),

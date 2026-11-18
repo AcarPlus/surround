@@ -108,6 +108,7 @@ export function CableSetup() {
   const devices = useStore((s) => s.devices)
   const source = useStore((s) => s.source)
   const setSource = useStore((s) => s.setSource)
+  const refreshDevices = useStore((s) => s.refreshDevices)
   const current = devices.find((d) => d.id === source.deviceId)
   const cable = findCable(devices)
   const cableSelected = !!cable && source.mode === 'loopback' && source.deviceId === cable.id
@@ -118,6 +119,10 @@ export function CableSetup() {
       cableSelected={cableSelected}
       twoChannel={twoChannel}
       onSelect={() => cable && setSource({ mode: 'loopback', deviceId: cable.id })}
+      onAuto={async (deviceId) => {
+        await refreshDevices()
+        setSource({ mode: 'loopback', deviceId })
+      }}
     />
   )
 }
@@ -260,13 +265,35 @@ function CableGuide({
   cableSelected,
   twoChannel,
   onSelect,
+  onAuto,
 }: {
   cable: Device | undefined
   cableSelected: boolean
   twoChannel: boolean
   onSelect: () => void
+  onAuto: (deviceId: string) => Promise<void>
 }) {
   const showToast = useStore((s) => s.showToast)
+  const [auto, setAuto] = useState<{ busy: boolean; msg: string | null; err: boolean }>({ busy: false, msg: null, err: false })
+  const runAuto = async () => {
+    setAuto({ busy: true, msg: null, err: false })
+    try {
+      const r = await api.cableSetup()
+      if (r.state === 'reboot') {
+        setAuto({
+          busy: false,
+          err: false,
+          msg: 'VB-Cable kuruldu. Windows’un tamamlaması için bilgisayarı yeniden başlat; Surround açılınca bu düğmeye bir kez daha bas.',
+        })
+        return
+      }
+      await onAuto(r.deviceId)
+      setAuto({ busy: false, err: false, msg: null })
+      showToast(r.installed ? 'VB-Cable kuruldu, 7.1 yapıldı ve kaynak seçildi.' : 'VB-Cable 7.1 yapıldı ve kaynak seçildi.', 5000)
+    } catch (e) {
+      setAuto({ busy: false, err: true, msg: e instanceof Error ? e.message : String(e) })
+    }
+  }
   const [autoDefault, setAutoDefault] = useState(false)
   useEffect(() => {
     api
@@ -405,6 +432,29 @@ function CableGuide({
               yalnızca 2 kanal alınır ve yükseltme (upmix) kullanılır. Kurulumdan sonra bu ekranı yenile.
             </p>
           </div>
+        </div>
+      )}
+
+      {!(cableSelected && multichannel) && (
+        <div className="mb-3 rounded-lg border border-accent/40 bg-accent/10 p-3 text-[13px]">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">Tek tıkla kur</p>
+              <p className="mt-0.5 text-xs text-muted">
+                {cable ? 'VB-Cable’ı 7.1 yapar ve kaynak olarak seçer.' : 'VB-Cable’ı resmi siteden indirip kurar (Windows bir kez onay sorar), 7.1 yapar ve kaynak olarak seçer.'}{' '}
+                Surround çalışırken varsayılan çıkış olur, kapatınca eskisine döner.
+              </p>
+            </div>
+            <Button size="sm" variant="primary" onClick={runAuto} disabled={auto.busy}>
+              {auto.busy ? (cable ? 'Ayarlanıyor…' : 'Kuruluyor… (1 dk sürebilir)') : 'Hepsini kur'}
+            </Button>
+          </div>
+          {auto.msg && <p className={cx('mt-2 text-xs', auto.err ? 'text-warn' : 'text-fg')}>{auto.msg}</p>}
+          {!cable && (
+            <p className="mt-1.5 text-[11px] text-faint">
+              VB-Cable, VB-Audio’nun bağışla desteklenen ücretsiz sürücüsüdür; kurarak lisansını kabul etmiş olursun.
+            </p>
+          )}
         </div>
       )}
 
