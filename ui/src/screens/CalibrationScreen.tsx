@@ -56,7 +56,8 @@ export function CalibrationScreen() {
   const [loopback, setLoopback] = useState(false)
   const [loopbackId, setLoopbackId] = useState('')
   const [level, setLevel] = useState('-20')
-  const [repeats, setRepeats] = useState('2')
+  // null = automatic: 3 with the phone (a repeat with a gap in the phone's recording is dropped), else 2.
+  const [repeatsPick, setRepeats] = useState<string | null>(null)
   // Loopback kaynağında, kaynak cihazdaki hoparlörler ölçülemez (backend tüm ölçümü reddeder).
   const onSource = (sp: { outputDeviceId: string }) => source.mode === 'loopback' && sp.outputDeviceId === source.deviceId
   const [chosen, setChosen] = useState<Set<string>>(
@@ -81,6 +82,7 @@ export function CalibrationScreen() {
 
   const phoneMode = micId === PHONE_MIC && !loopback
   const phone = usePhoneLink(phoneMode)
+  const repeats = repeatsPick ?? (phoneMode ? '3' : '2')
 
   useEffect(() => {
     if (!micId && mics[0]) setMicId(mics[0].id)

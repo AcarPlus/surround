@@ -58,7 +58,7 @@ public static class CalibrationRunner
             if (!deviceIds.Any(d => SurroundConfig.SameId(d, t.Speaker.OutputDeviceId))) deviceIds.Add(t.Speaker.OutputDeviceId.Trim());
         var speakers = targets.Select(t => new CalibrationSpeaker(t.Id, t.LowBand,
             deviceIds.FindIndex(d => SurroundConfig.SameId(d, t.Speaker.OutputDeviceId)))).ToList();
-        var plan = new CalibrationPlan(rate, speakers, refIdx, repeats, levelDb);
+        var plan = new CalibrationPlan(rate, speakers, refIdx, repeats, levelDb, closingReference: req.IsPhone);
 
         var session = new Session(plan, targets, deviceIds, cfg, req, en, log, phone: external != null && req.IsPhone);
         ExternalRecording? rec = null;
@@ -91,12 +91,20 @@ public static class CalibrationRunner
             rec = external!.Finish(ct);
             if (rec.Samples.Length == 0 || rec.SampleRate < 8000) throw new InvalidOperationException("Telefondan boş kayıt geldi.");
             var al = ExternalAlignment.Find(plan, rec.Samples, rec.Samples.Length, rec.SampleRate, ct);
-            log?.Invoke(FormattableString.Invariant($"telefon: {rec.SampleRate} Hz, saat farkı {al.ClockPpm} ppm, referans {al.ReferenceHits}/{al.Steps}"));
+            log?.Invoke(FormattableString.Invariant(
+                $"telefon: {rec.SampleRate} Hz, saat farkı {al.ClockPpm} ppm, referans {al.ReferenceHits}/{al.Steps}, kesintili adım {al.Gaps} ({al.GapMs} ms)"));
             result = CalibrationAnalyzer.Analyze(plan, rec.Samples, rec.Samples.Length, rec.SampleRate, req.MicDeviceId,
-                extras, progress, ct, new AnalysisOptions { Map = al.Map, MaxLatencySec = ExternalAlignment.WindowSec, Responses = true });
+                extras, progress, ct, new AnalysisOptions
+                {
+                    Map = al.Map, StepMaps = al.StepMaps, StepGap = al.StepGap,
+                    MaxLatencySec = ExternalAlignment.WindowSec, Responses = true,
+                });
             var notes = new List<string> { FormattableString.Invariant($"Telefon {rec.SampleRate} Hz, saat farkı {al.ClockPpm:0} ppm.") };
             if (!string.IsNullOrWhiteSpace(rec.Note)) notes.Add(rec.Note!);
             if (al.ReferenceHits < al.Steps) notes.Add($"Referans {al.Steps} adımın {al.ReferenceHits} tanesinde bulundu.");
+            if (al.Gaps > 0)
+                notes.Add(FormattableString.Invariant(
+                    $"Telefon kaydında {al.Gaps} ölçümde kesinti bulundu (toplam {al.GapMs:0} ms); bu ölçümler zamanlamaya katılmadı."));
             result = result with { Note = string.Join(" ", notes) };
         }
         else

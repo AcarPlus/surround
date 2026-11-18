@@ -45,6 +45,8 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
     private static readonly TimeSpan SeenWindow = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan BeginTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan UploadTimeout = TimeSpan.FromSeconds(60);
+    /// <summary>A kept-alive connection with no new request for this long is closed.</summary>
+    private static readonly TimeSpan IdleTimeout = TimeSpan.FromSeconds(15);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
     private readonly object _lock = new();
@@ -90,14 +92,20 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
             var ips = (addresses ?? PhoneCertificate.LanAddresses()).ToList();
             if (ips.Count == 0) throw new InvalidOperationException("Bu bilgisayar bir yerel ağa (Wi-Fi/Ethernet) bağlı görünmüyor.");
             _cert ??= PhoneCertificate.LoadOrCreate(_certPath, ips);
-            _token = Convert.ToHexString(RandomNumberGenerator.GetBytes(12)).ToLowerInvariant();
+            // The same address across runs: a page left open on the phone (or a bookmark) reconnects by itself.
+            var saved = LoadSaved();
+            _token = saved.Token is { Length: 24 } t && t.All(Uri.IsHexDigit) ? t.ToLowerInvariant()
+                : Convert.ToHexString(RandomNumberGenerator.GetBytes(12)).ToLowerInvariant();
             TcpListener? l = null;
-            for (int p = port; p < port + 10 && l is null; p++)
+            var order = Enumerable.Range(port, 10).ToList();
+            if (saved.Port is { } sp && order.Remove(sp)) order.Insert(0, sp);
+            foreach (int p in order)
             {
-                try { l = new TcpListener(IPAddress.Any, p); l.Start(); _port = p; }
+                try { l = new TcpListener(IPAddress.Any, p); l.Start(); _port = p; break; }
                 catch (SocketException) { l = null; }
             }
             if (l is null) throw new InvalidOperationException($"{port}-{port + 9} portlarının hepsi kullanımda.");
+            Save(_token, _port);
             _listener = l;
             _urls = ips.Select(ip => $"https://{ip}:{_port}/c/{_token}").ToList();
             _cts = new CancellationTokenSource();
@@ -107,6 +115,26 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
         }
         Notify();
         return Status();
+    }
+
+    private sealed record Saved(string? Token, int? Port);
+
+    private string SavedPath => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(_certPath)) ?? ".", "phone-link.json");
+
+    private Saved LoadSaved()
+    {
+        try { return File.Exists(SavedPath) ? JsonSerializer.Deserialize<Saved>(File.ReadAllText(SavedPath), Json) ?? new(null, null) : new(null, null); }
+        catch { return new(null, null); }
+    }
+
+    private void Save(string token, int port)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(SavedPath)!);
+            File.WriteAllText(SavedPath, JsonSerializer.Serialize(new Saved(token, port), Json));
+        }
+        catch { /* not persisted: the next run shows a new QR code */ }
     }
 
     public void Stop()
@@ -215,7 +243,7 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
 
     // ---- HTTP ----
 
-    public sealed record Request(string Method, string Path, string Query, byte[] Body);
+    public sealed record Request(string Method, string Path, string Query, byte[] Body, bool KeepAlive = false);
     public sealed record Response(int Status, string ContentType, byte[] Body);
 
     /// <summary>Routes one request (pure apart from the shared state; used directly by tests).</summary>
@@ -273,19 +301,44 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
     private Response Upload(Request req)
     {
         int rate = 0;
+        string format = "f32", via = "";
         foreach (var kv in req.Query.Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
             var p = kv.Split('=', 2);
-            if (p.Length == 2 && p[0] == "rate") int.TryParse(p[1], out rate);
+            if (p.Length != 2) continue;
+            if (p[0] == "rate") int.TryParse(p[1], out rate);
+            else if (p[0] == "format") format = p[1];
+            else if (p[0] == "via") via = Uri.UnescapeDataString(p[1]);
         }
-        if (rate < 8000 || rate > 192000) return Text(400, "Geçersiz örnekleme hızı.");
-        if (req.Body.Length % 4 != 0) return Text(400, "Kayıt verisi bozuk.");
-        var samples = new float[req.Body.Length / 4];
-        for (int i = 0; i < samples.Length; i++)
+        float[] samples;
+        string? fill = null;
+        if (format == "webm")
         {
-            float v = BinaryPrimitives.ReadSingleLittleEndian(req.Body.AsSpan(i * 4, 4));
-            samples[i] = float.IsFinite(v) ? v : 0;
+            // MediaRecorder PCM (see phone.html): straight from the microphone track, gaps filled by timestamp.
+            WebmPcm.Audio a;
+            try { a = WebmPcm.Decode(req.Body); }
+            catch (InvalidDataException ex) { return Text(400, ex.Message); }
+            catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException or OverflowException)
+            { return Text(400, "Kayıt okunamadı (WebM bozuk)."); }
+            samples = a.Samples; rate = a.SampleRate;
+            if (a.Gaps > 0)
+            {
+                fill = FormattableString.Invariant($"telefon: kayıtta {a.Gaps} boşluk sessizlikle dolduruldu ({a.GapMs} ms)");
+                _log?.Invoke(fill);
+            }
         }
+        else
+        {
+            if (rate < 8000 || rate > 192000) return Text(400, "Geçersiz örnekleme hızı.");
+            if (req.Body.Length % 4 != 0) return Text(400, "Kayıt verisi bozuk.");
+            samples = new float[req.Body.Length / 4];
+            for (int i = 0; i < samples.Length; i++)
+            {
+                float v = BinaryPrimitives.ReadSingleLittleEndian(req.Body.AsSpan(i * 4, 4));
+                samples[i] = float.IsFinite(v) ? v : 0;
+            }
+        }
+        if (samples.Length == 0) return Text(400, "Kayıt boş.");
         string? note;
         lock (_lock)
         {
@@ -295,7 +348,7 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
             _upload.TrySetResult(new ExternalRecording(samples, rate, note));
             _state = PhoneState.Analyzing; _message = "Analiz ediliyor"; _seq++;
         }
-        _log?.Invoke(FormattableString.Invariant($"telefon kaydı: {samples.Length / (double)rate:0.0} sn, {rate} Hz"));
+        _log?.Invoke(FormattableString.Invariant($"telefon kaydı: {samples.Length / (double)rate:0.0} sn, {rate} Hz, {format}{(via.Length > 0 ? " / " + via : "")}"));
         Notify();
         return JsonOk(new { ok = true });
     }
@@ -303,12 +356,13 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
     /// <summary>The page reports its browser and the microphone track settings; processing left on is noted.</summary>
     private void Hello(byte[] body)
     {
-        string? device = null, note = null;
+        string? device = null, note = null, recorder = null;
         try
         {
             using var doc = JsonDocument.Parse(body);
             var r = doc.RootElement;
             if (r.TryGetProperty("device", out var d) && d.ValueKind == JsonValueKind.String) device = Trim(d.GetString(), 80);
+            if (r.TryGetProperty("recorder", out var rc) && rc.ValueKind == JsonValueKind.String) recorder = Trim(rc.GetString(), 20);
             if (r.TryGetProperty("settings", out var s) && s.ValueKind == JsonValueKind.Object)
             {
                 var on = new List<string>();
@@ -319,6 +373,7 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
             }
         }
         catch (JsonException) { }
+        _log?.Invoke($"telefon bağlandı: {device ?? "?"}, kayıt yolu {recorder ?? "eski sayfa"}");
         lock (_lock) { _device = device; _note = note; _lastSeen = DateTime.UtcNow; }
         Notify();
     }
@@ -369,17 +424,28 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
         client.NoDelay = true;
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            timeout.CancelAfter(TimeSpan.FromSeconds(90));
             await using var ssl = new SslStream(client.GetStream(), false);
-            await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+            using (var hs = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
-                ServerCertificate = _cert,
-                EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
-            }, timeout.Token);
-            var req = await ReadRequest(ssl, timeout.Token);
-            var resp = req is null ? Text(400, "Hatalı istek") : Handle(req);
-            await WriteResponse(ssl, resp, timeout.Token);
+                hs.CancelAfter(TimeSpan.FromSeconds(30));
+                await ssl.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+                {
+                    ServerCertificate = _cert,
+                    EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+                }, hs.Token);
+            }
+            // Keep-alive: the page polls several times a second; one TLS handshake per poll is slow and fragile on phones.
+            for (int n = 0; n < 10000 && !ct.IsCancellationRequested; n++)
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeout.CancelAfter(n == 0 ? TimeSpan.FromSeconds(90) : IdleTimeout);
+                var req = await ReadRequest(ssl, timeout.Token);
+                if (req is null) { if (n == 0) await WriteResponse(ssl, Text(400, "Hatalı istek"), false, timeout.Token); break; }
+                timeout.CancelAfter(TimeSpan.FromSeconds(90)); // a large upload or a slow phone
+                var resp = Handle(req);
+                await WriteResponse(ssl, resp, req.KeepAlive, timeout.Token);
+                if (!req.KeepAlive) break;
+            }
         }
         catch (Exception ex) when (ex is IOException or System.Security.Authentication.AuthenticationException or OperationCanceledException or SocketException)
         {
@@ -408,6 +474,7 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
         if (first.Length < 3) return null;
         long length = 0;
         bool chunked = false;
+        bool keepAlive = first[2].Trim().Equals("HTTP/1.1", StringComparison.OrdinalIgnoreCase);
         foreach (var line in lines.Skip(1))
         {
             int c = line.IndexOf(':');
@@ -419,6 +486,11 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
             }
             else if (name.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase))
                 chunked = value.Contains("chunked", StringComparison.OrdinalIgnoreCase);
+            else if (name.Equals("Connection", StringComparison.OrdinalIgnoreCase))
+            {
+                if (value.Contains("close", StringComparison.OrdinalIgnoreCase)) keepAlive = false;
+                else if (value.Contains("keep-alive", StringComparison.OrdinalIgnoreCase)) keepAlive = true;
+            }
         }
         byte[] body;
         if (chunked)
@@ -447,7 +519,7 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
         }
         string target = first[1];
         int q = target.IndexOf('?');
-        return new Request(first[0].ToUpperInvariant(), q < 0 ? target : target[..q], q < 0 ? "" : target[(q + 1)..], body);
+        return new Request(first[0].ToUpperInvariant(), q < 0 ? target : target[..q], q < 0 ? "" : target[(q + 1)..], body, keepAlive);
     }
 
     private static async Task<bool> ReadExactly(Stream s, byte[] buf, CancellationToken ct)
@@ -475,11 +547,12 @@ public sealed class PhoneLink : IExternalMicrophone, IDisposable
         return null;
     }
 
-    private static async Task WriteResponse(Stream s, Response r, CancellationToken ct)
+    private static async Task WriteResponse(Stream s, Response r, bool keepAlive, CancellationToken ct)
     {
         string reason = r.Status switch { 200 => "OK", 400 => "Bad Request", 404 => "Not Found", 409 => "Conflict", _ => "Error" };
         var head = $"HTTP/1.1 {r.Status} {reason}\r\nContent-Type: {r.ContentType}\r\nContent-Length: {r.Body.Length}\r\n" +
-                   "Cache-Control: no-store\r\nConnection: close\r\nX-Content-Type-Options: nosniff\r\n\r\n";
+                   "Cache-Control: no-store\r\n" + (keepAlive ? "Connection: keep-alive\r\nKeep-Alive: timeout=15\r\n" : "Connection: close\r\n") +
+                   "X-Content-Type-Options: nosniff\r\n\r\n";
         await s.WriteAsync(Encoding.ASCII.GetBytes(head), ct);
         await s.WriteAsync(r.Body, ct);
         await s.FlushAsync(ct);

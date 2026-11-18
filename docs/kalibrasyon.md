@@ -61,8 +61,11 @@ Mikrofonu olmayan ya da kulaklık mikrofonu dinleme noktasına uzanmayan kullan�
 
 - **Bağlantı:** Surround yerel ağda küçük bir HTTPS sunucusu açar (port 47810, doluysa sonraki 9). Telefon tarayıcıları
   mikrofonu yalnızca güvenli bağlamda (HTTPS) verir; sertifika kendinden imzalıdır (`%AppData%\Surround\phone-cert.pfx`,
-  ECDSA P-256, 2 yıl, SAN = bu PC'nin yerel IPv4 adresleri; adres değişince yenilenir). Telefon ilk açılışta bir kez
-  "bağlantı gizli değil" uyarısı gösterir. Her yol QR'daki rastgele belirteci (`/c/<token>`) taşır; diğeri 404.
+  ECDSA P-256, 2 yıl, SAN = bu PC'nin yerel IPv4 adresleri; yalnız QR'daki (ağ geçidi olan) adres değişince yenilenir,
+  sanal bağdaştırıcıların (WSL, Hyper-V) her açılışta değişen adresi yenilemez). Telefon ilk açılışta bir kez
+  "bağlantı gizli değil" uyarısı gösterir. Her yol QR'daki rastgele belirteci (`/c/<token>`) taşır; diğeri 404 (sayfa
+  bunu "QR'ı yeniden okut" diye gösterir). Belirteç ve port `%AppData%\Surround\phone-link.json`'da kalıcıdır: program
+  yeniden açılınca telefonda açık kalan sayfa kendiliğinden yeniden bağlanır. Bağlantılar keep-alive (15 sn boşta).
   Windows Güvenlik Duvarı (özellikle ağ "Ortak" işaretliyse) bağlantıyı sessizce düşürür; telefonda "yanıt vermesi çok
   uzun sürdü" görünür. `PhoneFirewall.IsAllowed` bunu kural tablosundan algılar (`firewall: false`), QR panelindeki
   "İzin ver" (`phoneLinkAllowFirewall`) tek UAC onayıyla bu programın tüm kurallarını (Windows'un iptal edilen sorudan
@@ -71,13 +74,26 @@ Mikrofonu olmayan ya da kulaklık mikrofonu dinleme noktasına uzanmayan kullan�
 - **Telefon sayfası** (`Phone/phone.html`, gömülü): `getUserMedia` (yankı giderme, gürültü bastırma, otomatik kazanç
   KAPALI istenir; tarayıcı kapatmazsa `hello` ile bildirilir ve sonuçta not olarak görünür), ekran uyanık tutulur
   (Wake Lock). Durumu 250–600 ms'de bir yoklar: `record` → kaydı başlatır ve `api/recording` ile onaylar; `upload` →
-  0,5 sn sonra durur, ham float32 mono'yu `api/upload?rate=` ile gönderir. Telefondaki "Ölçümü başlat" PC arayüzüne
+  0,5 sn sonra durur ve gönderir. Kayıt yolu, iyiden kötüye: **MediaRecorder `audio/webm;codecs=pcm`** (mikrofon izinden
+  doğrudan; `api/upload?format=webm`, PC `WebmPcm` ile okur ve blok zaman damgası örnek sayısının ≥ 8 ms önüne geçen
+  yerlere — sonraki blok da doğrularsa — kayıp kadar sessizlik koyar), MediaRecorder opus (256 kbps, telefonda
+  `decodeAudioData` ile çözülür, float32 gönderilir), ScriptProcessor (eski tarayıcılar). Web Audio grafiği yalnız
+  seviye göstergesi içindir: 2026-11-18 gerçek denemede (Android Chrome, ScriptProcessor) kayıttan saniyede bir
+  kadar 40 ms'lik bloklar düştü ve aynı hoparlörün gecikmesi kayıt içinde 40/80/120 ms kaydı. Kullanılan yol
+  günlükte görünür (`telefon bağlandı: …, kayıt yolu pcm`). Telefondaki "Ölçümü başlat" PC arayüzüne
   `phoneStart` olayı olarak gider; ölçümü (hoparlörler, referans, konum) PC belirler.
 - **Saat:** program, mikrofon yerine ilk çıkış cihazının loopback'iyle saatlenir (o cihaz programı çaldığı için paketleri
-  onun hızında gelir). Telefon kaydı ayrı bir saattedir; `ExternalAlignment` önce süpürme desenini (her adımda referans
-  + 1 sn sonra test) 1 ms kutulara indirgenmiş geniş bant zarfında kaydırarak başlangıcı bulur (desenin tamamı yalnızca
-  doğru yerde oturur; bir adım/tur kayması en az bir adımı kaybeder), sonra her adımın referans tepesinden sağlam bir
-  doğru (Theil–Sen) geçirip hız oranını çıkarır (telefon–PC farkı tipik ±100 ppm). Eşleme, her itmeyi referansın
+  onun hızında gelir). Telefonla programın sonuna bir **kapanış referansı** eklenir: her adım iki referans arasında
+  kalır. Telefon kaydı ayrı bir saattedir ve boşluk içerebilir; `ExternalAlignment` önce süpürme desenini (her adımda
+  referans + 1 sn sonra test) 1 ms kutulara indirgenmiş geniş bant zarfında kaydırarak kaba başlangıcı bulur, sonra
+  referans tepelerini sırayla izler (her biri bir öncekinin öngördüğü yerin ±250 ms'inde aranır; böylece bir boşluk
+  sonraki çapaları kaydırır ama kaybettirmez). Boşluklar kaba deseni bir adım kaydırabildiği için kaba sonucun ±3 adım
+  çevresi de izlenir; en çok referansı bulan başlangıç seçilir (doğru olan, ilkinden önceki ya da kapanıştan sonraki
+  boş yuvayı kaçırmaz). Hız oranı, nominale ±2000 ppm yakın komşu aralıkların medyanıdır (telefon–PC farkı tipik ±100
+  ppm; boşluk içeren aralık dışarıda kalır). Her adım kendi referansına çapalanır (`StepMaps`); iki çerçeve referansı
+  çalındıkları aralıktan 0,5 ms'den fazla sapan adımda kayıt boşluk içerir (`StepGap`), o adım zamanlama ve seviyeye
+  katılmaz ("Telefon kaydında kesinti olan ölçüm atlandı"); sonuç notunda kesintili adım sayısı ve toplamı yazılır.
+  Telefonla varsayılan tekrar 3. Eşleme, her itmeyi referansın
   varışından 0,4 sn önceye koyar; varış penceresi 0,8 sn (diğer hoparlörler referanstan ±0,4 sn farklı olabilir:
   Bluetooth ~330 ms dahil). Sonuç yine adım içi göreli farktır.
 - **Hata:** telefon bağlı değilse, 15 sn içinde kayda başlamazsa ya da 60 sn içinde kayıt gelmezse ölçüm durur;

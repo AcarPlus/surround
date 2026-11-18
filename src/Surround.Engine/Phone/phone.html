@@ -66,7 +66,13 @@
 (() => {
   const base = location.pathname.replace(/\/+$/, '');
   const $ = (id) => document.getElementById(id);
+  // Recording paths, best first:
+  //  pcm    MediaRecorder audio/webm;codecs=pcm, straight from the mic track (the Web Audio graph's input buffer drops
+  //         blocks of tens of ms on phones); the PC reads the WebM and fills lost audio by the block timestamps.
+  //  opus   MediaRecorder opus at a high bitrate, decoded here; still off the Web Audio graph.
+  //  script ScriptProcessor (old browsers).
   let ctx = null, stream = null, recording = false, chunks = [], rate = 0, wake = null, uploading = false, lastSeq = -1;
+  let mode = 'script', mime = '', recorder = null, stopped = null, analyser = null;
 
   async function post(path, body, type) {
     const r = await fetch(base + path, { method: 'POST', body: body ?? '{}', headers: { 'Content-Type': type || 'application/json' } });
@@ -78,6 +84,18 @@
     try { if ('wakeLock' in navigator) wake = await navigator.wakeLock.request('screen'); } catch (e) { /* not fatal */ }
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && stream) keepAwake(); });
+
+  function pickRecorder() {
+    if (!window.MediaRecorder || !MediaRecorder.isTypeSupported) return;
+    const list = [['pcm', 'audio/webm;codecs=pcm'], ['opus', 'audio/webm;codecs=opus'], ['opus', 'audio/ogg;codecs=opus'], ['opus', 'audio/mp4']];
+    for (const [m, t] of list) if (MediaRecorder.isTypeSupported(t)) { mode = m; mime = t; return; }
+  }
+
+  function showLevel(peak) {
+    const db = 20 * Math.log10(peak + 1e-9);
+    $('meter').style.width = Math.max(0, Math.min(100, (db + 70) / 70 * 100)) + '%';
+    $('meter').style.background = peak > 0.98 ? 'var(--err)' : 'var(--ok)';
+  }
 
   $('mic').onclick = async () => {
     $('micWarn').hidden = true;
@@ -91,23 +109,38 @@
         : 'Mikrofon izni verilmedi. Adres çubuğundaki kilit/ayar simgesinden mikrofona izin ver.';
       return;
     }
+    pickRecorder();
     ctx = new (window.AudioContext || window.webkitAudioContext)();
     rate = ctx.sampleRate;
     const src = ctx.createMediaStreamSource(stream);
-    const node = ctx.createScriptProcessor(4096, 1, 1);
-    node.onaudioprocess = (e) => {
-      const x = e.inputBuffer.getChannelData(0);
-      if (recording) chunks.push(new Float32Array(x));
-      let peak = 0;
-      for (let i = 0; i < x.length; i++) { const a = Math.abs(x[i]); if (a > peak) peak = a; }
-      const db = 20 * Math.log10(peak + 1e-9);
-      $('meter').style.width = Math.max(0, Math.min(100, (db + 70) / 70 * 100)) + '%';
-      $('meter').style.background = peak > 0.98 ? 'var(--err)' : 'var(--ok)';
-    };
-    src.connect(node);
-    node.connect(ctx.destination); // silent; keeps the processor running
-    const settings = stream.getAudioTracks()[0].getSettings ? stream.getAudioTracks()[0].getSettings() : {};
-    await post('/api/hello', JSON.stringify({ device: navigator.userAgent, sampleRate: rate, settings }));
+    if (mode === 'script') {
+      const node = ctx.createScriptProcessor(4096, 1, 1);
+      node.onaudioprocess = (e) => {
+        const x = e.inputBuffer.getChannelData(0);
+        if (recording) chunks.push(new Float32Array(x));
+        let peak = 0;
+        for (let i = 0; i < x.length; i++) { const a = Math.abs(x[i]); if (a > peak) peak = a; }
+        showLevel(peak);
+      };
+      src.connect(node);
+      node.connect(ctx.destination); // silent; keeps the processor running
+    } else {
+      // Level only: the recording itself does not go through this graph.
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      src.connect(analyser);
+      const buf = new Float32Array(analyser.fftSize);
+      setInterval(() => {
+        if (document.visibilityState !== 'visible') return;
+        analyser.getFloatTimeDomainData(buf);
+        let peak = 0;
+        for (let i = 0; i < buf.length; i++) { const a = Math.abs(buf[i]); if (a > peak) peak = a; }
+        showLevel(peak);
+      }, 120);
+    }
+    const track = stream.getAudioTracks()[0];
+    const settings = track.getSettings ? track.getSettings() : {};
+    await post('/api/hello', JSON.stringify({ device: navigator.userAgent, sampleRate: rate, settings, recorder: mode, mime }));
     $('setup').hidden = true;
     keepAwake();
     $('start').disabled = false;
@@ -118,41 +151,91 @@
     try { await post('/api/start'); } catch (e) { $('msg').textContent = e.message; $('start').disabled = false; }
   };
 
+  async function beginRecording() {
+    chunks = []; recording = true;
+    try { await ctx.resume(); } catch (e) { /* the level meter only */ }
+    if (mode !== 'script') {
+      recorder = new MediaRecorder(stream, mode === 'opus' ? { mimeType: mime, audioBitsPerSecond: 256000 } : { mimeType: mime });
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      stopped = new Promise((r) => { recorder.onstop = r; });
+      const started = new Promise((r) => { recorder.onstart = r; });
+      recorder.start(1000);
+      await started;
+    }
+    await post('/api/recording');
+  }
+
+  function mono(audio) {
+    const n = audio.length, ch = audio.numberOfChannels, out = new Float32Array(n);
+    for (let c = 0; c < ch; c++) { const x = audio.getChannelData(c); for (let i = 0; i < n; i++) out[i] += x[i] / ch; }
+    return out;
+  }
+
   async function upload() {
     uploading = true;
     await new Promise((r) => setTimeout(r, 500)); // the last sweep's tail
     recording = false;
-    let n = 0; for (const c of chunks) n += c.length;
-    const all = new Float32Array(n);
-    let o = 0; for (const c of chunks) { all.set(c, o); o += c.length; }
-    chunks = [];
-    try { await post('/api/upload?rate=' + rate, all.buffer, 'application/octet-stream'); }
-    catch (e) { $('msg').textContent = 'Kayıt gönderilemedi: ' + e.message; }
+    try {
+      if (mode === 'script') {
+        let n = 0; for (const c of chunks) n += c.length;
+        const all = new Float32Array(n);
+        let o = 0; for (const c of chunks) { all.set(c, o); o += c.length; }
+        chunks = [];
+        await post('/api/upload?rate=' + rate + '&via=script', all.buffer, 'application/octet-stream');
+      } else {
+        recorder.stop();
+        await stopped;
+        const blob = new Blob(chunks, { type: mime });
+        chunks = [];
+        if (mode === 'pcm') {
+          await post('/api/upload?format=webm&via=pcm', blob, 'application/octet-stream');
+        } else {
+          $('msg').textContent = 'Kayıt çözülüyor';
+          const audio = await ctx.decodeAudioData(await blob.arrayBuffer());
+          await post('/api/upload?rate=' + audio.sampleRate + '&via=' + encodeURIComponent(mime), mono(audio).buffer, 'application/octet-stream');
+        }
+      }
+    } catch (e) { $('msg').textContent = 'Kayıt gönderilemedi: ' + e.message; }
+    recorder = null;
     uploading = false;
+  }
+
+  function cancelRecording() {
+    recording = false; chunks = [];
+    if (recorder && recorder.state !== 'inactive') { try { recorder.stop(); } catch (e) { /* already stopped */ } }
+    recorder = null;
   }
 
   const labels = { ready: 'Hazır', record: 'Kayıt başlıyor', recording: 'Ölçülüyor', upload: 'Kayıt gönderiliyor', analyzing: 'Analiz ediliyor' };
 
   async function poll() {
-    let s;
+    let s, r;
     try {
-      const r = await fetch(base + '/api/state', { cache: 'no-store' });
-      s = await r.json();
+      r = await fetch(base + '/api/state', { cache: 'no-store' });
     } catch (e) {
       $('state').textContent = 'Bilgisayara ulaşılamıyor';
+      $('msg').textContent = 'Surround açık mı, telefon aynı ağda mı? Kendiliğinden yeniden denenir.';
       $('dot').className = 'dot';
       setTimeout(poll, 1000);
       return;
     }
+    if (r.status === 404) {
+      // The PC no longer knows this address (an older QR code).
+      cancelRecording();
+      $('state').textContent = 'Bu bağlantı artık geçersiz';
+      $('msg').textContent = 'Bilgisayardaki QR kodunu yeniden okut.';
+      $('dot').className = 'dot';
+      $('start').disabled = true;
+      setTimeout(poll, 3000);
+      return;
+    }
+    try { s = await r.json(); } catch (e) { setTimeout(poll, 1000); return; }
     if (s.state === 'record' && !recording) {
       if (!ctx) { $('msg').textContent = 'Önce “Mikrofonu aç”a dokun.'; }
-      else {
-        chunks = []; recording = true;
-        try { await ctx.resume(); await post('/api/recording'); } catch (e) { recording = false; }
-      }
+      else { try { await beginRecording(); } catch (e) { cancelRecording(); $('msg').textContent = 'Kayıt başlamadı: ' + e.message; } }
     }
     if (s.state === 'upload' && recording && !uploading) upload();
-    if ((s.state === 'ready') && recording && !uploading) { recording = false; chunks = []; }
+    if ((s.state === 'ready') && recording && !uploading) cancelRecording();
 
     $('state').textContent = labels[s.state] || s.state;
     $('dot').className = 'dot ' + (s.state === 'recording' || s.state === 'record' ? 'rec' : 'on');

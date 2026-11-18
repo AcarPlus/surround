@@ -1,6 +1,6 @@
 namespace Surround.Engine.Phone;
 
-/// <summary>The phone page (phone.html, embedded): asks for the microphone, records on request, uploads raw float32.</summary>
+/// <summary>The phone page (phone.html, embedded): asks for the microphone, records on request (MediaRecorder PCM WebM when the browser can, see <see cref="WebmPcm"/>), uploads.</summary>
 public static class PhonePage
 {
     private static byte[]? _html;

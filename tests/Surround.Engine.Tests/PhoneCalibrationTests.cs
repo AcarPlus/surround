@@ -32,6 +32,7 @@ public class PhoneCalibrationTests(ITestOutputHelper output)
                 lanes[s][m] += spk[s].Gain * plan.Amplitude * sw.Value(m / rate - at);
         }
         foreach (var st in plan.Steps) { Add(st.StartFrame, plan.Reference); Add(st.StartFrame + plan.OffsetFrames, st.Test); }
+        if (plan.ClosingFrame is { } closing) Add(closing, plan.Reference);
         var x = new double[len];
         for (int s = 0; s < spk.Length; s++)
         {
@@ -53,14 +54,80 @@ public class PhoneCalibrationTests(ITestOutputHelper output)
         return y;
     }
 
-    private static CalibrationPlan Plan(int n, int repeats = 2, int reference = 0) =>
-        new(48000, Enumerable.Range(0, n).Select(i => new CalibrationSpeaker($"s{i}", false)).ToList(), reference, repeats, -20);
+    private static CalibrationPlan Plan(int n, int repeats = 2, int reference = 0, bool closing = true) =>
+        new(48000, Enumerable.Range(0, n).Select(i => new CalibrationSpeaker($"s{i}", false)).ToList(), reference, repeats, -20,
+            closingReference: closing);
 
     private static CalibrationResult AnalyzePhone(CalibrationPlan plan, float[] mic, int micRate, out ExternalAlignment.Alignment al)
     {
         al = ExternalAlignment.Find(plan, mic, mic.Length, micRate);
         return CalibrationAnalyzer.Analyze(plan, mic, mic.Length, micRate, "phone", null, null, default,
-            new AnalysisOptions { Map = al.Map, MaxLatencySec = ExternalAlignment.WindowSec, Responses = true });
+            new AnalysisOptions
+            {
+                Map = al.Map, StepMaps = al.StepMaps, StepGap = al.StepGap,
+                MaxLatencySec = ExternalAlignment.WindowSec, Responses = true,
+            });
+    }
+
+    /// <summary>The phone browser lost <paramref name="ms"/> of audio at each of <paramref name="atSec"/> (recording time).</summary>
+    private static float[] Drop(float[] x, int rate, double ms, params double[] atSec)
+    {
+        var list = x.ToList();
+        int n = (int)Math.Round(ms / 1000 * rate);
+        foreach (var t in atSec.OrderByDescending(t => t)) list.RemoveRange((int)Math.Round(t * rate), n);
+        return list.ToArray();
+    }
+
+    /// <summary>Recording time (s) of the middle between a step's reference and test sweeps.</summary>
+    private static double Between(CalibrationPlan plan, int step, double leadSec) =>
+        leadSec + (plan.Steps[step].StartFrame + plan.OffsetFrames * 0.8) / (double)plan.Rate;
+
+    [Fact]
+    public void Phone_DroppedBlocks_InsideAStep_AreDetected_AndKeptOutOfTheTiming()
+    {
+        // The 2026-11-18 room test: 40 ms blocks lost mid-recording made one speaker's delay jump by 40/80 ms.
+        const int micRate = 48000;
+        var plan = Plan(2, repeats: 3);
+        var spk = new[] { new Spk(2.0, 0.5), new Spk(3.3, 0.9) };
+        var clean = PhoneRecord(plan, spk, micRate, leadSec: 0.9, ppm: 30, noiseRms: 2e-4);
+        var mic = Drop(clean, micRate, 40, Between(plan, 1, 0.9), Between(plan, 2, 0.9) - 0.1, Between(plan, 2, 0.9));
+        var r = AnalyzePhone(plan, mic, micRate, out var al);
+        output.WriteLine($"ppm {al.ClockPpm}, hits {al.ReferenceHits}/{al.Steps}, gaps {al.Gaps} ({al.GapMs} ms): {string.Join(",", al.StepGap)} anchors {string.Join(" ", al.AnchorsSec)}");
+        foreach (var x in r.Speakers) output.WriteLine($"{x.SpeakerId}: {x.ArrivalMs:0.0000} ms spread {x.SpreadMs} {x.Message}");
+
+        Assert.Equal(new[] { false, true, true }, al.StepGap);
+        Assert.InRange(al.GapMs, 115, 125);
+        Assert.Equal(al.Steps, al.ReferenceHits);
+        var b = r.Speakers[1];
+        Assert.True(b.Ok, b.Message);
+        Assert.InRange(b.ArrivalMs - 1.3, -0.05, 0.05);
+        Assert.Contains("kesinti", b.Message);
+    }
+
+    [Fact]
+    public void Phone_DroppedBlocks_BetweenSteps_DoNotLoseTheFollowingSteps()
+    {
+        // Gaps between steps (after a test sweep, before the next reference) add up to more than the old ±30 ms search.
+        const int micRate = 44100;
+        var plan = Plan(3, repeats: 3);
+        var spk = new[] { new Spk(1.0, 0.5), new Spk(6.0, 0.7), new Spk(330.0, 0.6) };
+        var clean = PhoneRecord(plan, spk, micRate, leadSec: 1.2, ppm: -60, noiseRms: 2e-4);
+        double After(int step) => 1.2 + (plan.Steps[step].StartFrame + plan.OffsetFrames) / (double)plan.Rate + 1.25;
+        // Steps: s1, s2, s1, s2, s1, s2 (repeat-major); gaps after steps 0, 1 (two) and 3 add up to 160 ms.
+        var mic = Drop(clean, micRate, 40, After(0), After(1), After(1) + 0.05, After(3));
+        var r = AnalyzePhone(plan, mic, micRate, out var al);
+        output.WriteLine($"ppm {al.ClockPpm}, hits {al.ReferenceHits}/{al.Steps}, gaps {al.Gaps}: {string.Join(",", al.StepGap)} anchors {string.Join(" ", al.AnchorsSec)}");
+        foreach (var x in r.Speakers) output.WriteLine($"{x.SpeakerId}: {x.ArrivalMs:0.0000} ms spread {x.SpreadMs} {x.Message}");
+
+        Assert.Equal(al.Steps, al.ReferenceHits);
+        Assert.InRange(al.ClockPpm, -80, -40);
+        // A gap between a test sweep and the next reference still breaks that step's frame: it is dropped, not trusted.
+        Assert.Equal(new[] { true, true, false, true, false, false }, al.StepGap);
+        var s = r.Speakers;
+        Assert.True(s[1].Ok, s[1].Message);
+        Assert.True(s[2].Ok, s[2].Message);
+        Assert.InRange(s[1].ArrivalMs - 5.0, -0.05, 0.05);
+        Assert.InRange(s[2].ArrivalMs - 329.0, -0.05, 0.05);
     }
 
     [Fact]

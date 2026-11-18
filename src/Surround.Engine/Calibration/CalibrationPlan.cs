@@ -23,7 +23,12 @@ public sealed class CalibrationPlan
 
     private readonly float[] _sweep;
 
-    public CalibrationPlan(int rate, IReadOnlyList<CalibrationSpeaker> speakers, int reference, int repeats, double levelDb)
+    /// <param name="closingReference">
+    /// Play the reference once more after the last step (external microphone): every step is then framed by two reference
+    /// sweeps, so a gap in the recording inside a step shows up as a wrong spacing between them (<see cref="ExternalAlignment"/>).
+    /// </param>
+    public CalibrationPlan(int rate, IReadOnlyList<CalibrationSpeaker> speakers, int reference, int repeats, double levelDb,
+        bool closingReference = false)
     {
         if (speakers.Count == 0) throw new ArgumentException("No speakers.", nameof(speakers));
         if (speakers.Count > MaxSpeakers) throw new ArgumentException($"At most {MaxSpeakers} speakers.", nameof(speakers));
@@ -48,6 +53,7 @@ public sealed class CalibrationPlan
         for (int r = 0; r < Repeats; r++)
             foreach (int s in tests) { steps.Add(new CalibrationStep(s, r, t)); t += stepFrames; }
         Steps = steps;
+        if (closingReference) { ClosingFrame = t; t += OffsetFrames; }
         TotalFrames = t + Frames(TailSec);
     }
 
@@ -61,6 +67,8 @@ public sealed class CalibrationPlan
     public long NoiseStartFrame { get; }
     public long NoiseFrames { get; }
     public long OffsetFrames { get; }
+    /// <summary>Start of the closing reference sweep after the last step; null when the plan has none.</summary>
+    public long? ClosingFrame { get; }
     public long TotalFrames { get; }
 
     public double Seconds => TotalFrames / (double)Rate;
@@ -80,6 +88,7 @@ public sealed class CalibrationPlan
             AddSweep(st.StartFrame, Reference, start, end, dest, stride);
             AddSweep(st.StartFrame + OffsetFrames, st.Test, start, end, dest, stride);
         }
+        if (ClosingFrame is { } c) AddSweep(c, Reference, start, end, dest, stride);
     }
 
     private void AddSweep(long at, int lane, long start, long end, Span<float> dest, int stride)

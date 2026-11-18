@@ -102,6 +102,10 @@ public sealed class AnalysisOptions
 {
     /// <summary>null = the recording starts at program frame 0, at the nominal rate ratio (local microphone).</summary>
     public RecordingMap? Map { get; init; }
+    /// <summary>Per step: its own map (external microphone, anchored on the step's reference); null = <see cref="Map"/>.</summary>
+    public IReadOnlyList<RecordingMap>? StepMaps { get; init; }
+    /// <summary>Per step: the recording has a gap inside the step (external microphone); the step is not used.</summary>
+    public IReadOnlyList<bool>? StepGap { get; init; }
     /// <summary>Search window for an arrival after its (mapped) push.</summary>
     public double MaxLatencySec { get; init; } = CalibrationPlan.MaxLatencySec;
     /// <summary>Also report each speaker's smoothed frequency response on <see cref="ResponseGrid"/>.</summary>
@@ -214,9 +218,9 @@ public static class CalibrationAnalyzer
         var envT = new float[segLen];
         var envL = new float[segLen];
 
-        Event Analyze(double frame, CalibrationSpeaker spk, Shape timing)
+        Event Analyze(RecordingMap m, double frame, CalibrationSpeaker spk, Shape timing)
         {
-            double pos = map.At(frame);
+            double pos = m.At(frame);
             long b = (long)Math.Floor(pos) - pre;
             dec.Load(mic, micLength, b, segLen);
             dec.Envelope(timing.Window, envT, segLen);
@@ -276,12 +280,14 @@ public static class CalibrationAnalyzer
                 $"Analiz ediliyor ({i + 1}/{steps.Count})"));
             stepLow[i] = spk[refIdx].LowBand || spk[st.Test].LowBand;
             var timing = stepLow[i] ? low : broad;
-            evR[i] = Analyze(st.StartFrame, spk[refIdx], timing);
-            evS[i] = Analyze(st.StartFrame + plan.OffsetFrames, spk[st.Test], timing);
+            var sm = options?.StepMaps is { } maps && i < maps.Count ? maps[i] : map;
+            evR[i] = Analyze(sm, st.StartFrame, spk[refIdx], timing);
+            evS[i] = Analyze(sm, st.StartFrame + plan.OffsetFrames, spk[st.Test], timing);
         }
 
         ct.ThrowIfCancellationRequested();
-        bool Glitched(int i) => extras?.StepGlitched is { } g && i < g.Length && g[i];
+        bool Gap(int i) => options?.StepGap is { } g && i < g.Count && g[i];
+        bool Glitched(int i) => (extras?.StepGlitched is { } g && i < g.Length && g[i]) || Gap(i);
         static bool Usable(Event e) => e.Found && e.Snr >= MinSnrDb;
 
         var results = new List<SpeakerCalibration>(spk.Count);
@@ -290,7 +296,13 @@ public static class CalibrationAnalyzer
             var msgs = new List<string>();
             var idx = Enumerable.Range(0, steps.Count).Where(i => steps[i].Test == s || s == refIdx).ToList();
             var clean = idx.Where(i => !Glitched(i)).ToList();
-            if (clean.Count < idx.Count) msgs.Add(clean.Count == 0 ? "Ses akışında kesinti oldu; tekrar deneyin." : "Bir ölçümde ses akışı kesildi; o tekrar atlandı.");
+            if (clean.Count < idx.Count)
+            {
+                bool phoneGap = idx.Any(Gap);
+                msgs.Add(clean.Count == 0
+                    ? (phoneGap ? "Telefon kaydında kesinti oldu; zamanlama güvenilir değil, tekrar deneyin." : "Ses akışında kesinti oldu; tekrar deneyin.")
+                    : (phoneGap ? "Telefon kaydında kesinti olan ölçüm atlandı." : "Bir ölçümde ses akışı kesildi; o tekrar atlandı."));
+            }
 
             if (s == refIdx)
             {

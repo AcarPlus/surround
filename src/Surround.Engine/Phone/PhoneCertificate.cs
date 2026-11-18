@@ -8,8 +8,8 @@ namespace Surround.Engine.Phone;
 
 /// <summary>
 /// The self-signed TLS certificate of the phone link. Kept in a PFX file so the phone's one-time "proceed anyway"
-/// exception stays valid across runs; made again when this PC's LAN addresses are no longer all in it (the browser
-/// checks the address it connects to) or when it is about to expire.
+/// exception stays valid across runs; made again when the QR code's address is no longer in it (the browser checks the
+/// address it connects to) or when it is about to expire.
 /// </summary>
 public static class PhoneCertificate
 {
@@ -22,7 +22,10 @@ public static class PhoneCertificate
             if (File.Exists(path))
             {
                 var c = X509CertificateLoader.LoadPkcs12FromFile(path, null, X509KeyStorageFlags.Exportable);
-                if (c.NotAfter > DateTime.Now.AddDays(30) && addresses.All(a => Covers(c, a))) return c;
+                // Only the QR code's address (the first: the network with a gateway) must be in it. Virtual adapters
+                // (WSL, Hyper-V) get a new address on every boot; remaking the certificate for them would make the phone
+                // show its warning again each time.
+                if (c.NotAfter > DateTime.Now.AddDays(30) && (addresses.Count == 0 || Covers(c, addresses[0]))) return c;
                 c.Dispose();
             }
         }

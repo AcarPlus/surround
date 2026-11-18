@@ -103,6 +103,115 @@ public class PhoneLinkTests : IDisposable
         Assert.False(PhoneCertificate.IsPrivate(IPAddress.Parse("8.8.8.8")));
     }
 
+    [Fact]
+    public void Link_KeepsItsAddress_AcrossRuns()
+    {
+        string cert = Path.Combine(_dir, "cert.pfx");
+        string token; int port;
+        using (var a = new PhoneLink(cert))
+        {
+            a.Start(47920, new[] { IPAddress.Loopback });
+            token = a.Token; port = a.Port;
+        }
+        using var b = new PhoneLink(cert);
+        b.Start(47920, new[] { IPAddress.Loopback });
+        Assert.Equal(token, b.Token);
+        Assert.Equal(port, b.Port);
+    }
+
+    [Fact]
+    public void Certificate_IsKept_WhenOnlyASecondaryAddressChanges()
+    {
+        string path = Path.Combine(_dir, "cert.pfx");
+        var lan = IPAddress.Parse("192.168.1.50");
+        using var c1 = PhoneCertificate.LoadOrCreate(path, new[] { lan, IPAddress.Parse("172.20.1.5") });
+        using var c2 = PhoneCertificate.LoadOrCreate(path, new[] { lan, IPAddress.Parse("172.27.9.1") }); // WSL after a reboot
+        Assert.Equal(c1.Thumbprint, c2.Thumbprint);
+    }
+
+    // ---- WebM (MediaRecorder audio/webm;codecs=pcm) ----
+
+    private static byte[] Vint(long v, int len)
+    {
+        var b = new byte[len];
+        for (int i = len - 1; i >= 0; i--) { b[i] = (byte)(v & 0xFF); v >>= 8; }
+        b[0] |= (byte)(0x80 >> (len - 1));
+        return b;
+    }
+
+    private static byte[] Id(uint id) => id > 0xFFFFFF ? BitConverter.GetBytes(id).Reverse().ToArray()
+        : id > 0xFFFF ? BitConverter.GetBytes(id).Reverse().Skip(1).ToArray()
+        : id > 0xFF ? BitConverter.GetBytes(id).Reverse().Skip(2).ToArray() : new[] { (byte)id };
+
+    private static byte[] El(uint id, byte[] data) => Id(id).Concat(Vint(data.Length, 4)).Concat(data).ToArray();
+    private static byte[] Unknown(uint id) => Id(id).Concat(new byte[] { 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF }).ToArray();
+    private static byte[] U(long v, int n) { var b = new byte[n]; for (int i = n - 1; i >= 0; i--) { b[i] = (byte)v; v >>= 8; } return b; }
+
+    /// <summary>A browser-style recording: unknown-size Segment/Cluster, float stereo, blocks of 10 ms at the given times.</summary>
+    private static byte[] Webm(int rate, IEnumerable<(int Ms, float[] Frames)> blocks)
+    {
+        var f = new List<byte>();
+        f.AddRange(El(0x1A45DFA3, El(0x4282, "webm"u8.ToArray())));
+        f.AddRange(Unknown(0x18538067));
+        f.AddRange(El(0x1549A966, El(0x2AD7B1, U(1_000_000, 3))));
+        var audio = El(0xB5, BitConverter.GetBytes((float)rate).Reverse().ToArray()).Concat(El(0x9F, U(2, 1))).Concat(El(0x6264, U(32, 1))).ToArray();
+        var entry = El(0xD7, U(1, 1)).Concat(El(0x86, "A_PCM/FLOAT/IEEE"u8.ToArray())).Concat(El(0xE1, audio)).ToArray();
+        f.AddRange(El(0x1654AE6B, El(0xAE, entry)));
+        f.AddRange(Unknown(0x1F43B675));
+        f.AddRange(El(0xE7, U(0, 2)));
+        foreach (var (ms, frames) in blocks)
+        {
+            var payload = new List<byte> { 0x81 }; // track 1
+            payload.AddRange(U(ms, 2));
+            payload.Add(0x80); // keyframe, no lacing
+            foreach (var x in frames) { payload.AddRange(BitConverter.GetBytes(x)); payload.AddRange(BitConverter.GetBytes(0f)); }
+            f.AddRange(El(0xA3, payload.ToArray()));
+        }
+        return f.ToArray();
+    }
+
+    [Fact]
+    public void Webm_DecodesPcm_AndFillsLostAudioByTimestamp()
+    {
+        const int rate = 48000, n = 480; // 10 ms blocks
+        float[] Block(int k) => Enumerable.Range(0, n).Select(i => (k + 1) * 0.01f).ToArray();
+        // Blocks at 0..40 ms, then 40 ms of audio lost (the next block is stamped 90 ms), then on.
+        var times = new[] { 0, 10, 20, 30, 40, 90, 100, 110 };
+        var data = Webm(rate, times.Select((t, k) => (t, Block(k))));
+        Assert.True(WebmPcm.LooksLikeWebm(data));
+        var a = WebmPcm.Decode(data);
+        Assert.Equal(rate, a.SampleRate);
+        Assert.Equal(2, a.Channels);
+        Assert.Equal(1, a.Gaps);
+        Assert.Equal(40, a.GapMs, 1);
+        Assert.Equal(times.Length * n + 40 * rate / 1000, a.Samples.Length);
+        // Stereo (x, 0) → mono x/2; the 6th block starts at 90 ms.
+        Assert.Equal(0.01f / 2, a.Samples[0], 5);
+        Assert.Equal(0f, a.Samples[50 * rate / 1000 + 10]);
+        Assert.Equal(0.06f / 2, a.Samples[90 * rate / 1000], 5);
+    }
+
+    [Fact]
+    public void Webm_TimestampJitter_IsNotAGap()
+    {
+        const int rate = 48000, n = 480;
+        var times = new[] { 0, 10, 22, 30, 40, 50 }; // one block stamped 2 ms late, the next on time
+        var a = WebmPcm.Decode(Webm(rate, times.Select(t => (t, new float[n]))));
+        Assert.Equal(0, a.Gaps);
+        Assert.Equal(times.Length * n, a.Samples.Length);
+    }
+
+    [Fact]
+    public void Upload_AcceptsWebm()
+    {
+        using var link = new PhoneLink(Path.Combine(_dir, "cert.pfx"));
+        link.Start(47930, new[] { IPAddress.Loopback });
+        string p = "/c/" + link.Token;
+        Assert.Equal(400, link.Handle(new PhoneLink.Request("POST", p + "/api/upload", "format=webm", new byte[] { 1, 2, 3 })).Status);
+        var data = Webm(44100, new[] { (0, new float[441]) });
+        Assert.Equal(409, link.Handle(new PhoneLink.Request("POST", p + "/api/upload", "format=webm&via=pcm", data)).Status); // not asked for
+    }
+
     private static async Task WaitState(HttpClient http, string url, string state)
     {
         for (int i = 0; i < 100; i++)
