@@ -14,6 +14,7 @@ import {
   type Device,
   type LevelFrame,
   type LogicalChannel,
+  type PhoneLinkStatus,
   type SinkStatus,
   type Speaker,
 } from './types'
@@ -119,6 +120,24 @@ function initialConfig(): Config {
   }
 }
 
+/** C# ResponseGrid: 100 Hz'den 1/12 oktav, 89 nokta. */
+const RESP_HZ = Array.from({ length: 89 }, (_, i) => Math.round(100 * Math.pow(2, i / 12) * 10) / 10)
+
+/** Önizleme: cihaza göre renklenmiş, konuma göre biraz oynayan bir hoparlör yanıtı (dB). */
+function mockResponse(id: string, deviceId: string): number[] {
+  const h = [...(id + deviceId)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7)
+  const f1 = 300 + (h % 9) * 350
+  const g1 = ((h >> 3) % 13) - 6
+  const tilt = (((h >> 7) % 7) - 3) * 0.8
+  const lowCut = deviceId.length % 2 ? 180 : 70
+  return RESP_HZ.map((f) => {
+    const o = Math.log2(f / f1)
+    const bump = g1 * Math.exp(-o * o * 3)
+    const hp = f < lowCut ? -12 * Math.log2(lowCut / f) : 0
+    return Math.round((-38 + bump + tilt * Math.log2(f / 1000) + hp + (Math.random() - 0.5) * 1.2) * 100) / 100
+  })
+}
+
 export function createMockApi(): SurroundApi {
   const devices = buildDevices()
   let config = initialConfig()
@@ -139,6 +158,16 @@ export function createMockApi(): SurroundApi {
     ;(window as unknown as { __trayProfile?: (id: string) => void }).__trayProfile = (id) => profileListeners.forEach((cb) => cb(id))
   }
   const rejoinListeners = new Set<(names: string[]) => void>()
+  const phoneListeners = new Set<(s: PhoneLinkStatus) => void>()
+  const phoneStartListeners = new Set<() => void>()
+  let phone: PhoneLinkStatus = { running: false, url: null, urls: [], connected: false, state: 'ready' }
+  const setPhone = (p: Partial<PhoneLinkStatus>) => {
+    phone = { ...phone, ...p }
+    phoneListeners.forEach((cb) => cb(phone))
+  }
+  // Önizlemede telefonun "Ölçümü başlat" düğmesi.
+  if (typeof window !== 'undefined')
+    (window as unknown as { __phoneStart?: () => void }).__phoneStart = () => phoneStartListeners.forEach((cb) => cb())
   let engineState: EngineState = { state: 'stopped', missing: [] }
   let dropTimers: ReturnType<typeof setTimeout>[] = []
 
@@ -337,6 +366,8 @@ export function createMockApi(): SurroundApi {
       const arrival = (s: Speaker) => (path(s) / 343) * 1000 + devLat(s.outputDeviceId)
       const level = (s: Speaker) => -20 * Math.log10(Math.max(0.3, path(s))) + devLvl(s.outputDeviceId)
       const emit = (p: CalibrationProgress) => calibrationListeners.forEach((cb) => cb(p))
+      const wantResp = req.responses || req.micDeviceId === 'phone'
+      if (req.micDeviceId === 'phone' && !phone.connected) return Promise.reject(new Error('Telefon bağlı değil. QR kodu telefonla okutup sayfayı açık tutun.'))
       const total = speakers.length
       return new Promise<CalibrationResult>((resolve, reject) => {
         let step = -2
@@ -360,9 +391,16 @@ export function createMockApi(): SurroundApi {
             micDeviceId: req.micDeviceId,
             noiseFloorDb: -62,
             micClipped: false,
+            ...(wantResp ? { responseHz: RESP_HZ } : {}),
+            ...(req.applyCorrections ? { verified: true } : {}),
+            ...(req.micDeviceId === 'phone' ? { note: 'Telefon 48000 Hz, saat farkı 42 ppm.' } : {}),
             speakers: speakers.map((s, i) => {
               const weak = query('zayif') && i === total - 1
               return {
+                ...(wantResp && !req.lowBandSpeakerIds?.includes(s!.id) ? { responseDb: mockResponse(s!.id, s!.outputDeviceId) } : {}),
+                ...(req.applyCorrections && s!.id !== ref.id
+                  ? { residualArrivalMs: round(rand(-0.15, 0.15), 3), residualLevelDb: round(rand(-0.4, 0.4), 2) }
+                  : {}),
                 speakerId: s!.id,
                 ok: !weak,
                 arrivalMs: round(arrival(s!) - arrival(ref) + rand(-0.03, 0.03), 3),
@@ -389,6 +427,29 @@ export function createMockApi(): SurroundApi {
     onCalibration(cb) {
       calibrationListeners.add(cb)
       return () => calibrationListeners.delete(cb)
+    },
+    async phoneLinkStart() {
+      if (!phone.running) {
+        const url = 'https://192.168.1.20:47810/c/onizleme1234'
+        setPhone({ running: true, url, urls: [url], state: 'ready' })
+        setTimeout(() => setPhone({ connected: true, device: 'Android Chrome (önizleme)' }), 1500)
+      }
+      return phone
+    },
+    async phoneLinkStop() {
+      setPhone({ running: false, connected: false, url: null, urls: [] })
+    },
+    async phoneLinkStatus() {
+      return phone
+    },
+    async phoneLinkPrompt() {},
+    onPhoneLink(cb) {
+      phoneListeners.add(cb)
+      return () => phoneListeners.delete(cb)
+    },
+    onPhoneStart(cb) {
+      phoneStartListeners.add(cb)
+      return () => phoneStartListeners.delete(cb)
     },
     onDeviceRejoined(cb) {
       rejoinListeners.add(cb)

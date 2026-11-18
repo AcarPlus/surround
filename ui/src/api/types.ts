@@ -89,6 +89,8 @@ export interface Speaker {
   eq?: number[]
   /** Hoparlöre özel parametrik bantlar (en fazla 6, 10 bant EQ'dan sonra); yoksa yok. */
   peq?: PeqBand[]
+  /** Kalibrasyondan gelen otomatik tını/oda düzeltmesi (en fazla 8, kullanıcının EQ'sundan sonra); yoksa yok. */
+  roomEq?: PeqBand[]
   /** Yalnızca arayüz etiketi (motor yok sayar). */
   eqPreset?: string
   /** Küçük hoparlör: bu frekansın altı kesilir (0/yok = kapalı, 40..250). Kesilen bas bassReceiver'lara gider. */
@@ -444,6 +446,29 @@ export interface CalibrationRequest {
   repeats?: number
   /** Süpürme tepe seviyesi, dBFS. */
   levelDb?: number
+  /** Doğrulama: hoparlörlerin gecikme/kazanç/roomEq'su açıkken çal (sonuç yine düzeltmesiz değer olarak gelir). */
+  applyCorrections?: boolean
+  /** Frekans yanıtlarını da ölç (tını eşleme). Telefonla her zaman ölçülür. */
+  responses?: boolean
+}
+
+/** `micDeviceId` olarak telefon mikrofonu (QR ile bağlanan). */
+export const PHONE_MIC = 'phone'
+
+export type PhoneState = 'ready' | 'record' | 'recording' | 'upload' | 'analyzing'
+
+export interface PhoneLinkStatus {
+  running: boolean
+  /** QR koduna konan adres (https, yerel ağ). */
+  url?: string | null
+  urls: string[]
+  /** Telefon sayfası son birkaç saniyede bağlandı. */
+  connected: boolean
+  state: PhoneState
+  device?: string | null
+  /** Telefon tarayıcısının kapatmadığı ses işlemeleri vb. */
+  note?: string | null
+  error?: string | null
 }
 
 export type CalibrationPhase = 'preparing' | 'noise' | 'measuring' | 'analyzing' | 'done'
@@ -470,6 +495,11 @@ export interface SpeakerMeasurement {
   /** Bas bandında ölçüldü (zamanlama daha az güvenilir). */
   lowBand: boolean
   message?: string
+  /** Yumuşatılmış frekans yanıtı (dB, `responseHz` ızgarasında); kazanç ve roomEq hariç. */
+  responseDb?: number[]
+  /** Doğrulama ölçümünde: düzeltmeler açıkken duyulan varış/seviye farkı (referansa göre). */
+  residualArrivalMs?: number
+  residualLevelDb?: number
 }
 
 export interface CalibrationResult {
@@ -478,6 +508,11 @@ export interface CalibrationResult {
   noiseFloorDb: number
   micClipped: boolean
   speakers: SpeakerMeasurement[]
+  responseHz?: number[]
+  /** Düzeltmeler açıkken yapılan doğrulama ölçümü. */
+  verified?: boolean
+  /** Kayıtla ilgili not (telefon: örnekleme hızı, saat farkı, ses işleme). */
+  note?: string
 }
 
 /** Kaynak kanal seviyeleri, dBFS (-90 .. 0). Eski motorlarda üst şeritler eksik olabilir; okurken `?? -90` kullan. */

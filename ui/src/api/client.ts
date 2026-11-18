@@ -3,6 +3,7 @@ import type {
   CalibrationProgress,
   CalibrationRequest,
   CalibrationResult,
+  PhoneLinkStatus,
   Config,
   Device,
   EngineInfo,
@@ -58,6 +59,15 @@ export interface SurroundApi {
   calibrate(request: CalibrationRequest): Promise<CalibrationResult>
   cancelCalibration(): Promise<void>
   onCalibration(cb: (p: CalibrationProgress) => void): () => void
+  /** Telefon mikrofonu: yerel ağda HTTPS bağlantısını açar (QR adresi döner); açıksa aynısını döner. */
+  phoneLinkStart(): Promise<PhoneLinkStatus>
+  phoneLinkStop(): Promise<void>
+  phoneLinkStatus(): Promise<PhoneLinkStatus>
+  /** Telefon ekranında gösterilecek yönerge (ör. sonraki konum); null temizler. */
+  phoneLinkPrompt(text: string | null): Promise<void>
+  onPhoneLink(cb: (s: PhoneLinkStatus) => void): () => void
+  /** Telefonda "Ölçümü başlat"a basıldı. */
+  onPhoneStart(cb: () => void): () => void
   /** Tepsi menüsünden bir profil seçildi; backend onu kayıtlı yapılandırmaya zaten uyguladı. */
   onProfileApplied(cb: (id: string) => void): () => void
   /** "Eksik cihaz olmadan başlat"tan sonra eksik cihaz geri geldi ve motora eklendi (cihaz adları). */

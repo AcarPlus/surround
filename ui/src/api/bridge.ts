@@ -9,6 +9,7 @@ import {
   type EngineInfo,
   type EngineState,
   type LevelFrame,
+  type PhoneLinkStatus,
   type SinkStatus,
 } from './types'
 
@@ -17,7 +18,7 @@ import {
  *
  *   JS -> C#: { id, method, params: unknown[] }
  *   C# -> JS: { id, result } | { id, error: { message, errors? } }
- *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'engineState' | 'deviceRejoined' | 'calibration' | 'profileApplied', data }
+ *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'engineState' | 'deviceRejoined' | 'calibration' | 'profileApplied' | 'phoneLink' | 'phoneStart', data }
  */
 
 interface WebViewHost {
@@ -64,6 +65,8 @@ export function createBridgeApi(): SurroundApi {
   const calibrationListeners = new Set<(p: CalibrationProgress) => void>()
   const profileListeners = new Set<(id: string) => void>()
   const rejoinListeners = new Set<(names: string[]) => void>()
+  const phoneListeners = new Set<(s: PhoneLinkStatus) => void>()
+  const phoneStartListeners = new Set<() => void>()
   let nextId = 1
 
   host.addEventListener('message', (e) => {
@@ -97,6 +100,12 @@ export function createBridgeApi(): SurroundApi {
         }
         case 'calibration':
           calibrationListeners.forEach((cb) => cb(msg.data as CalibrationProgress))
+          break
+        case 'phoneLink':
+          phoneListeners.forEach((cb) => cb(msg.data as PhoneLinkStatus))
+          break
+        case 'phoneStart':
+          phoneStartListeners.forEach((cb) => cb())
           break
         case 'deviceRejoined': {
           const names: string[] = Array.isArray(msg.data?.names) ? msg.data.names.map(String) : []
@@ -163,6 +172,12 @@ export function createBridgeApi(): SurroundApi {
     calibrate: (request) => call<CalibrationResult>('calibrate', request),
     cancelCalibration: () => call<void>('cancelCalibration'),
     onCalibration: (cb) => subscribe(calibrationListeners, cb),
+    phoneLinkStart: () => call<PhoneLinkStatus>('phoneLinkStart'),
+    phoneLinkStop: () => call<void>('phoneLinkStop'),
+    phoneLinkStatus: () => call<PhoneLinkStatus>('phoneLinkStatus'),
+    phoneLinkPrompt: (text) => call<void>('phoneLinkPrompt', text),
+    onPhoneLink: (cb) => subscribe(phoneListeners, cb),
+    onPhoneStart: (cb) => subscribe(phoneStartListeners, cb),
     onProfileApplied: (cb) => subscribe(profileListeners, cb),
     onDeviceRejoined: (cb) => subscribe(rejoinListeners, cb),
   }

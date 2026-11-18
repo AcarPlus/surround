@@ -8,7 +8,7 @@ namespace Surround.Desktop.Bridge;
 /// JSON-RPC over WebView2 messages.
 ///   page -> host: { id, method, params: [] }
 ///   host -> page: { id, result } | { id, error: { message, errors } }
-///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "engineState" | "deviceRejoined" | "calibration" | "profileApplied", data }
+///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "engineState" | "deviceRejoined" | "calibration" | "profileApplied" | "phoneLink" | "phoneStart", data }
 /// </summary>
 public sealed class BridgeHost : IDisposable
 {
@@ -38,7 +38,13 @@ public sealed class BridgeHost : IDisposable
         _backend.StateChanged += OnEngineState;
         _backend.DeviceRejoined += OnDeviceRejoined;
         _backend.ProfileApplied += OnProfileApplied;
+        _backend.PhoneStatus += OnPhoneStatus;
+        _backend.PhoneStartRequested += OnPhoneStart;
     }
+
+    private void OnPhoneStatus(Surround.Engine.Phone.PhoneLinkStatus s) => PushEvent("phoneLink", s);
+
+    private void OnPhoneStart() => PushEvent("phoneStart", new { });
 
     /// <summary>Tray menu applied a profile to the stored config: the page adopts it (undo, toast, profile menu).</summary>
     private void OnProfileApplied(string id) => PushEvent("profileApplied", new { id });
@@ -143,6 +149,8 @@ public sealed class BridgeHost : IDisposable
         _backend.StateChanged -= OnEngineState;
         _backend.DeviceRejoined -= OnDeviceRejoined;
         _backend.ProfileApplied -= OnProfileApplied;
+        _backend.PhoneStatus -= OnPhoneStatus;
+        _backend.PhoneStartRequested -= OnPhoneStart;
         try { _web.WebMessageReceived -= OnMessage; } catch { }
     }
 }

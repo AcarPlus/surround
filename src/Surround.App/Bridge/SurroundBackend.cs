@@ -74,6 +74,7 @@ public sealed partial class SurroundBackend : IDisposable
             case "openSoundPanel": OpenSoundPanel(); return null;
             case "calibrate": return await CalibrateAsync(Arg(args, 0));
             case "cancelCalibration": Volatile.Read(ref _calCts)?.Cancel(); return null;
+            case "phoneLinkStart" or "phoneLinkStop" or "phoneLinkStatus" or "phoneLinkPrompt": return await PhoneLinkAsync(method, args);
             default: throw new BridgeException($"Bilinmeyen yöntem: {method}");
         }
     }
@@ -355,6 +356,7 @@ public sealed partial class SurroundBackend : IDisposable
     private async Task<CalibrationResult> CalibrateAsync(JsonElement doc)
     {
         var req = ParseCalibration(doc);
+        var external = PhoneFor(req);
         var cts = new CancellationTokenSource();
         if (Interlocked.CompareExchange(ref _calCts, cts, null) != null) throw new BridgeException("Kalibrasyon zaten sürüyor.");
         try
@@ -372,12 +374,18 @@ public sealed partial class SurroundBackend : IDisposable
                 }
                 try
                 {
-                    return await Task.Run(() => CalibrationRunner.Run(cfg, req, p => CalibrationProgress?.Invoke(p), cts.Token));
+                    var result = await Task.Run(() => CalibrationRunner.Run(cfg, req, p =>
+                    {
+                        CalibrationProgress?.Invoke(p);
+                        PhoneProgress(req, p);
+                    }, cts.Token, AppLog.Info, external));
+                    PhoneResult(req, cfg, result, null);
+                    return result;
                 }
-                catch (OperationCanceledException) { throw new BridgeException("Kalibrasyon iptal edildi."); }
-                catch (ArgumentException ex) { throw new BridgeException(ex.Message); }
-                catch (BridgeException) { throw; }
-                catch (Exception ex) { throw new BridgeException($"Kalibrasyon başarısız: {ex.Message}"); }
+                catch (OperationCanceledException) { PhoneResult(req, cfg, null, "Ölçüm iptal edildi."); throw new BridgeException("Kalibrasyon iptal edildi."); }
+                catch (ArgumentException ex) { PhoneResult(req, cfg, null, ex.Message); throw new BridgeException(ex.Message); }
+                catch (BridgeException ex) { PhoneResult(req, cfg, null, ex.Message); throw; }
+                catch (Exception ex) { PhoneResult(req, cfg, null, ex.Message); throw new BridgeException($"Kalibrasyon başarısız: {ex.Message}"); }
                 finally
                 {
                     if (wasRunning) await ResumeAfterCalibrationAsync(cfg);
@@ -440,7 +448,11 @@ public sealed partial class SurroundBackend : IDisposable
         string? reference = Get(doc, "referenceSpeakerId") is { ValueKind: JsonValueKind.String } r ? r.GetString() : null;
         bool loopback = Flag(doc, "micLoopback", false);
         return new CalibrationRequest(mic, speakers, reference, loopback,
-            (int)Math.Round(Number(doc, "repeats") ?? 2), Number(doc, "levelDb") ?? -20, Strings(doc, "lowBandSpeakerIds"));
+            (int)Math.Round(Number(doc, "repeats") ?? 2), Number(doc, "levelDb") ?? -20, Strings(doc, "lowBandSpeakerIds"))
+        {
+            ApplyCorrections = Flag(doc, "applyCorrections", false),
+            Responses = Flag(doc, "responses", false),
+        };
     }
 
     // ---- default output device ----
@@ -551,6 +563,7 @@ public sealed partial class SurroundBackend : IDisposable
         Interlocked.Exchange(ref _toneCts, null)?.Cancel();
         Volatile.Read(ref _calCts)?.Cancel();
         StopRecovery();
+        DisposePhone();
         _host.Dispose(); // stops the engine
         _guard.Restore(); // app exit / session end: give the user their default output back
     }
