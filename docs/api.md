@@ -7,7 +7,7 @@ köprüsünü, yoksa (`npm run dev`, tarayıcı) `ui/src/api/mock.ts` sahte veri
 ## Köprü protokolü (WebView2)
 JSON-RPC, `postMessage` / `WebMessageReceived` üzerinden. Sayfa -> C#: `{ id, method, params: [] }` (konumsal argümanlar).
 C# -> sayfa: `{ id, result }` ya da `{ id, error: { message, errors?: string[] } }`; itilen olaylar:
-`{ event: "status" | "levels" | "engine" | "engineError" | "engineState" | "calibration" | "profileApplied", data }`. C# tarafı: `src/Surround.App/Bridge`.
+`{ event: "status" | "levels" | "engine" | "engineError" | "engineState" | "calibration" | "profileApplied" | "phoneLink" | "phoneStart", data }`. C# tarafı: `src/Surround.App/Bridge`.
 `saveConfig` her zaman diske yazar; doğrulama hatası varsa (boş oda hariç) `errors` ile reddeder, çalışan motor
 mühendislik alanları değiştiyse yeniden başlatılır (oda/konum gibi arayüz alanları yeniden başlatmaz).
 
@@ -35,6 +35,10 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 | `getAppSettings()` | Uygulama ayarları (`app.json`, motor yapılandırmasından ayrı): `{ switchDefaultDevice, startWithWindows, startEngineOnLaunch, minimizeToTray }` (hepsi boolean; varsayılan `true, false, false, true`). Dahili `restore*` alanları dönmez |
 | `calibrate(request)` | Mikrofonla hoparlör ölçümü (uzun sürer, ~2,4 sn × tekrar × hoparlör + 3 sn); bitince `CalibrationResult` döner. Ayrıntı: `docs/kalibrasyon.md` |
 | `cancelCalibration()` | Süren kalibrasyonu (analiz aşaması dahil) durdurur, `null` döner; bekleyen `calibrate` "Kalibrasyon iptal edildi." ile reddedilir |
+| `phoneLinkStart()` | Telefon mikrofonu için yerel ağda HTTPS bağlantısını açar (açıksa aynısı); `PhoneLinkStatus { running, url, urls, connected, state, device?, note?, error? }` döner. `url` QR koduna konur. Ayrıntı: `docs/kalibrasyon.md` "Telefonla" |
+| `phoneLinkStop()` / `phoneLinkStatus()` | Bağlantıyı kapatır / durumu döner |
+| `phoneLinkPrompt(text \| null)` | Telefon ekranında yönerge (ör. sonraki ölçüm konumu) |
+| `onPhoneLink(cb)` / `onPhoneStart(cb)` | `phoneLink` olayı (durum değişti: bağlandı/koptu, kayıt durumu); `phoneStart` olayı (telefonda "Ölçümü başlat"a basıldı; arayüz ölçümü başlatır) |
 | `calibration` olayı | Kalibrasyon sırasında itilen `CalibrationProgress` |
 | `saveAppSettings(settings)` | Verilen alanları kaydeder (eksik alan değişmez, bilinmeyen/`restore*` alanlar yok sayılır); başarıyla `null` döner. `startWithWindows` HKCU\...\Run altındaki `Surround` değerini yazar/siler (komut: `"<exe>" --tray`; Velopack kurulumunda güncellemelerden etkilenmeyen kök başlatıcı); yazılamazsa reddeder. Motor çalışırken `switchDefaultDevice` değişirse hemen uygulanır |
 
@@ -42,8 +46,14 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 İstek (hoparlörler kayıtlı config.json içinde `id` ile aranır; bilinmeyen id hata verir):
 ```
 { micDeviceId: string, micLoopback?: boolean, speakerIds: string[], referenceSpeakerId?: string,
-  repeats?: number, levelDb?: number, lowBandSpeakerIds?: string[] }
+  repeats?: number, levelDb?: number, lowBandSpeakerIds?: string[],
+  applyCorrections?: boolean, responses?: boolean }
 ```
+`micDeviceId: "phone"`: telefon mikrofonu (önce `phoneLinkStart`, telefon bağlı olmalı). `responses`: frekans yanıtları da
+ölçülür (`responseDb` + `responseHz`; telefonla her zaman). `applyCorrections`: doğrulama — hoparlörler delay/gain/roomEq
+açıkken çalar; sonuç düzeltmesiz değere çevrilir, şu an duyulan fark `residualArrivalMs`/`residualLevelDb`, `verified: true`.
+Hoparlör alanı `roomEq` (en çok 8 parametrik bant): kalibrasyonun tını düzeltmesi, kullanıcının `peq`'inden sonra; canlı
+güncellenir.
 - `referenceSpeakerId` yoksa `speakerIds[0]`; listede değilse yine çalınır ve sonuçta yer alır. `repeats` 1–5 (varsayılan 2),
   `levelDb` süpürme tepe seviyesi −40…−6 dBFS (varsayılan −20). `micLoopback: true` test modudur: "mikrofon" bir çıkış cihazının loopback'idir.
 - `lowBandSpeakerIds`: bas bandında (≈25–180 Hz) analiz edilecek hoparlörler (subwoofer). Alan yoksa yalnızca karışım satırı (`source`)
