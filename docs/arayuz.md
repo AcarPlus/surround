@@ -1,108 +1,111 @@
-# Arayüz (v2)
+# Arayüz (v3, 0.5.0)
 
 Masaüstü arayüzü `ui/` altındadır (React + Zustand). Bu belge ekranları ve arayüze özgü davranışları özetler;
 motor sözleşmesi için `docs/api.md`, ölçüm yöntemi için `docs/kalibrasyon.md`.
 
+Tek uygulama: herkesin kullanabileceği kadar sade, isteyene ayrıntılı. Basit/Gelişmiş kip yok (0.4.0'daki `uiMode`,
+Kolay kurulum ve Ölçmeden başla 0.5.0'da kaldırıldı; config'teki eski `uiMode` alanı yok sayılır).
+
 ## Ekranlar
 | Ekran | İçerik |
 |---|---|
-| Ana sayfa | Büyük Başlat/Durdur, profil kartları, **Sistem kontrolü** (`ui/src/lib/health.ts`), oda önizlemesi, hoparlör listesi (test sesi, sustur) |
-| Oda | Oda planı (sürükle, ok tuşları 5 cm, Delete), hoparlör ekle (rol menüsü), düzen şablonu (önizlemeli), "Mesafeden hesapla", "Sırayla çal"; sağda sekmeli hoparlör paneli (Genel / Ses / Gelişmiş) |
+| Oda (ana ekran) | Odanın kendisi: düzen çipleri, oda sahnesi, altta canlı seviye şeridi. Aşağıya bakın. |
 | Ses | Upmix (stereo → çevresel; "Arka kanallar": gecikme, tiz kesme, ayrıştırma) ve genel ses işleme (ön ayar + kendi ön ayarların, karakter, otomatik ön kazanç, frekans yanıtı eğrisi, 10 bant EQ, parametrik bantlar, A/B, limiter) |
-| Kalibrasyon | Mikrofonla ölçüm (hazırlık → ölçüm → sonuç tablosu → uygula), mikrofon yoksa kulakla seviye eşitleme |
-| Bağlantı | VB-Cable rehberi, kaynak seçimi, kanal seviye ölçerleri, çıkış cihazlarının tampon/ek gecikme ve canlı durumu, düşük gecikme |
+| Ölçüm | Mikrofonla/telefonla tek akış ölçüm (hazırlık → 5 nokta → sonuç → uygula), mikrofon yoksa kulakla seviye eşitleme |
 | Ayarlar | Profiller, Windows ile bütünleşme, kurulum sihirbazı, yedek indir/yükle |
 
-## Kurulum sihirbazı (`ui/src/lib/setup.ts`)
-Düzen sayısı (5.1, 7.1 …) yerine gerçek bağlantıdan yola çıkar: kaynak ve sanal kablo uçları dışındaki her çıkış cihazı için
-"ne bağlı?" sorulur — 2.1 set (sol/sağ + dahili sub, bas alıcısı), stereo çift (yeri, tipi, sol/sağ ters), tek hoparlör
-(rol) ya da çok kanallı sistem (kanal başına rol, Windows sırası FL FR FC LFE BL BR SL SR varsayılan). Her kanal için test
-sesi vardır. Sihirbaz yeniden açılınca cevaplar mevcut hoparlörlerden çıkarılır. Uygularken aynı cihaz + kanaldaki hoparlör
-korunur (kimlik, konum, EQ, gecikme/kazanç, kalibrasyon); rolü değişirse yeni rol/karışım/ad alır, gecikme/kazancı otomatiğe
-döner, yalnızca tarafı değiştiyse standart konuma taşınır; ön ayarı değiştiyse yeniden uygulanır. Sihirbazın listelemediği
-cihazlardaki hoparlörler (çıkarılmış cihaz vb.) olduğu gibi kalır; yeni hoparlörler rolün standart açısına, dinleyicinin
-duvara uzaklığıyla sınırlı yarıçapa yerleştirilir. Hiç hoparlör yoksa ilk açılışta kendiliğinden açılır.
+Üst çubuk: logo, Başlat/Durdur, profil seçimi (ilk üç profil tek dokunuşla — Film / Oyun / Müzik — diğerleri oklu menüde),
+motorun ne yaptığı (upmix durumu), geri al/yinele, ana ses düzeyi, **tek durum işareti** ve tema. Ekranlar geniş pencerede
+ortalanır (`.screen-page`).
 
-## Basit / Gelişmiş mod
-Uygulama iki kipte çalışır; ayar `uiMode: 'simple' | 'advanced'` olarak config'te saklanır (arayüze özgü alan, motor yok sayar ve korur;
-eksikse **Basit**, yeni kurulumun varsayılanı da Basit). Geçiş Ayarlar'daki "Gelişmiş mod" anahtarından ya da Basit ekrandaki
-"Gelişmiş mod" bağlantısından yapılır; tüm geçişler `ui/src/lib/mode.ts` → `canUseAdvanced()` üzerinden geçer (ileride lisansa
-bağlanacaksa kontrol yalnızca orada). Kip geri alma geçmişine girmez.
+## VB-Cable kapısı (`components/CableGate.tsx`)
+Surround sesi VB-Cable'dan alır; o olmadan çalışmaz. VB-Cable yoksa ya da Windows'ta 2 kanal ayarlıysa uygulamanın tek ekranı
+bu kapıdır, atlama yolu yoktur. Tek tık (`useCableAutoSetup` → `api.cableSetup`): resmi siteden indirir, imzasını doğrular,
+kurar (bir UAC onayı), 7.1 yapar, kaynak ve "Windows varsayılan çıkışını çevir" ayarını açar. Yeniden başlatma gerekirse söyler.
+VB-Cable lisansı gereği Setup'a gömülmez; bu yüzden kurulum ilk açılışta yapılır.
 
-- **Gelişmiş**: yukarıda anlatılan arayüz (gezinme, tüm ekranlar, Denetçi, kurulum sihirbazı ilk açılışta kendiliğinden açılır).
-- **Basit** (`screens/SimpleHome.tsx`): üstte uygulama adı + Ayarlar dişlisi; Başlat/Durdur, ana ses, **Film / Oyun / Müzik**
-  (ses ön ayarları `film`, `game`, `music`), tek satır durum (hoparlör sayısı, ölçüldü mü, çalışıyor mu, sorun varsa düzelt düğmesi) ve iki kurulum girişi.
-  Hoparlör yoksa yalnızca bu iki giriş gösterilir. İlk açılışta kurulum sihirbazı kendiliğinden **açılmaz**.
-  - **Kolay kurulum** (`easySetupOpen`, `openEasySetup()`, `closeEasySetup()`, `cancelEasySetup()`; `screens/EasySetup.tsx` +
-    `EasySetupSteps.tsx`, saf mantık `lib/easySetup.ts`): rehberli, ölçümlü kurulum; aşağıya bakın.
-  - **Ölçmeden başla** (`quickStartOpen`, `openQuickStart()`, `closeQuickStart()`; `screens/QuickStart.tsx`, mantık `lib/quickStart.ts`):
-    kaynak, sanal kablo ve kulaklık dışındaki her çıkış stereo çift olur (çok kanallı cihaz varsayılan rolleriyle; cihaz başına işaret
-    kutusu); her hoparlörün test sesi çalınır ve **oda kadranına** (`components/TapDial.tsx`) dokunularak yeri söylenir. Açı en yakın
-    zemin rolüne çevrilir (`lib/tapPlace.ts`: `nearestRole`, `angleToPosition`; subwoofer ve üst hoparlörler rolünü korur), konum
-    standart yerleşim yarıçapına konur. "Atla" standart yeri korur. Uygulanırken gecikme 0, kazanç 0 (otomatik hesap kapalı), oda EQ'su yok;
-    `applySetup(r, { autoForNew: false, silent: true })` kullanılır, `setupDone` işaretlenir ve motor başlatılır.
-    Kaynak (VB-Cable yokken varsayılan hoparlör) listeden düştüğü için liste boş kalırsa (`blockedBySource`) nedeni ve tek tıkla
-    VB-Cable kurulumu gösterilir.
+Kaynak her zaman VB-Cable'dır ve arayüzden seçilmez: cihaz listesi her yenilendiğinde `followCable()` kaynağı kabloya
+(loopback) çevirir (geri alma geçmişine girmez). Ayrı bir Bağlantı ekranı yoktur.
 
-### Kolay kurulum
-Adımlar: **Ses kaynağı → Hoparlörler → Mikrofon → Konum → Ölçüm → Oda düzeltmesi → Bitti** (ilerleme göstergesi, Geri/İleri).
-Açılırken yapılandırma ve geri alma geçmişi kontrol noktası olarak saklanır; **Vazgeç** (X / Esc, Bitti dışındaki her adımda)
-kaynak, hoparlör ve ölçüm değişikliklerini geri alır (`cancelEasySetup`), Bitti (`closeEasySetup`) korur.
-1. *Ses kaynağı*: `sourceState` → VB-Cable yok / kurulu ama 7.1 ya da kaynak değil / hazır. Tek tıkla kur ya da ayarla
-   (`CableInstallCard` → `useCableAutoSetup` → `api.cableSetup`; Bağlantı ekranındaki rehberle ortak). Yönetici onayı, yeniden
-   başlatma ve hata sade dille anlatılır; "stereo ile devam et" ile atlanabilir. Elle adımlar için `CableSetup`.
-2. *Hoparlörler*: Ölçmeden başla ile aynı varsayımlar (`quickStartDevices`/`quickStartKits`, `DeviceChecklist`).
-3. *Mikrofon*: "Telefonum" (QR, `PhonePanel`/`usePhoneLink`; sertifika uyarısı için çizimli "Gelişmiş → Devam et",
-   bağlanmazsa `FirewallFix`) ya da bilgisayar/kulaklık mikrofonu. Son seçim tarayıcıda (`surround.easyMic`) hatırlanır.
-4. *Konum*: her hoparlör çalınır, kadrana dokunulur (`components/TapPlace.tsx`: `useTapPlace` + `TapPlaceView`, Ölçmeden başla ile ortak).
-5. *Ölçüm*: plan önce uygulanır (`buildQuickStart` → `applySetup(…, { autoForNew: false, silent: true })`), sonra Gelişmiş ekranla
-   aynı ölçüm (`useCalibrationRun` + `calibrationRequest`, gecikme + seviye + frekans yanıtı, 1 konum, "Orta" seviye).
-   `checkMeasurement`: ölçülemeyen ya da SNR < 15 dB hoparlör **uygulanmaz** ve kullanıcıya söylenir (tekrar ölç — bir kademe
-   yüksek sesle; ya da onlar olmadan devam). Mikrofon kırpıldıysa bir kademe kısık; mikrofon ortada değil şüphesi de gösterilir.
-   Sorun yoksa doğrudan sonraki adıma geçilir. Telefondaki "Ölçümü başlat" da çalışır.
-6. *Oda düzeltmesi*: `gentleRoomEq` = `matchSpeakers(…, { target: 'average', limits: GENTLE_ROOM_EQ_LIMITS })` — yalnızca kısma,
-   toplamda en çok −6 dB, en çok 4 bant (docs/kalibrasyon.md). Kapatılabilir (kapalıysa eski oda EQ'su kaldırılır).
-   Uygulama: `easyPatches` → `applyCalibration(…, { silent: true })`.
-7. *Bitti*: sade özet (`easySummary`), motor başlatılır, bildirim.
+## Oda (ana ekran)
+- **Sahne** (`components/RoomStage.tsx`): odanın kuşbakışı planı (oda boyutuna oranlı), hoparlörler, dinleyici ("Sen").
+  Hoparlörler ve dinleyici sürüklenir; ok tuşları 5 cm, Delete siler. Hoparlör düğümünde kanal kısaltması, altında adı.
+- **Hoparlör paneli** (`components/SpeakerPopover.tsx`): hoparlöre dokununca yanında açılır — çalan cihaz (kaynak ve sanal
+  kablolar hariç tüm çıkışlar, Bluetooth dahil) ve kanal (2 kanallı cihazda Sol/Sağ; çakışma uyarısı), seviye (elle değişince
+  otomatik kazanç kapanır), gecikme, mesafe, ölçüm durumu, test sesi, sustur, kaldır (iki dokunuşla). "Tüm ayarlar" sağdan
+  ayrıntılı Denetçiyi (`components/Inspector.tsx`: Genel / Ses / Gelişmiş sekmeleri) çekmece olarak açar.
+- **Düzen çipleri** (`components/LayoutPicker.tsx`): 2.0, 2.1, 3.1, 5.1, 7.1, 5.1.2, 7.1.4 ve "Başka…" (X.Y veya X.Y.Z).
+  Hiç hoparlör silinmeyecekse hemen uygulanır, silinecekse önizlemeli onay ister. Elle kurulan düzen şablona uymuyorsa
+  "Özel · X.Y.Z" görünür.
+- **Hoparlör ekle**: kullanılmayan standart rollerin yuvaları (sol, orta, sağ, sub, yan, arka, arka orta, dört üst) sahnede
+  "+" olarak belirir; dokununca o rol eklenir (`addSpeaker(role)`). Nadir roller (geniş, üst orta, rolsüz) "Diğer…" menüsünde.
+- **Oda menüsü** (sağ üst, oda ölçüsü): oda boyutu, "Gecikme ve seviyeyi mesafeden hesapla", "Kurulumu baştan yap".
+- **Canlı seviye şeridi**: her hoparlörün çaldığı kanalın seviyesi (LED tarzı), kaynak, yayılım (upmix durumu), ek gecikme, kesinti.
+- Arkada hoparlör yoksa sahnede sessiz bir ipucu çıkar.
 
-Hoparlörler varsa Basit ana sayfadaki **Yeniden ölç / Hoparlörleri ölç** (`openEasySetup({ step: 'mic' })`) yalnızca
-Mikrofon → Ölçüm → Oda düzeltmesi → Bitti adımlarını açar; Basit kipte sistem kontrolünün "kalibrasyon" ve "kurulum" düzeltmeleri de
-Kolay kurulumu açar.
+### Görsel dil ("Gece" teması)
+Lacivert-siyah zemin, çivit mavisi vurgu (`--accent`), cihaz renkleri vurgudan ayrı (`--dev-0..5`). Motor çalışırken arayüz sese
+tepki verir; canlı seviyeler `lib/useLevels.ts` (`useLevels`, `speakerLevel`, `frameEnergy`) ile okunur:
+ortam ışığı (`.ambient`, uygulama kökündeki `--energy` ile parlar), cam paneller (`.glass`), hoparlörlerin zemin ışığı
+(`.light-pool`), hoparlörden dinleyiciye akan ışınlar ve parçacıklar (`.beam-flow`, `.particle`), hoparlör çevresinde seviye yayı
+(`.level-arc`) ve zar titreşimi, bas vuruşunda şok dalgası (`.shockwave`; LFE ya da genel enerji kendi ortalamasının belirgin
+üstüne sıçrayınca), dinleyici çevresinde **ses pusulası** (kanalların nominal açılarına göre yön göstergesi), üst çubukta akan
+ışık (`.run-line`). `prefers-reduced-motion` açıkken sürekli animasyonlar durur. Uygulama simgesi `tools/make-icon.ps1` ile üretilir.
+
+## Kurulum sihirbazı (`ui/src/lib/setup.ts`, `screens/SetupWizard.tsx`)
+Tek kurulum akışı: **Hoparlörler → Yerleşim → Bitti** (VB-Cable'ı kapı halleder). Düzen sayısı yerine gerçek bağlantıdan yola
+çıkar: kaynak ve sanal kablo uçları dışındaki her çıkış cihazı için "ne bağlı?" sorulur — 2.1 set (sol/sağ + dahili sub, bas
+alıcısı), stereo çift (yeri, tipi, sol/sağ ters), tek hoparlör (rol) ya da çok kanallı sistem (kanal başına rol, Windows sırası
+FL FR FC LFE BL BR SL SR varsayılan). Her kanal için test sesi vardır. Sihirbaz yeniden açılınca cevaplar mevcut hoparlörlerden
+çıkarılır. Uygularken aynı cihaz + kanaldaki hoparlör korunur (kimlik, konum, EQ, gecikme/kazanç, kalibrasyon); rolü değişirse
+yeni rol/karışım/ad alır, gecikme/kazancı otomatiğe döner, yalnızca tarafı değiştiyse standart konuma taşınır. Sihirbazın
+listelemediği cihazlardaki hoparlörler olduğu gibi kalır; yeni hoparlörler rolün standart açısına yerleştirilir. Bitti adımı
+"Sırayla dinle", "Odayı ölç" ve Başlat sunar. Hiç hoparlör yoksa ve kurulum yapılmamışsa ilk açılışta kendiliğinden açılır.
+
+## Bildirimler
+Kullanıcı boğulmasın diye en aza indirilmiştir:
+- **Durum işareti** (üst çubuk): yalnızca sistem kontrolünün hata/uyarıları (`checkHealth` sonucundan `info` düzeyi
+  süzülür) ve motor durumu. Sorun yoksa "Her şey yolunda" / "Hazır". Kesinti ancak 10'u bulunca işareti sarıya çevirir.
+  Tıklayınca sorunlar düzeltme düğmeleriyle (`fixHealth`) açılır. Gezinmede rozet yoktur.
+- Bildirim (toast) yalnızca hatalarda, silmede (Geri al düğmesiyle), boş kanal uyarısında, yedek yüklemede ve VB-Cable
+  kurulunca çıkar; kaydetme, geri alma, kurulum/kalibrasyon tamam gibi başarı bildirimleri yoktur.
+
+## Çıkış tamponu
+Kullanıcıya tampon ayarı gösterilmez: motor çalışırken bir cihazda son büyütmeden bu yana en az 3 kesinti olursa o cihazın
+`bufferMs`'i kendiliğinden 20 ms büyür (en çok 200 ms, iki büyütme arası en az 15 sn; geri alma geçmişine girmez).
 
 ## Geri al / yinele
 Yapılandırmayı değiştiren her eylem (`commit`) önceki durumu geçmişe yazar (en fazla 100 adım). Aynı türden art arda gelen
 değişiklikler (sürükleme, kaydırıcı) 0,9 sn içinde tek adım sayılır. Ctrl+Z / Ctrl+Y (veya Ctrl+Shift+Z), üst çubuktaki
-düğmeler ve silme/düzen/kurulum/kalibrasyon bildirimlerindeki "Geri al". Metin kutusundayken tarayıcının kendi geri alması
-çalışır. Geçmiş oturuma özgüdür (diske yazılmaz).
+düğmeler ve silme bildirimindeki "Geri al". Metin kutusundayken tarayıcının kendi geri alması çalışır. Geçmiş oturuma özgüdür.
 
 ## Sistem kontrolü
-Saf fonksiyon; seviyeler hata / uyarı / bilgi. Örnekler: hoparlör yok, kaynak cihaz yok ya da VB-Cable değil, VB-Cable
-stereo ayarlı, hoparlörün cihazı bağlı değil / kanal yok / kaynak cihaza çıkıyor (geri besleme), aynı kanala iki hoparlör,
-bas kesiliyor ama bas alıcısı yok, tek taraflı surround (bir yanda arka/yan yok → o yanın ortam sesi önde kalır), ön çift eksik,
-stereo kaynakta upmix kapalı, sessizdeki hoparlörler, çalışırken kesinti (tamponu büyüt), cihaz bekleniyor (motor bir cihaz
-değişikliğiyle durdu, eksik cihazlar listelenir; bkz. docs/api.md "Cihaz değişince"), kalibrasyon yapılmadı, Bluetooth
-hoparlör (gecikmesi ölçülmeli; Hands-Free uç noktası uyarısı). Düzeltme
-düğmeleri `fixHealth` eylemine bağlanır. Gezinmedeki Ana sayfa simgesi hata/uyarı sayısını gösterir.
+Saf fonksiyon (`ui/src/lib/health.ts`); seviyeler hata / uyarı / bilgi. Örnekler: hoparlör yok, kaynak cihaz yok ya da VB-Cable
+değil, VB-Cable stereo ayarlı, hoparlörün cihazı bağlı değil / kanal yok / kaynak cihaza çıkıyor (geri besleme), aynı kanala iki
+hoparlör, bas kesiliyor ama bas alıcısı yok, tek taraflı surround, ön çift eksik, stereo kaynakta upmix kapalı, sessizdeki
+hoparlörler, çalışırken kesinti, cihaz bekleniyor (bkz. docs/api.md "Cihaz değişince"), Bluetooth hoparlör. Arayüz yalnızca
+hata ve uyarıları gösterir.
 
 ## Bluetooth hoparlörler
-`kind: "bluetooth"` cihazlar (Beats Pill vb.) sihirbazda "Bluetooth" rozeti ve gecikme notuyla görünür (~150–250 ms; kalibrasyon
-ölçer, diğer hoparlörleri ona göre bekletir). Sihirbaz yeni Bluetooth çıkışını `bufferMs: 150` ile açar. Düşük gecikme modu
-Bluetooth'u ağ cihazı gibi devre dışı bırakır. Hands-Free (HFP) uç noktası düşük kalite/mono olduğu için uyarı üretir.
+`kind: "bluetooth"` cihazlar (Beats Pill vb.) sihirbazda "Bluetooth" rozeti ve gecikme notuyla, hoparlör panelinin cihaz
+listesinde "· Bluetooth" ile görünür (~150–250 ms; ölçüm bunu ölçer, diğer hoparlörleri ona göre bekletir). Sihirbaz yeni
+Bluetooth çıkışını `bufferMs: 150` ile açar. Store'daki `lowLatency` (Bluetooth/ağ cihazlarını dışarıda bırakır) 0.5.0'da
+varsayılan kapalıdır ve arayüzde anahtarı yoktur. Hands-Free (HFP) uç noktası düşük kalite/mono olduğu için uyarı üretir.
 
 ## Arayüze özgü config alanları (motor yok sayar)
-`speakers[].calibratedAt` (ISO; değerler ölçümden geldi), `setupDone`, `uiMode`, `lastCalibration: { at, micDeviceId, speakers }`.
+`speakers[].calibratedAt` (ISO; değerler ölçümden geldi), `setupDone`, `lastCalibration: { at, micDeviceId, speakers }`.
 Hiçbir hoparlörün kullanmadığı `outputs` kaydedilmez.
 
 ## Önizleme (tarayıcı, sahte veri)
 `npm --prefix ui run dev` → `http://localhost:5173`. Sorgu parametreleri: `?masaustu` (iki Realtek çıkışı + VB-Cable +
-kulaklık mikrofonu, boş kurulum → sihirbaz açılır), `?bos` (boş kurulum), `?zayif` (kalibrasyonda son hoparlör zayıf sinyal; "Yüksek" ölçüm sesiyle düzelir),
-`?nocable` (VB-Cable yok; tek tıkla kurulum başarılı olur ve kablo belirir), `?yenidenbaslat` / `?kablohata` (kurulum yeniden başlatma
-ister / yönetici onayı reddedilir), `?tekcikis` (VB-Cable yok, tek hoparlör çıkışı: liste boş kalır), `?duvar` (telefon güvenlik
-duvarına takılır), `?cable2ch`, `?gelismis` (Gelişmiş kip; varsayılan Basit), `?bekle` (Başlat'tan 5 sn sonra bir çıkış "çıkarılır", 5 sn sonra döner: üst çubukta "Cihaz bekleniyor").
-Cihaz beklerken (`runState: 'waiting'`) üst çubuktaki durum etiketi uyarı renginde eksik cihazları yazar, Başlat düğmesi
-"Durdur" olur (beklemeyi bitirir).
+kulaklık mikrofonu, boş kurulum → sihirbaz açılır), `?bos` (boş kurulum), `?zayif` (ölçümde son hoparlör zayıf sinyal; otomatik
+seviye yükseltmesiyle düzelir), `?nocable` (VB-Cable yok → kapı; tek tıkla kurulum başarılı olur ve kablo belirir),
+`?yenidenbaslat` / `?kablohata` (kurulum yeniden başlatma ister / yönetici onayı reddedilir), `?tekcikis`, `?duvar` (telefon
+güvenlik duvarına takılır), `?cable2ch` (kablo 2 kanal → kapı "7.1 yap"), `?bekle` (Başlat'tan 5 sn sonra bir çıkış "çıkarılır",
+5 sn sonra döner: durum işareti "Bekleniyor").
+Cihaz beklerken (`runState: 'waiting'`) Başlat düğmesi "Durdur" olur (beklemeyi bitirir).
 
-## Gelişmiş EQ (Ses ekranı ve Denetçi)
+## Gelişmiş EQ (Ses ekranı ve hoparlörün "Tüm ayarlar" çekmecesi)
 
 - **Eğri** (`ui/src/components/EqCurve.tsx`): gerçek birleşik genlik yanıtı (dB, log frekans 20 Hz–20 kHz): 10 bant + bas + netlik + parametrik + etkin ön kazanç.
   Hesap `ui/src/lib/eqCurve.ts`'te, motorun RBJ biquad formüllerinin (frekanslar, Q, raf türleri) birebir aynasıdır; C# ile hesaplanmış referans noktalarla sınanır

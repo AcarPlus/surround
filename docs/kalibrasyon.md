@@ -107,19 +107,30 @@ indirilir; tekrarlar güçte ortalanır (`responseDb`, `responseHz`). Kazanç ve
 yansımaları (koltuktaki tınıyı belirleyen kısım) tutar, odanın geç kuyruğunu (her hoparlörde ortak) atar.
 
 Arayüz (`ui/src/lib/roomEq.ts`) bunlardan `speaker.roomEq` önerir:
-- 1, 3 ya da 5 konumda ölçülür (ilki dinleme noktası; gecikme/seviye oradan), yanıtlar konumlar arasında güçte ortalanır.
+- Her zaman 5 konumda ölçülür (ilki dinleme noktası; gecikme/seviye oradan; sonra ~30 cm sol, ~30 cm sağ, ~20 cm ön,
+  ~20 cm arka), yanıtlar konumlar arasında güçte ortalanır. Arayüzde seçenek yoktur (bkz. "Ölçüm ekranı" aşağıda).
 - Eğriler 500 Hz–4 kHz ortalamasına hizalanır (seviye kazançla ayrıca eşitlenir). Aynı mikrofonla ölçüldüğü için
   mikrofonun rengi farkta düşer: mutlak düz eğri değil hoparlörler arası eşleşme hedeflenir.
-- Hedef: referans hoparlörün eğrisi (ona EQ yok) ya da hepsinin ortalaması.
+- Hedef: referans hoparlörün eğrisi (ona EQ yok; içeriğin çoğunu çalan önler değişmez, diğerleri onlara benzetilir).
 - Eşleme bandı: 150 Hz (bas yönetimi varsa kesimin 1,3 katı) ile 12 kHz arası, ayrıca hoparlörün kendi düşüş
   noktaları (500 Hz altında −6 dB, 4 kHz üstünde −10 dB) dışarıda. Subwoofer eşlenmez.
 - Açgözlü tepe yerleştirme: en büyük kalan hatanın yerine bir tepe bandı, genişliği yarı yükseklikten; frekans/kazanç/Q
   küçük ızgarada iyileştirilir; en çok 8 bant, 1 dB altı hata için bant eklenmez; sonra kazançlar birlikte ayarlanır.
-  Yükseltme toplamda en çok +6 dB (çukur doldurmak hoparlörü zorlar), kısma en çok −12 dB.
+  Yükseltme toplamda en çok +3 dB (0.5.0'dan önce +6; çukur doldurmak hoparlörü zorlar, duyulur fayda getirmez),
+  kısma en çok −12 dB.
 - Sınırlar `matchSpeakers(…, { limits })` ile değişir (`RoomEqLimits`; varsayılan `DEFAULT_ROOM_EQ_LIMITS` yukarıdaki değerler).
-  Basit kipteki Kolay kurulum **yumuşak** sınırları kullanır (`GENTLE_ROOM_EQ_LIMITS`): yükseltme yok (yalnızca hedeften
-  yüksek kalan yerler aranır), bant başına ve üst üste binen bantların toplamında en çok −6 dB, en çok 4 bant, 1,5 dB altı
-  fark için bant yok; hedef hoparlörlerin ortalaması, tek konum; SNR < 15 dB ölçülen hoparlör eşlenmez.
+  `GENTLE_ROOM_EQ_LIMITS` (yalnızca kısma, en çok −6 dB, 4 bant) 0.4.0'daki Kolay kurulumdan kalmadır, şu an kullanılmaz.
+
+## Ölçüm ekranı (0.5.0)
+Kullanıcıya ayar bırakılmaz; her şey en iyi değerinde sabittir:
+- Tını eşleme her zaman açık, 5 konum, tekrar 3 (medyan). Loopback test modu yalnızca komut satırında.
+- **Tarama seviyesi otomatik:** −12 dBFS ("Yüksek") ile başlar. Bir konumda ölçülemeyen ya da SNR < 15 dB (`MIN_SNR_DB`,
+  `lib/calibration.ts`) hoparlör varsa aynı konum bir kez −6 dBFS ("Çok yüksek") ile tekrarlanır; mikrofon kırpıldıysa
+  8 dB kısılıp (en az −20 dBFS) tekrarlanır. Yükseltilen seviye sonraki konumlarda da kullanılır.
+- Referans hoparlör kendiliğinden: sessize alınmamış ilk subwoofer olmayan hoparlör (genelde ön sol).
+- Seviye hedefi en sessiz hoparlör (hiçbiri yükseltilmez, kırpılma payı korunur).
+- Ölçülemeyen ya da SNR < 15 dB hoparlöre gecikme/seviye/tını düzeltmesi uygulanmaz; diğerlerine uygulanır (onay kutusu yok).
+- Mikrofon ortada değil şüphesinde uygulamadan önce onay istenir. Doğrulama ("düzeltmeler açıkken ölç") durur.
 
 ## Doğrulama
 `applyCorrections: true` ile hoparlörler `delayMs` (motorun etkin gecikmesi), `gainDb` ve `roomEq` açıkken çalınır.

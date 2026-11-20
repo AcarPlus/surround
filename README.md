@@ -38,8 +38,8 @@ Uygulama tek kopya çalışır: ikinci kez açılırsa var olan pencere öne gel
 yeni sürümü arka planda indirir, "Yeniden başlat ve güncelle" ile ya da bir sonraki açılışta kurar (`docs/api.md`, "Otomatik güncelleme").
 Ses düzeyi üst çubuktan ya da klavyedeki ses tuşlarıyla ayarlanır (`docs/api.md`, "Ses düzeyi").
 
-İlk açılışta kaynak, varsayılan oynatma cihazının loopback'i olur; hoparlör yoktur (geri besleme koruması yüzünden).
-Hoparlör yoksa kurulum sihirbazı kendiliğinden açılır.
+İlk açılışta VB-Cable yoksa ya da 7.1 değilse uygulama yalnızca VB-Cable kurulum ekranını gösterir (Surround onsuz çalışmaz);
+kurulunca kaynak kendiliğinden VB-Cable olur. Hoparlör yoksa kurulum sihirbazı kendiliğinden açılır.
 
 ### Geliştirme modu
 
@@ -67,7 +67,7 @@ dotnet run --project src/Surround.App
 yayınlanır). Düğme her zaman son sürümün `Surround-win-Setup.exe`'sine gider
 (`releases/latest/download/...`). Setup Surround'u kullanıcı klasörüne kurar ve açar.
 
-Uygulamada (Bağlantı ekranı / kurulum sihirbazı) **"Hepsini kur"** (`cableSetup`,
+Uygulama ilk açılışta (VB-Cable kapısı, `ui/src/components/CableGate.tsx`) **"VB-Cable'ı kur ve ayarla"** (`cableSetup`,
 `src/Surround.App/Bridge/SurroundBackend.Cable.cs`):
 
 1. VB-Cable yoksa resmi sunucudan sürücü paketini indirir (`CableInstaller.PackUrl`; adres değişmişse vb-audio.com/Cable
