@@ -24,7 +24,7 @@ const RULES: Array<[RegExp, string]> = [
   [/bassReceiver/i, 'Bir hoparlör hem bası kesilen hem bas alıcısı olamaz.'],
   [/Yapılandırma okunamadı|JsonException|JSON|could not be converted/i, 'Ayar dosyası okunamadı ya da bozuk.'],
   [/AUDCLNT_E_DEVICE_IN_USE|0x8889000a|exclusive/i, 'Ses cihazı başka bir uygulama tarafından özel modda kullanılıyor.'],
-  [/AUDCLNT_E_UNSUPPORTED_FORMAT|0x88890008|E_INVALIDARG|desteklenm/i, 'Ses cihazı bu biçimi desteklemiyor. Cihazın Windows ses biçimini (Hz / kanal) kontrol edin.'],
+  [/AUDCLNT_E_UNSUPPORTED_FORMAT|0x88890008|E_INVALIDARG|formatı desteklenmiyor|Desteklenmeyen format/i, 'Ses cihazı bu biçimi desteklemiyor. Cihazın Windows ses biçimini (Hz / kanal) kontrol edin.'],
   [/DEVICE_INVALIDATED|0x88890004|cihaz.*(yok|bulunamadı|kaldırıldı)/i, 'Ses cihazı kullanılamıyor (çıkarılmış ya da devre dışı olabilir).'],
   [/Kalibrasyon iptal/i, 'Kalibrasyon iptal edildi.'],
 ]

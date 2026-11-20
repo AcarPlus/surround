@@ -31,11 +31,16 @@ public sealed class SourceVolume : IDisposable
     public event Action<VolumeState>? Changed;
 
     public VolumeState State => _state;
-    public string DeviceId => _device.ID;
+    /// <summary>
+    /// Read once at creation (on the MTA thread): the page's config saves ask for it on the UI (STA) thread, where any
+    /// call into the MTA-created IMMDevice fails with E_NOINTERFACE.
+    /// </summary>
+    public string DeviceId { get; }
 
     private SourceVolume(MMDevice device, bool ownsDevice, Action<string>? log)
     {
         _device = device;
+        DeviceId = device.ID;
         _ownsDevice = ownsDevice;
         _log = log;
         _volume = device.AudioEndpointVolume;

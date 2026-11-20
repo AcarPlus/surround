@@ -21,6 +21,11 @@ describe('explainError', () => {
     expect(friendlyMessage('outputs[0]: loopback kaynak cihazı aynı zamanda çıkış olamaz (geri besleme döngüsü).').translated).toBe(true)
     expect(friendlyMessage("'FL': outputDeviceId outputs listesinde yok.").message).toContain('çıkış cihazı')
     expect(friendlyMessage('Hata 0x88890008').translated).toBe(true)
+    expect(friendlyMessage('Kaynak formatı desteklenmiyor: 8 kanal').translated).toBe(true)
+  })
+  it('Windows\'un yerelleştirilmiş "desteklenmiyor" metnini biçim hatası sanmaz', () => {
+    const raw = 'Beklenmeyen hata: Unable to cast COM object ... Böyle bir arabirim desteklenmiyor (0x80004002 (E_NOINTERFACE)).'
+    expect(friendlyMessage(raw).message).not.toContain('biçimi desteklemiyor')
   })
   it('sayısal sınırlar için ayrı cümleler', () => {
     expect(friendlyMessage("'FL': gainDb -60..24 dB aralığında olmalı (bulunan: 40).").message).toContain('-60')
