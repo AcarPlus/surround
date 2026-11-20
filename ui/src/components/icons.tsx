@@ -41,6 +41,12 @@ export const IconMic = (p: SVGProps<SVGSVGElement>) => (
     <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
   </svg>
 )
+export const IconPhone = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="6.5" y="2.5" width="11" height="19" rx="2.2" />
+    <path d="M10.5 18.5h3" />
+  </svg>
+)
 export const IconPlay = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base({ fill: 'currentColor', stroke: 'none', ...p })}>
     <path d="M7 4.8v14.4a.8.8 0 0 0 1.2.7l11.5-7.2a.8.8 0 0 0 0-1.4L8.2 4.1A.8.8 0 0 0 7 4.8z" />

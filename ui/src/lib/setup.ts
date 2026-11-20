@@ -71,7 +71,7 @@ export function candidateDevices(devices: Device[], sourceDeviceId: string): Dev
   return devices.filter((d) => d.flow === 'render' && d.id !== sourceDeviceId && !/cable|virtual/i.test(d.name))
 }
 
-const isHeadphone = (d: Device) => /kulakl|headphone|headset|earphone/i.test(d.name)
+export const isHeadphone = (d: Device) => /kulakl|headphone|headset|earphone/i.test(d.name)
 
 function emptyKit(d: Device): DeviceKit {
   return {
@@ -198,17 +198,21 @@ export function planSpeakers(kits: DeviceKit[], devices: Device[]): PlannedSpeak
       })
     }
   }
-  // Aynı rolden birden fazla varsa adlara sıra numarası ekle.
+  numberDuplicateNames(out)
+  return out
+}
+
+/** Aynı rolden birden fazla varsa adlara sıra numarası ekler (adlar rolün temel adından başlar). */
+export function numberDuplicateNames(plan: PlannedSpeaker[]): void {
   const totals: Record<string, number> = {}
-  for (const p of out) totals[p.role] = (totals[p.role] ?? 0) + 1
+  for (const p of plan) totals[p.role] = (totals[p.role] ?? 0) + 1
   const seen: Record<string, number> = {}
-  for (const p of out) {
+  for (const p of plan) {
     if (totals[p.role] > 1) {
       seen[p.role] = (seen[p.role] ?? 0) + 1
       p.name = `${p.name} ${seen[p.role]}`
     }
   }
-  return out
 }
 
 /** Rolün dinleyiciye göre standart açısı (0 = ön, + = sağ). Yan hoparlör varsa arkalar daha geriye alınır. */

@@ -1,4 +1,5 @@
-import type { CalibrationProgress, CalibrationResult, Output, Speaker } from '../api/types'
+import type { CalibrationProgress, CalibrationRequest, CalibrationResult, Device, Output, Source, Speaker } from '../api/types'
+import type { MatchInput, MatchResult } from './roomEq'
 import { ROLE_SUB, effectiveRole } from './roles'
 import { round } from './geometry'
 
@@ -177,4 +178,84 @@ export function offCentreSuspect(rows: CalibrationRow[], speakers: Speaker[]): O
       return { pair: `${ra.s.name} / ${rb.s.name}`, deltaMs: round(deltaMs, 2), deltaDb: round(deltaDb, 1) }
   }
   return null
+}
+
+/* ---------- Ölçüm isteği ve sonuç birleştirme (Kalibrasyon ekranı ve Kolay kurulum ortak) ---------- */
+
+/** Backend'in kullanıcı iptalinde döndürdüğü metin (hata sayılmaz). */
+export const CALIBRATION_CANCELLED = 'Kalibrasyon iptal edildi.'
+
+/** Kayıt için seçilebilecek mikrofonlar (sanal kablonun kayıt ucu hariç). */
+export const micDevices = (devices: Device[]): Device[] => devices.filter((d) => d.flow === 'capture' && !/cable/i.test(d.name))
+
+/** Loopback kaynağında kaynak cihazdaki hoparlörler ölçülemez (backend tüm ölçümü reddeder). */
+export const onSourceDevice = (sp: Pick<Speaker, 'outputDeviceId'>, source: Source): boolean =>
+  source.mode === 'loopback' && sp.outputDeviceId === source.deviceId
+
+/** Referans: istenen listedeyse o; yoksa ilk subwoofer olmayan; o da yoksa ilk hoparlör. */
+export function pickReference(list: Speaker[], preferredId?: string): string | undefined {
+  if (preferredId && list.some((s) => s.id === preferredId)) return preferredId
+  return (list.find((s) => !isSubwoofer(s)) ?? list[0])?.id
+}
+
+/** Tekrar sayısı: telefonda 3 (kayıtta boşluk olan tekrar atılır), diğer mikrofonlarda 2. */
+export const defaultRepeats = (phone: boolean): number => (phone ? 3 : 2)
+
+export interface CalibrationRequestInput {
+  micDeviceId: string
+  loopback?: boolean
+  speakers: Speaker[]
+  referenceId?: string
+  repeats: number
+  levelDb: number
+  /** Frekans yanıtları da ölçülsün (tını eşleme / oda düzeltmesi). */
+  responses?: boolean
+  /** Doğrulama: düzeltmeler açıkken ölç. */
+  verify?: boolean
+}
+
+/** `api.calibrate` isteği: subwoofer'lar bas bandında ölçülür. */
+export function calibrationRequest(o: CalibrationRequestInput): CalibrationRequest {
+  return {
+    micDeviceId: o.micDeviceId,
+    micLoopback: o.loopback || undefined,
+    speakerIds: o.speakers.map((s) => s.id),
+    referenceSpeakerId: pickReference(o.speakers, o.referenceId),
+    lowBandSpeakerIds: o.speakers.filter(isSubwoofer).map((s) => s.id),
+    repeats: o.repeats,
+    levelDb: o.levelDb,
+    responses: o.responses || undefined,
+    applyCorrections: o.verify || undefined,
+  }
+}
+
+/**
+ * Tını eşleme girdileri: subwoofer olmayan her hoparlörün, her konum ölçümündeki (başarılı) yanıtı.
+ * `skip` içindeki hoparlörler (ör. zayıf sinyal) eşlenmez.
+ */
+export function matchInputs(list: Speaker[], taken: CalibrationResult[], skip: ReadonlySet<string> = new Set()): MatchInput[] {
+  return list
+    .filter((s) => !isSubwoofer(s) && !skip.has(s.id))
+    .map((s) => ({
+      speakerId: s.id,
+      highPassHz: s.highPassHz,
+      responses: taken
+        .map((t) => t.speakers.find((m) => m.speakerId === s.id && m.ok)?.responseDb)
+        .filter((r): r is number[] => !!r),
+    }))
+}
+
+/** Tını eşleme bantlarını yamalara ekler (`excluded` dışındakiler; bant yoksa mevcut roomEq kalkar). */
+export function withRoomEq(
+  patches: Record<string, Partial<Speaker>>,
+  matches: MatchResult[],
+  excluded: ReadonlySet<string>,
+  at: string,
+): Record<string, Partial<Speaker>> {
+  const out = { ...patches }
+  for (const m of matches) {
+    if (excluded.has(m.speakerId)) continue
+    out[m.speakerId] = { ...out[m.speakerId], roomEq: m.bands.length ? m.bands : undefined, calibratedAt: at }
+  }
+  return out
 }

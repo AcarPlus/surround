@@ -53,7 +53,7 @@ export function usePhoneLink(active: boolean) {
 }
 
 /** Güvenlik duvarı telefonu engelliyorsa: tek tuşla izin (Windows bir kez yönetici onayı sorar). */
-function FirewallFix() {
+export function FirewallFix() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   return (

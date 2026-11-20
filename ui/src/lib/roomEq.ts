@@ -19,6 +19,38 @@ export const MATCH_HI_HZ = 12000
 /** Bu kadar yakınsa bant eklemeye gerek yok. */
 export const MATCH_TOLERANCE_DB = 1
 
+/**
+ * Bant sınırları. Varsayılan (Gelişmiş kalibrasyon): yükseltme +6, kısma −12 dB (bant başına), 8 bant.
+ * `capTotalCut`: üst üste binen bantların TOPLAM kısması da `maxCutDb` ile sınırlanır.
+ */
+export interface RoomEqLimits {
+  maxBoostDb: number
+  maxCutDb: number
+  maxBands: number
+  /** Kalan hata bundan küçükse yeni bant eklenmez (dB). */
+  toleranceDb: number
+  capTotalCut?: boolean
+}
+
+export const DEFAULT_ROOM_EQ_LIMITS: RoomEqLimits = {
+  maxBoostDb: MAX_BOOST_DB,
+  maxCutDb: MAX_CUT_DB,
+  maxBands: ROOM_EQ_MAX_BANDS,
+  toleranceDb: MATCH_TOLERANCE_DB,
+}
+
+/**
+ * Basit kip (Kolay kurulum) "yumuşak oda düzeltmesi": yalnızca kısma (yükseltme yok), toplamda en çok −6 dB,
+ * en çok 4 bant, 1,5 dB altındaki farklar için bant yok.
+ */
+export const GENTLE_ROOM_EQ_LIMITS: RoomEqLimits = {
+  maxBoostDb: 0,
+  maxCutDb: 6,
+  maxBands: 4,
+  toleranceDb: 1.5,
+  capTotalCut: true,
+}
+
 export type MatchTarget = 'reference' | 'average'
 
 export interface MatchInput {
@@ -82,7 +114,14 @@ const r1 = (v: number) => Math.round(v * 10) / 10
  * hatanın en büyük olduğu yere bir bant konur (genişlik, hatanın yarı yüksekliğinden), sonra frekans/kazanç/Q küçük bir
  * ızgarada iyileştirilir; sonunda kazançlar birlikte bir kez daha ayarlanır.
  */
-export function fitPeaks(hz: readonly number[], want: readonly number[], use: readonly boolean[], maxBands = ROOM_EQ_MAX_BANDS): PeqBand[] {
+export function fitPeaks(
+  hz: readonly number[],
+  want: readonly number[],
+  use: readonly boolean[],
+  maxBands = ROOM_EQ_MAX_BANDS,
+  limits: RoomEqLimits = DEFAULT_ROOM_EQ_LIMITS,
+): PeqBand[] {
+  const { maxBoostDb, maxCutDb, toleranceDb } = limits
   const pts = hz.map((_, i) => i).filter((i) => use[i])
   if (pts.length < 3) return []
   const bands: { f: number; q: number; g: number }[] = []
@@ -98,10 +137,12 @@ export function fitPeaks(hz: readonly number[], want: readonly number[], use: re
       const near = [i - 1, i, i + 1].filter((k) => k >= 0 && k < hz.length && use[k])
       return near.reduce((a, k) => a + res[k], 0) / near.length
     }
+    // Yükseltme yasaksa yalnızca kısılacak (eksi) hatalar aranır.
+    const score = (v: number) => (maxBoostDb > 0 ? Math.abs(v) : Math.max(0, -v))
     let at = pts[0]
-    for (const i of pts) if (Math.abs(sm(i)) > Math.abs(sm(at))) at = i
+    for (const i of pts) if (score(sm(i)) > score(sm(at))) at = i
     const g0 = sm(at)
-    if (Math.abs(g0) < MATCH_TOLERANCE_DB) break
+    if (score(g0) < toleranceDb) break
     // Genişlik: aynı işaretli ve yarı yükseklikten büyük komşuluk.
     let lo = at
     let hi = at
@@ -111,12 +152,12 @@ export function fitPeaks(hz: readonly number[], want: readonly number[], use: re
     const q0 = clamp(Math.sqrt(Math.pow(2, bw)) / (Math.pow(2, bw) - 1), 0.5, 6)
 
     const before = err(eq)
-    let best = { f: hz[at], q: q0, g: clamp(g0, -MAX_CUT_DB, MAX_BOOST_DB), e: Infinity }
+    let best = { f: hz[at], q: q0, g: clamp(g0, -maxCutDb, maxBoostDb), e: Infinity }
     for (const fm of [-1 / 24, 0, 1 / 24])
       for (const gm of [0.7, 0.85, 1, 1.15])
         for (const qm of [0.6, 0.8, 1, 1.25, 1.6]) {
           const f = hz[at] * Math.pow(2, fm)
-          const g = clamp(g0 * gm, -MAX_CUT_DB, MAX_BOOST_DB)
+          const g = clamp(g0 * gm, -maxCutDb, maxBoostDb)
           const q = clamp(q0 * qm, 0.5, 6)
           const e = pts.reduce((a, i) => a + (res[i] - peakDb(hz[i], f, q, g)) ** 2, 0)
           if (e < best.e) best = { f, q, g, e }
@@ -131,7 +172,7 @@ export function fitPeaks(hz: readonly number[], want: readonly number[], use: re
       const others = curve(k)
       let bestG = b.g
       let bestE = Infinity
-      for (let g = -MAX_CUT_DB; g <= MAX_BOOST_DB + 1e-9; g += 0.25) {
+      for (let g = -maxCutDb; g <= maxBoostDb + 1e-9; g += 0.25) {
         const e = pts.reduce((a, i) => a + (want[i] - others[i] - peakDb(hz[i], b.f, b.q, g)) ** 2, 0)
         if (e < bestE) {
           bestE = e
@@ -144,12 +185,22 @@ export function fitPeaks(hz: readonly number[], want: readonly number[], use: re
   // Bantlar üst üste binince toplam yükseltme sınırı aşabilir: yükselten bantları orantılı küçült.
   for (let k = 0; k < 20; k++) {
     const top = Math.max(...curve())
-    if (top <= MAX_BOOST_DB + 0.05) break
-    const f = MAX_BOOST_DB / top
+    if (top <= maxBoostDb + 0.05) break
+    const f = Math.max(0, maxBoostDb) / top
     bands.forEach((b) => {
       if (b.g > 0) b.g *= f
     })
   }
+  // İsteğe bağlı: toplam kısma da sınırlı (kısan bantlar orantılı küçültülür).
+  if (limits.capTotalCut)
+    for (let k = 0; k < 20; k++) {
+      const bottom = Math.min(...curve())
+      if (bottom >= -maxCutDb - 0.05) break
+      const f = maxCutDb / -bottom
+      bands.forEach((b) => {
+        if (b.g < 0) b.g *= f
+      })
+    }
 
   return bands
     .filter((b) => Math.abs(b.g) >= 0.25)
@@ -194,8 +245,10 @@ export function rollOff(hz: readonly number[], db: readonly number[]): { lo: num
 export function matchSpeakers(
   hz: readonly number[],
   inputs: MatchInput[],
-  opts: { target: MatchTarget; referenceId?: string; maxBands?: number },
+  opts: { target: MatchTarget; referenceId?: string; maxBands?: number; limits?: RoomEqLimits },
 ): MatchResult[] {
+  const limits = opts.limits ?? DEFAULT_ROOM_EQ_LIMITS
+  const maxBands = opts.maxBands ?? limits.maxBands
   const usable = inputs.filter((x) => x.responses.length > 0 && x.responses.every((r) => r.length === hz.length))
   if (usable.length === 0) return []
   const curves = new Map(usable.map((x) => [x.speakerId, alignLevel(hz, spatialAverage(x.responses))]))
@@ -222,8 +275,8 @@ export function matchSpeakers(
     const hiHz = Math.min(MATCH_HI_HZ, edge.hi)
     const use = hz.map((f) => f >= loHz && f <= hiHz)
     const isTarget = opts.target === 'reference' && x.speakerId === refIn.speakerId
-    const want = hz.map((_, i) => clamp(target[i] - measured[i], -MAX_CUT_DB, MAX_BOOST_DB))
-    const bands = isTarget ? [] : fitPeaks(hz, want, use, opts.maxBands)
+    const want = hz.map((_, i) => clamp(target[i] - measured[i], -limits.maxCutDb, limits.maxBoostDb))
+    const bands = isTarget ? [] : fitPeaks(hz, want, use, maxBands, limits)
     const eq = bandsDb(hz, bands)
     const corrected = measured.map((v, i) => v + eq[i])
     const dev = (c: number[]) => hz.map((_, i) => i).filter((i) => use[i]).map((i) => c[i] - target[i])

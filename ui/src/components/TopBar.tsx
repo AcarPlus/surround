@@ -116,7 +116,7 @@ function WaitingActions() {
 }
 
 /** Yeni sürüm indirildi: yeniden başlatınca kurulur (kapatılırsa bir sonraki açılışta kendiliğinden kurulur). */
-function UpdateStrip() {
+export function UpdateStrip() {
   const update = useUpdate()
   const showToast = useStore((s) => s.showToast)
   const [hidden, setHidden] = useState(false)

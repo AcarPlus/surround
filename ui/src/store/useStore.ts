@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { canUseAdvanced, normalizeUiMode, resolveUiMode, shouldAutoOpenWizard, type UiMode } from '../lib/mode'
 import { api } from '../api/client'
 import {
   LOGICAL_CHANNELS,
@@ -121,6 +122,13 @@ const COALESCE_MS = 900
 const CONTINUOUS_LABEL = /^(Taşı:|Hoparlör ayarı:|Ses ayarı:|Upmix ayarı:|Karışım:|Çıkış ayarı:|Dinleyiciyi taşı$|Oda boyutu$)/
 export const isContinuousLabel = (label: string): boolean => CONTINUOUS_LABEL.test(label)
 
+export interface ApplySetupOptions {
+  /** Yeni hoparlörlerin gecikme/kazancı geometriden otomatik hesaplansın mı (varsayılan true; ölçüm yoksa false → 0). */
+  autoForNew?: boolean
+  /** Varsayılan "Kurulum tamam" bildirimini gösterme (çağıran kendi bildirimini gösterir). */
+  silent?: boolean
+}
+
 interface State {
   ready: boolean
   devices: Device[]
@@ -151,6 +159,14 @@ interface State {
   lastCalibration: NonNullable<Config['lastCalibration']> | null
 
   wizardOpen: boolean
+  /** Basit / Gelişmiş arayüz (config'te `uiMode`; geri alma geçmişine girmez). Varsayılan Basit. */
+  uiMode: UiMode
+  /** Kolay kurulum (ölçümlü, rehberli) penceresi açık mı (bkz. screens/EasySetup.tsx). */
+  easySetupOpen: boolean
+  /** Kolay kurulum hangi adımdan açıldı: null = baştan; 'mic' = mevcut hoparlörleri yeniden ölç. */
+  easySetupStart: 'mic' | null
+  /** "Ölçmeden başla" penceresi açık mı (bkz. screens/QuickStart.tsx). */
+  quickStartOpen: boolean
   /** Test sesi çalan hoparlör (haritada vurgulanır). */
   playing: string | null
   past: HistoryEntry[]
@@ -197,11 +213,29 @@ interface State {
   /** X.Y.Z düzenini uygular; mevcut hoparlörlerin cihaz/EQ/bas ayarları rol, sonra konum sırasıyla korunur. */
   applyLayout: (spec: LayoutSpec) => void
   /** Kurulum sihirbazının sonucunu tek adımda uygular (geri alınabilir). */
-  applySetup: (r: BuildResult) => void
+  applySetup: (r: BuildResult, opts?: ApplySetupOptions) => void
   /** Kalibrasyon yamalarını uygular; değişen değerlerin "Otomatik" bayrağı kapanır. */
-  applyCalibration: (patches: Record<string, Partial<Speaker>>, micDeviceId: string, at: string) => void
+  applyCalibration: (
+    patches: Record<string, Partial<Speaker>>,
+    micDeviceId: string,
+    at: string,
+    opts?: { silent?: boolean },
+  ) => void
   openWizard: () => void
   closeWizard: () => void
+  /** Kip değiştirir; geçiş `canUseAdvanced()` (lisans) denetiminden geçer. Geçilen kipi döndürür (reddedilirse mevcut kip). */
+  setUiMode: (mode: UiMode) => UiMode
+  /**
+   * Kolay kurulumu açar ve o anki yapılandırmayı kontrol noktası olarak saklar (`cancelEasySetup` ona döner).
+   * `step: 'mic'` = hoparlörler zaten varsa doğrudan mikrofon adımından yeniden ölç.
+   */
+  openEasySetup: (opts?: { step?: 'mic' }) => void
+  /** Kolay kurulumu bitirip kapatır (yapılan değişiklikler kalır). */
+  closeEasySetup: () => void
+  /** Vazgeç: açılıştan beri yapılan yapılandırma değişiklikleri (kaynak, hoparlörler, ölçüm) geri alınır ve kapanır. */
+  cancelEasySetup: () => void
+  openQuickStart: () => void
+  closeQuickStart: () => void
   undo: () => void
   redo: () => void
   /** Sistem kontrolündeki "düzelt" düğmeleri. */
@@ -276,6 +310,23 @@ const initialTheme = (): Theme => {
     return localStorage.getItem('surround.theme') === 'light' ? 'light' : 'dark'
   } catch {
     return 'dark'
+  }
+}
+
+/** Açılışta yükleniyor ekranında doğru kabuğu (Basit/Gelişmiş) göstermek için son kipin tarayıcıdaki kopyası; asıl kaynak config'tir. */
+const UI_MODE_CACHE = 'surround.uiMode'
+const initialUiMode = (): UiMode => {
+  try {
+    return resolveUiMode(normalizeUiMode(localStorage.getItem(UI_MODE_CACHE)))
+  } catch {
+    return 'simple'
+  }
+}
+const cacheUiMode = (mode: UiMode) => {
+  try {
+    localStorage.setItem(UI_MODE_CACHE, mode)
+  } catch {
+    /* yoksay */
   }
 }
 
@@ -377,6 +428,8 @@ export const useStore = create<State>()((set, get) => {
   let listening = false
   let toastSeq = 0
   let toastTimer: ReturnType<typeof setTimeout> | undefined
+  /** Kolay kurulum açılırken yapılandırma ve geçmiş (Vazgeç bunlara döner). */
+  let easyCheckpoint: { snap: Snapshot; past: HistoryEntry[]; future: HistoryEntry[] } | null = null
 
   /**
    * Kaydedilecek belge: hoparlörlerin `auto` bayrakları da içinde taşınır. Hiçbir hoparlörün kullanmadığı
@@ -395,6 +448,7 @@ export const useStore = create<State>()((set, get) => {
     ...(s.userSpeakerPresets.length ? { userSpeakerPresets: s.userSpeakerPresets } : {}),
     ...(s.abBypass ? { abBypass: true } : {}),
     ...(s.activeProfileId ? { activeProfileId: s.activeProfileId } : {}),
+    uiMode: s.uiMode,
     ...(s.setupDone ? { setupDone: true } : {}),
     ...(s.lastCalibration ? { lastCalibration: s.lastCalibration } : {}),
   })
@@ -474,6 +528,10 @@ export const useStore = create<State>()((set, get) => {
     lastCalibration: null,
 
     wizardOpen: false,
+    uiMode: initialUiMode(),
+    easySetupOpen: false,
+    easySetupStart: null,
+    quickStartOpen: false,
     playing: null,
     past: [],
     future: [],
@@ -545,7 +603,10 @@ export const useStore = create<State>()((set, get) => {
       // A/B açıkken uygulama kapandıysa config'te işleme kapalı kalmıştır; işaretten geri açılır.
       const abLeftover = cfg.abBypass === true
       const loaded = normalizeProcessing(cfg.processing)
+      const uiMode = resolveUiMode(normalizeUiMode(cfg.uiMode))
+      cacheUiMode(uiMode)
       set({
+        uiMode,
         abBypass: false,
         userSoundPresets: normalizeUserSoundPresets(cfg.userSoundPresets),
         userSpeakerPresets: normalizeUserSpeakerPresets(cfg.userSpeakerPresets),
@@ -563,7 +624,7 @@ export const useStore = create<State>()((set, get) => {
         auto,
         setupDone: !!cfg.setupDone || speakers.length > 0,
         lastCalibration: cfg.lastCalibration ?? null,
-        wizardOpen: speakers.length === 0 && !cfg.setupDone,
+        wizardOpen: shouldAutoOpenWizard(uiMode, speakers.length, !!cfg.setupDone),
         past: [],
         future: [],
         ready: true,
@@ -764,7 +825,7 @@ export const useStore = create<State>()((set, get) => {
       get().showToast(clashes > 0 ? `${msg} ${CLASH_WARNING}` : msg, 6000, { action: undoAction })
     },
 
-    applySetup(r) {
+    applySetup(r, opts = {}) {
       const { auto } = get()
       const created = new Set(r.createdIds)
       commit(
@@ -774,7 +835,9 @@ export const useStore = create<State>()((set, get) => {
           auto: Object.fromEntries(
             r.speakers.map((s) => [
               s.id,
-              created.has(s.id) ? { delay: true, gain: true } : (auto[s.id] ?? { delay: true, gain: true }),
+              created.has(s.id)
+                ? { delay: opts.autoForNew !== false, gain: opts.autoForNew !== false }
+                : (auto[s.id] ?? { delay: true, gain: true }),
             ]),
           ),
           selection: null,
@@ -783,10 +846,10 @@ export const useStore = create<State>()((set, get) => {
         150,
         'Kurulum sihirbazı',
       )
-      get().showToast(`Kurulum tamam: ${r.speakers.length} hoparlör.`, 6000, { action: undoAction })
+      if (!opts.silent) get().showToast(`Kurulum tamam: ${r.speakers.length} hoparlör.`, 6000, { action: undoAction })
     },
 
-    applyCalibration(patches, micDeviceId, at) {
+    applyCalibration(patches, micDeviceId, at, opts = {}) {
       const { speakers, auto } = get()
       const nextAuto = { ...auto }
       for (const [id, p] of Object.entries(patches)) {
@@ -803,11 +866,41 @@ export const useStore = create<State>()((set, get) => {
         150,
         'Kalibrasyon',
       )
-      get().showToast(`Kalibrasyon uygulandı (${n} hoparlör).`, 6000, { action: undoAction })
+      if (!opts.silent) get().showToast(`Kalibrasyon uygulandı (${n} hoparlör).`, 6000, { action: undoAction })
     },
 
     openWizard: () => set({ wizardOpen: true }),
     closeWizard: () => set({ wizardOpen: false, selection: null }),
+    setUiMode(mode) {
+      const next = mode === 'advanced' && !canUseAdvanced() ? 'simple' : mode
+      if (next === get().uiMode) return next
+      // Basit kipte Ayarlar dışında ekran yok: Gelişmiş'ten dönerken ana sayfaya git.
+      set({ uiMode: next, selection: null, ...(next === 'simple' && get().screen !== 'settings' ? { screen: 'home' as Screen } : {}) })
+      cacheUiMode(next)
+      scheduleSave(150)
+      return next
+    },
+    openEasySetup(opts = {}) {
+      const cur = get()
+      easyCheckpoint = { snap: snapshot(cur), past: cur.past, future: cur.future }
+      set({ easySetupOpen: true, easySetupStart: opts.step === 'mic' && cur.speakers.length > 0 ? 'mic' : null })
+    },
+    closeEasySetup() {
+      easyCheckpoint = null
+      set({ easySetupOpen: false, easySetupStart: null })
+    },
+    cancelEasySetup() {
+      const cp = easyCheckpoint
+      easyCheckpoint = null
+      set({ easySetupOpen: false, easySetupStart: null })
+      if (!cp) return
+      const now = snapshot(get())
+      if (HISTORY_KEYS.every((k) => now[k] === cp.snap[k])) return
+      restore(cp.snap)
+      set({ past: cp.past, future: cp.future })
+    },
+    openQuickStart: () => set({ quickStartOpen: true }),
+    closeQuickStart: () => set({ quickStartOpen: false }),
 
     undo() {
       const { past, future } = get()
@@ -831,10 +924,13 @@ export const useStore = create<State>()((set, get) => {
       const st = get()
       switch (id) {
         case 'open-setup':
-          st.openWizard()
+          // Basit kipte sihirbaz yerine Kolay kurulum.
+          if (st.uiMode === 'simple') st.openEasySetup()
+          else st.openWizard()
           break
         case 'open-calibration':
-          st.setScreen('calibration')
+          if (st.uiMode === 'simple') st.openEasySetup({ step: 'mic' })
+          else st.setScreen('calibration')
           break
         case 'open-sound-panel':
           api.openSoundPanel().catch((e) => st.showError(e, 6000))

@@ -427,6 +427,8 @@ export interface Config {
   abBypass?: boolean
   /** Yalnızca arayüz: kurulum sihirbazı tamamlandı mı (ilk açılış ekranı için). */
   setupDone?: boolean
+  /** Yalnızca arayüz: Basit / Gelişmiş arayüz kipi; yoksa 'simple'. */
+  uiMode?: 'simple' | 'advanced'
   /** Yalnızca arayüz: son kalibrasyon özeti. */
   lastCalibration?: { at: string; micDeviceId: string; speakers: number }
 }

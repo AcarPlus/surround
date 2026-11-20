@@ -33,6 +33,8 @@ const DESKTOP = query('masaustu')
 /** Önizleme: ?bekle -> başlattıktan 5 sn sonra bir çıkış cihazı "çıkarılır", 5 sn sonra geri gelir (cihaz bekleniyor). */
 const DROP_DEVICE = query('bekle')
 const DROP_AFTER_MS = 5000
+/** Önizleme: ?gelismis -> Gelişmiş kip (varsayılan Basit); gerçek uygulamada config'teki `uiMode` belirler. */
+const ADVANCED = query('gelismis')
 
 function buildDevices(): Device[] {
   if (DESKTOP) {
@@ -55,8 +57,11 @@ function buildDevices(): Device[] {
     { id: 'vb-cable', name: 'CABLE Output (VB-Audio Virtual Cable)', kind: 'multichannel', flow: 'capture', channels: 8, sampleRate: 48000, isDefault: false },
     { id: 'vb-cable-in-16', name: 'CABLE In 16ch (VB-Audio Virtual Cable)', kind: 'local', flow: 'render', channels: 2, sampleRate: 48000, isDefault: false },
     { id: 'vb-cable-in', name: 'CABLE Input (VB-Audio Virtual Cable)', kind: 'multichannel', flow: 'render', channels: 8, sampleRate: 48000, isDefault: false },
+    { id: 'realtek-mic', name: 'Mikrofon (Realtek)', kind: 'local', flow: 'capture', channels: 2, sampleRate: 48000, isDefault: true },
   ]
   if (typeof location !== 'undefined') {
+    // Önizleme: ?tekcikis -> VB-Cable yok ve tek hoparlör çıkışı var (kaynak olduğu için listeye giremez).
+    if (location.search.includes('tekcikis')) return devices.filter((d) => d.id === 'realtek-spk' || d.flow === 'capture').filter((d) => !d.name.includes('CABLE'))
     // Önizleme: ?nocable -> VB-Cable yokmuş gibi (kurulum adımlarını görmek için).
     if (location.search.includes('nocable')) return devices.filter((d) => !d.name.includes('CABLE'))
     // ?cable2ch -> CABLE Input Windows'ta 7.1 yapılmamış (2 kanal).
@@ -143,7 +148,7 @@ function mockResponse(id: string, deviceId: string): number[] {
 
 export function createMockApi(): SurroundApi {
   const devices = buildDevices()
-  let config = initialConfig()
+  let config: Config = { ...initialConfig(), ...(ADVANCED ? { uiMode: 'advanced' as const } : {}) }
   let running = false
   let appSettings: AppSettings = defaultAppSettings()
 
@@ -368,8 +373,18 @@ export function createMockApi(): SurroundApi {
     },
     async cableSetup(): Promise<CableSetupResult> {
       await new Promise((r) => setTimeout(r, 1500))
+      // ?kablohata: Windows onayı reddedilmiş gibi; ?yenidenbaslat: kuruldu ama yeniden başlatma gerekiyor.
+      if (query('kablohata')) throw new Error('Kurulum tamamlanamadı: yönetici onayı verilmedi.')
       const cable = devices.find((d) => d.flow === 'render' && /cable/i.test(d.name))
-      if (!cable) return { state: 'reboot', installed: true }
+      if (!cable) {
+        if (query('yenidenbaslat')) return { state: 'reboot', installed: true }
+        // Kurulum başarılı: sanal kablo uç noktaları belirir.
+        devices.push(
+          { id: 'vb-cable-in', name: 'CABLE Input (VB-Audio Virtual Cable)', kind: 'multichannel', flow: 'render', channels: 8, sampleRate: 48000, isDefault: true },
+          { id: 'vb-cable', name: 'CABLE Output (VB-Audio Virtual Cable)', kind: 'multichannel', flow: 'capture', channels: 8, sampleRate: 48000, isDefault: false },
+        )
+        return { state: 'done', deviceId: 'vb-cable-in', channels: 8, installed: true }
+      }
       cable.channels = 8
       return { state: 'done', deviceId: cable.id, channels: 8, installed: false }
     },
@@ -436,7 +451,8 @@ export function createMockApi(): SurroundApi {
             ...(req.applyCorrections ? { verified: true } : {}),
             ...(req.micDeviceId === 'phone' ? { note: 'Telefon 48000 Hz, saat farkı 42 ppm.' } : {}),
             speakers: speakers.map((s, i) => {
-              const weak = query('zayif') && i === total - 1
+              // ?zayif: son hoparlör zayıf duyulur; "Yüksek" ölçüm sesiyle (−12 dBFS) tekrar ölçünce düzelir.
+              const weak = query('zayif') && i === total - 1 && (req.levelDb ?? -20) < -15
               return {
                 ...(wantResp && !req.lowBandSpeakerIds?.includes(s!.id) ? { responseDb: mockResponse(s!.id, s!.outputDeviceId) } : {}),
                 ...(req.applyCorrections && s!.id !== ref.id

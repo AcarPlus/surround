@@ -116,6 +116,10 @@ Arayüz (`ui/src/lib/roomEq.ts`) bunlardan `speaker.roomEq` önerir:
 - Açgözlü tepe yerleştirme: en büyük kalan hatanın yerine bir tepe bandı, genişliği yarı yükseklikten; frekans/kazanç/Q
   küçük ızgarada iyileştirilir; en çok 8 bant, 1 dB altı hata için bant eklenmez; sonra kazançlar birlikte ayarlanır.
   Yükseltme toplamda en çok +6 dB (çukur doldurmak hoparlörü zorlar), kısma en çok −12 dB.
+- Sınırlar `matchSpeakers(…, { limits })` ile değişir (`RoomEqLimits`; varsayılan `DEFAULT_ROOM_EQ_LIMITS` yukarıdaki değerler).
+  Basit kipteki Kolay kurulum **yumuşak** sınırları kullanır (`GENTLE_ROOM_EQ_LIMITS`): yükseltme yok (yalnızca hedeften
+  yüksek kalan yerler aranır), bant başına ve üst üste binen bantların toplamında en çok −6 dB, en çok 4 bant, 1,5 dB altı
+  fark için bant yok; hedef hoparlörlerin ortalaması, tek konum; SNR < 15 dB ölçülen hoparlör eşlenmez.
 
 ## Doğrulama
 `applyCorrections: true` ile hoparlörler `delayMs` (motorun etkin gecikmesi), `gainDb` ve `roomEq` açıkken çalınır.

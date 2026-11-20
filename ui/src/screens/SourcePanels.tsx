@@ -108,7 +108,6 @@ export function CableSetup() {
   const devices = useStore((s) => s.devices)
   const source = useStore((s) => s.source)
   const setSource = useStore((s) => s.setSource)
-  const refreshDevices = useStore((s) => s.refreshDevices)
   const current = devices.find((d) => d.id === source.deviceId)
   const cable = findCable(devices)
   const cableSelected = !!cable && source.mode === 'loopback' && source.deviceId === cable.id
@@ -119,12 +118,114 @@ export function CableSetup() {
       cableSelected={cableSelected}
       twoChannel={twoChannel}
       onSelect={() => cable && setSource({ mode: 'loopback', deviceId: cable.id })}
-      onAuto={async (deviceId) => {
-        await refreshDevices()
-        setSource({ mode: 'loopback', deviceId })
-      }}
     />
   )
+}
+
+/**
+ * Basit kip için tek tıkla VB-Cable kartı (Kolay kurulum, Ölçmeden başla): neden gerektiğini tek cümleyle söyler,
+ * kurar ya da 7.1 yapar; Windows yönetici onayı, yeniden başlatma ve hata durumlarını sade dille anlatır.
+ */
+export function CableInstallCard({
+  reason,
+  onSkip,
+  skipLabel = 'Atla, stereo ile devam et',
+  onDone,
+}: {
+  reason?: ReactNode
+  onSkip?: () => void
+  skipLabel?: string
+  onDone?: () => void
+}) {
+  const devices = useStore((s) => s.devices)
+  const cable = findCable(devices)
+  const auto = useCableAutoSetup()
+  return (
+    <div className="rounded-lg border border-accent/40 bg-accent/10 p-4 text-[13px]">
+      <p className="leading-5">
+        {reason ??
+          'Oyun ve filmlerin gerçek 7.1 sesini Windows’tan alabilmek için VB-Cable adlı ücretsiz bir sanal ses kartı gerekir; Surround sesi oradan alıp hoparlörlerine dağıtır.'}
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button
+          variant="primary"
+          disabled={auto.busy}
+          onClick={async () => {
+            if ((await auto.run()) === 'done') onDone?.()
+          }}
+        >
+          {auto.busy ? (cable ? 'Ayarlanıyor…' : 'Kuruluyor… (1 dk sürebilir)') : cable ? 'VB-Cable’ı ayarla' : 'VB-Cable’ı kur'}
+        </Button>
+        {onSkip && (
+          <Button variant="ghost" disabled={auto.busy} onClick={onSkip}>
+            {skipLabel}
+          </Button>
+        )}
+      </div>
+      {auto.busy && !cable && (
+        <p className="mt-2 text-xs text-muted">
+          Windows “Bu uygulamanın cihazınızda değişiklik yapmasına izin vermek istiyor musunuz?” diye sorarsa <b className="text-fg">Evet</b>’e bas.
+        </p>
+      )}
+      {auto.reboot && <p className="mt-2 text-xs text-fg">{auto.msg}</p>}
+      {auto.err && (
+        <div className="mt-2 text-xs">
+          <p className="text-warn">Olmadı: {auto.msg}</p>
+          <p className="mt-0.5 text-muted">
+            Windows’un onay penceresinde “Hayır” dendiyse ya da internet yoksa kurulum yapılamaz. Tekrar deneyebilir ya da şimdilik
+            stereo ile devam edebilirsin.
+          </p>
+        </div>
+      )}
+      {!cable && (
+        <p className="mt-2 text-[11px] text-faint">
+          VB-Cable, VB-Audio’nun bağışla desteklenen ücretsiz sürücüsüdür; kurarak lisansını kabul etmiş olursun.
+        </p>
+      )}
+    </div>
+  )
+}
+
+export type CableSetupOutcome = 'done' | 'reboot' | 'error'
+
+/**
+ * Tek tıkla VB-Cable (`api.cableSetup`): kurar ya da 7.1 yapar, cihaz listesini yeniler ve kaynak olarak seçer.
+ * Bağlantı ekranındaki rehber ve Kolay kurulum ortak kullanır.
+ */
+export function useCableAutoSetup() {
+  const refreshDevices = useStore((s) => s.refreshDevices)
+  const setSource = useStore((s) => s.setSource)
+  const showToast = useStore((s) => s.showToast)
+  const [state, setState] = useState<{ busy: boolean; msg: string | null; err: boolean; reboot: boolean }>({
+    busy: false,
+    msg: null,
+    err: false,
+    reboot: false,
+  })
+  const run = async (): Promise<CableSetupOutcome> => {
+    setState({ busy: true, msg: null, err: false, reboot: false })
+    try {
+      const r = await api.cableSetup()
+      if (r.state === 'reboot') {
+        setState({
+          busy: false,
+          err: false,
+          reboot: true,
+          msg: 'VB-Cable kuruldu. Windows’un tamamlaması için bilgisayarı yeniden başlat; Surround açılınca bu düğmeye bir kez daha bas.',
+        })
+        return 'reboot'
+      }
+      await refreshDevices()
+      setSource({ mode: 'loopback', deviceId: r.deviceId })
+      setState({ busy: false, err: false, reboot: false, msg: null })
+      showToast(r.installed ? 'VB-Cable kuruldu, 7.1 yapıldı ve kaynak seçildi.' : 'VB-Cable 7.1 yapıldı ve kaynak seçildi.', 5000)
+      return 'done'
+    } catch (e) {
+      setState({ busy: false, err: true, reboot: false, msg: e instanceof Error ? e.message : String(e) })
+      return 'error'
+    }
+  }
+  return { ...state, run }
 }
 
 /** Motorun bildirdiği anlık upmix durumu (yalnızca çalışırken). */
@@ -265,35 +366,15 @@ function CableGuide({
   cableSelected,
   twoChannel,
   onSelect,
-  onAuto,
 }: {
   cable: Device | undefined
   cableSelected: boolean
   twoChannel: boolean
   onSelect: () => void
-  onAuto: (deviceId: string) => Promise<void>
 }) {
   const showToast = useStore((s) => s.showToast)
-  const [auto, setAuto] = useState<{ busy: boolean; msg: string | null; err: boolean }>({ busy: false, msg: null, err: false })
-  const runAuto = async () => {
-    setAuto({ busy: true, msg: null, err: false })
-    try {
-      const r = await api.cableSetup()
-      if (r.state === 'reboot') {
-        setAuto({
-          busy: false,
-          err: false,
-          msg: 'VB-Cable kuruldu. Windows’un tamamlaması için bilgisayarı yeniden başlat; Surround açılınca bu düğmeye bir kez daha bas.',
-        })
-        return
-      }
-      await onAuto(r.deviceId)
-      setAuto({ busy: false, err: false, msg: null })
-      showToast(r.installed ? 'VB-Cable kuruldu, 7.1 yapıldı ve kaynak seçildi.' : 'VB-Cable 7.1 yapıldı ve kaynak seçildi.', 5000)
-    } catch (e) {
-      setAuto({ busy: false, err: true, msg: e instanceof Error ? e.message : String(e) })
-    }
-  }
+  const auto = useCableAutoSetup()
+  const runAuto = () => void auto.run()
   const [autoDefault, setAutoDefault] = useState(false)
   useEffect(() => {
     api

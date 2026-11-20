@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useStore, LISTENER_ID } from './store/useStore'
-import { TopBar } from './components/TopBar'
+import { TopBar, UpdateStrip } from './components/TopBar'
 import { NavRail } from './components/NavRail'
 import { Inspector } from './components/Inspector'
 import { HomeScreen } from './screens/HomeScreen'
@@ -11,6 +11,9 @@ import { CalibrationScreen } from './screens/CalibrationScreen'
 import { SoundScreen } from './screens/SoundScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { SetupWizard } from './screens/SetupWizard'
+import { SimpleHeader, SimpleHome } from './screens/SimpleHome'
+import { EasySetup } from './screens/EasySetup'
+import { QuickStart } from './screens/QuickStart'
 import { IconX } from './components/icons'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { InitErrorScreen } from './components/InitErrorScreen'
@@ -34,6 +37,10 @@ export function App() {
   const dismissToast = useStore((s) => s.dismissToast)
   const wizardOpen = useStore((s) => s.wizardOpen)
   const initError = useStore((s) => s.initError)
+  const uiMode = useStore((s) => s.uiMode)
+  const easySetupOpen = useStore((s) => s.easySetupOpen)
+  const quickStartOpen = useStore((s) => s.quickStartOpen)
+  const simple = uiMode === 'simple'
 
   useEffect(() => {
     document.documentElement.dataset.theme = useStore.getState().theme
@@ -63,7 +70,7 @@ export function App() {
           screen: st.screen,
           selection: st.selection,
           listenerSelected: st.selection === LISTENER_ID,
-          modalOpen: st.wizardOpen || modalOpen(),
+          modalOpen: st.wizardOpen || st.easySetupOpen || st.quickStartOpen || modalOpen(),
         },
       )
       if (!action) return
@@ -93,44 +100,76 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  const loading = !ready ? (
+    initError ? (
+      <InitErrorScreen />
+    ) : (
+      <div className="flex h-full items-center justify-center text-muted">Yükleniyor…</div>
+    )
+  ) : null
+
   return (
-    <div className="flex h-full min-w-[1000px] flex-col">
-      <ErrorBoundary compact>
-        <TopBar />
-      </ErrorBoundary>
-      <div className="flex min-h-0 flex-1">
-        <NavRail />
-        <main className="min-w-0 flex-1 bg-bg">
-          {!ready ? (
-            initError ? (
-              <InitErrorScreen />
-            ) : (
-              <div className="flex h-full items-center justify-center text-muted">Yükleniyor…</div>
-            )
-          ) : (
-            // Yalnızca CSS ile giriş geçişi: çıkış animasyonu yok, böylece pencere arka plandayken
-            // (requestAnimationFrame durur) ekran değişimi takılmaz.
-            <ErrorBoundary resetKey={screen}>
-              <div key={screen} className="screen-in h-full">
-                {screen === 'home' && <HomeScreen />}
-                {screen === 'room' && <RoomScreen />}
-                {screen === 'sound' && <SoundScreen />}
-                {screen === 'calibration' && <CalibrationScreen />}
-                {screen === 'connection' && <ConnectionScreen />}
-                {screen === 'settings' && <SettingsScreen />}
-              </div>
-            </ErrorBoundary>
-          )}
-        </main>
-        {screen === 'room' && (
+    <div className={cx('flex h-full flex-col', simple ? 'min-w-[360px]' : 'min-w-[1000px]')}>
+      {simple ? (
+        <>
           <ErrorBoundary compact>
-            <Inspector />
+            <SimpleHeader />
+            <UpdateStrip />
           </ErrorBoundary>
-        )}
-      </div>
+          <main className="min-h-0 flex-1 bg-bg">
+            {loading ?? (
+              <ErrorBoundary resetKey={screen}>
+                <div key={screen} className="screen-in h-full">
+                  {screen === 'settings' ? <SettingsScreen /> : <SimpleHome />}
+                </div>
+              </ErrorBoundary>
+            )}
+          </main>
+        </>
+      ) : (
+        <>
+          <ErrorBoundary compact>
+            <TopBar />
+          </ErrorBoundary>
+          <div className="flex min-h-0 flex-1">
+            <NavRail />
+            <main className="min-w-0 flex-1 bg-bg">
+              {loading ?? (
+                // Yalnızca CSS ile giriş geçişi: çıkış animasyonu yok, böylece pencere arka plandayken
+                // (requestAnimationFrame durur) ekran değişimi takılmaz.
+                <ErrorBoundary resetKey={screen}>
+                  <div key={screen} className="screen-in h-full">
+                    {screen === 'home' && <HomeScreen />}
+                    {screen === 'room' && <RoomScreen />}
+                    {screen === 'sound' && <SoundScreen />}
+                    {screen === 'calibration' && <CalibrationScreen />}
+                    {screen === 'connection' && <ConnectionScreen />}
+                    {screen === 'settings' && <SettingsScreen />}
+                  </div>
+                </ErrorBoundary>
+              )}
+            </main>
+            {screen === 'room' && (
+              <ErrorBoundary compact>
+                <Inspector />
+              </ErrorBoundary>
+            )}
+          </div>
+        </>
+      )}
       {ready && wizardOpen && (
         <ErrorBoundary compact>
           <SetupWizard />
+        </ErrorBoundary>
+      )}
+      {ready && quickStartOpen && (
+        <ErrorBoundary compact>
+          <QuickStart />
+        </ErrorBoundary>
+      )}
+      {ready && easySetupOpen && (
+        <ErrorBoundary compact>
+          <EasySetup />
         </ErrorBoundary>
       )}
       <AnimatePresence>

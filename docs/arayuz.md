@@ -23,6 +23,52 @@ döner, yalnızca tarafı değiştiyse standart konuma taşınır; ön ayarı de
 cihazlardaki hoparlörler (çıkarılmış cihaz vb.) olduğu gibi kalır; yeni hoparlörler rolün standart açısına, dinleyicinin
 duvara uzaklığıyla sınırlı yarıçapa yerleştirilir. Hiç hoparlör yoksa ilk açılışta kendiliğinden açılır.
 
+## Basit / Gelişmiş mod
+Uygulama iki kipte çalışır; ayar `uiMode: 'simple' | 'advanced'` olarak config'te saklanır (arayüze özgü alan, motor yok sayar ve korur;
+eksikse **Basit**, yeni kurulumun varsayılanı da Basit). Geçiş Ayarlar'daki "Gelişmiş mod" anahtarından ya da Basit ekrandaki
+"Gelişmiş mod" bağlantısından yapılır; tüm geçişler `ui/src/lib/mode.ts` → `canUseAdvanced()` üzerinden geçer (ileride lisansa
+bağlanacaksa kontrol yalnızca orada). Kip geri alma geçmişine girmez.
+
+- **Gelişmiş**: yukarıda anlatılan arayüz (gezinme, tüm ekranlar, Denetçi, kurulum sihirbazı ilk açılışta kendiliğinden açılır).
+- **Basit** (`screens/SimpleHome.tsx`): üstte uygulama adı + Ayarlar dişlisi; Başlat/Durdur, ana ses, **Film / Oyun / Müzik**
+  (ses ön ayarları `film`, `game`, `music`), tek satır durum (hoparlör sayısı, ölçüldü mü, çalışıyor mu, sorun varsa düzelt düğmesi) ve iki kurulum girişi.
+  Hoparlör yoksa yalnızca bu iki giriş gösterilir. İlk açılışta kurulum sihirbazı kendiliğinden **açılmaz**.
+  - **Kolay kurulum** (`easySetupOpen`, `openEasySetup()`, `closeEasySetup()`, `cancelEasySetup()`; `screens/EasySetup.tsx` +
+    `EasySetupSteps.tsx`, saf mantık `lib/easySetup.ts`): rehberli, ölçümlü kurulum; aşağıya bakın.
+  - **Ölçmeden başla** (`quickStartOpen`, `openQuickStart()`, `closeQuickStart()`; `screens/QuickStart.tsx`, mantık `lib/quickStart.ts`):
+    kaynak, sanal kablo ve kulaklık dışındaki her çıkış stereo çift olur (çok kanallı cihaz varsayılan rolleriyle; cihaz başına işaret
+    kutusu); her hoparlörün test sesi çalınır ve **oda kadranına** (`components/TapDial.tsx`) dokunularak yeri söylenir. Açı en yakın
+    zemin rolüne çevrilir (`lib/tapPlace.ts`: `nearestRole`, `angleToPosition`; subwoofer ve üst hoparlörler rolünü korur), konum
+    standart yerleşim yarıçapına konur. "Atla" standart yeri korur. Uygulanırken gecikme 0, kazanç 0 (otomatik hesap kapalı), oda EQ'su yok;
+    `applySetup(r, { autoForNew: false, silent: true })` kullanılır, `setupDone` işaretlenir ve motor başlatılır.
+    Kaynak (VB-Cable yokken varsayılan hoparlör) listeden düştüğü için liste boş kalırsa (`blockedBySource`) nedeni ve tek tıkla
+    VB-Cable kurulumu gösterilir.
+
+### Kolay kurulum
+Adımlar: **Ses kaynağı → Hoparlörler → Mikrofon → Konum → Ölçüm → Oda düzeltmesi → Bitti** (ilerleme göstergesi, Geri/İleri).
+Açılırken yapılandırma ve geri alma geçmişi kontrol noktası olarak saklanır; **Vazgeç** (X / Esc, Bitti dışındaki her adımda)
+kaynak, hoparlör ve ölçüm değişikliklerini geri alır (`cancelEasySetup`), Bitti (`closeEasySetup`) korur.
+1. *Ses kaynağı*: `sourceState` → VB-Cable yok / kurulu ama 7.1 ya da kaynak değil / hazır. Tek tıkla kur ya da ayarla
+   (`CableInstallCard` → `useCableAutoSetup` → `api.cableSetup`; Bağlantı ekranındaki rehberle ortak). Yönetici onayı, yeniden
+   başlatma ve hata sade dille anlatılır; "stereo ile devam et" ile atlanabilir. Elle adımlar için `CableSetup`.
+2. *Hoparlörler*: Ölçmeden başla ile aynı varsayımlar (`quickStartDevices`/`quickStartKits`, `DeviceChecklist`).
+3. *Mikrofon*: "Telefonum" (QR, `PhonePanel`/`usePhoneLink`; sertifika uyarısı için çizimli "Gelişmiş → Devam et",
+   bağlanmazsa `FirewallFix`) ya da bilgisayar/kulaklık mikrofonu. Son seçim tarayıcıda (`surround.easyMic`) hatırlanır.
+4. *Konum*: her hoparlör çalınır, kadrana dokunulur (`components/TapPlace.tsx`: `useTapPlace` + `TapPlaceView`, Ölçmeden başla ile ortak).
+5. *Ölçüm*: plan önce uygulanır (`buildQuickStart` → `applySetup(…, { autoForNew: false, silent: true })`), sonra Gelişmiş ekranla
+   aynı ölçüm (`useCalibrationRun` + `calibrationRequest`, gecikme + seviye + frekans yanıtı, 1 konum, "Orta" seviye).
+   `checkMeasurement`: ölçülemeyen ya da SNR < 15 dB hoparlör **uygulanmaz** ve kullanıcıya söylenir (tekrar ölç — bir kademe
+   yüksek sesle; ya da onlar olmadan devam). Mikrofon kırpıldıysa bir kademe kısık; mikrofon ortada değil şüphesi de gösterilir.
+   Sorun yoksa doğrudan sonraki adıma geçilir. Telefondaki "Ölçümü başlat" da çalışır.
+6. *Oda düzeltmesi*: `gentleRoomEq` = `matchSpeakers(…, { target: 'average', limits: GENTLE_ROOM_EQ_LIMITS })` — yalnızca kısma,
+   toplamda en çok −6 dB, en çok 4 bant (docs/kalibrasyon.md). Kapatılabilir (kapalıysa eski oda EQ'su kaldırılır).
+   Uygulama: `easyPatches` → `applyCalibration(…, { silent: true })`.
+7. *Bitti*: sade özet (`easySummary`), motor başlatılır, bildirim.
+
+Hoparlörler varsa Basit ana sayfadaki **Yeniden ölç / Hoparlörleri ölç** (`openEasySetup({ step: 'mic' })`) yalnızca
+Mikrofon → Ölçüm → Oda düzeltmesi → Bitti adımlarını açar; Basit kipte sistem kontrolünün "kalibrasyon" ve "kurulum" düzeltmeleri de
+Kolay kurulumu açar.
+
 ## Geri al / yinele
 Yapılandırmayı değiştiren her eylem (`commit`) önceki durumu geçmişe yazar (en fazla 100 adım). Aynı türden art arda gelen
 değişiklikler (sürükleme, kaydırıcı) 0,9 sn içinde tek adım sayılır. Ctrl+Z / Ctrl+Y (veya Ctrl+Shift+Z), üst çubuktaki
@@ -44,13 +90,15 @@ düğmeleri `fixHealth` eylemine bağlanır. Gezinmedeki Ana sayfa simgesi hata/
 Bluetooth'u ağ cihazı gibi devre dışı bırakır. Hands-Free (HFP) uç noktası düşük kalite/mono olduğu için uyarı üretir.
 
 ## Arayüze özgü config alanları (motor yok sayar)
-`speakers[].calibratedAt` (ISO; değerler ölçümden geldi), `setupDone`, `lastCalibration: { at, micDeviceId, speakers }`.
+`speakers[].calibratedAt` (ISO; değerler ölçümden geldi), `setupDone`, `uiMode`, `lastCalibration: { at, micDeviceId, speakers }`.
 Hiçbir hoparlörün kullanmadığı `outputs` kaydedilmez.
 
 ## Önizleme (tarayıcı, sahte veri)
 `npm --prefix ui run dev` → `http://localhost:5173`. Sorgu parametreleri: `?masaustu` (iki Realtek çıkışı + VB-Cable +
-kulaklık mikrofonu, boş kurulum → sihirbaz açılır), `?bos` (boş kurulum), `?zayif` (kalibrasyonda son hoparlör zayıf sinyal),
-`?nocable`, `?cable2ch`, `?bekle` (Başlat'tan 5 sn sonra bir çıkış "çıkarılır", 5 sn sonra döner: üst çubukta "Cihaz bekleniyor").
+kulaklık mikrofonu, boş kurulum → sihirbaz açılır), `?bos` (boş kurulum), `?zayif` (kalibrasyonda son hoparlör zayıf sinyal; "Yüksek" ölçüm sesiyle düzelir),
+`?nocable` (VB-Cable yok; tek tıkla kurulum başarılı olur ve kablo belirir), `?yenidenbaslat` / `?kablohata` (kurulum yeniden başlatma
+ister / yönetici onayı reddedilir), `?tekcikis` (VB-Cable yok, tek hoparlör çıkışı: liste boş kalır), `?duvar` (telefon güvenlik
+duvarına takılır), `?cable2ch`, `?gelismis` (Gelişmiş kip; varsayılan Basit), `?bekle` (Başlat'tan 5 sn sonra bir çıkış "çıkarılır", 5 sn sonra döner: üst çubukta "Cihaz bekleniyor").
 Cihaz beklerken (`runState: 'waiting'`) üst çubuktaki durum etiketi uyarı renginde eksik cihazları yazar, Başlat düğmesi
 "Durdur" olur (beklemeyi bitirir).
 

@@ -1,20 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
-import { PHONE_MIC, type CalibrationProgress, type CalibrationResult, type Speaker } from '../api/types'
+import { PHONE_MIC, type CalibrationResult, type Speaker } from '../api/types'
 import { PhonePanel, usePhoneLink } from '../components/PhonePanel'
 import { MatchCurve } from '../components/MatchCurve'
 import { bandsDb, matchSpeakers, type MatchResult, type MatchTarget } from '../lib/roomEq'
-import { micPrivacyHint } from '../lib/errors'
-import { describeError, useStore } from '../store/useStore'
+import { useStore } from '../store/useStore'
 import {
   calibrationPatches,
   calibrationPercent,
+  calibrationRequest,
   computeCalibration,
+  defaultRepeats,
   isSubwoofer,
+  matchInputs,
+  micDevices,
   msToMeters,
   offCentreSuspect,
+  onSourceDevice,
+  pickReference,
+  withRoomEq,
   type LevelTarget,
 } from '../lib/calibration'
+import { useCalibrationRun } from '../lib/useCalibrationRun'
 import { fmt, fmtSigned } from '../lib/format'
 import { RoomCanvas } from '../components/RoomCanvas'
 import { Badge, Button, Card, Field, NumberField, ScreenHeader, SectionTitle, Segmented, Select, Switch, cx } from '../components/ui'
@@ -30,9 +37,6 @@ const POSITIONS = [
   'Dinleme noktasının ~20 cm önüne',
   'Dinleme noktasının ~20 cm arkasına (ya da biraz yukarı)',
 ]
-
-/** Backend'in kullanıcı iptalinde döndürdüğü metin (hata sayılmaz). */
-const CANCELLED = 'Kalibrasyon iptal edildi.'
 
 const LEVELS = [
   { value: '-30', label: 'Kısık' },
@@ -51,7 +55,7 @@ export function CalibrationScreen() {
   const showToast = useStore((s) => s.showToast)
   const openWizard = useStore((s) => s.openWizard)
 
-  const mics = devices.filter((d) => d.flow === 'capture' && !/cable/i.test(d.name))
+  const mics = micDevices(devices)
   const [micId, setMicId] = useState(() => (mics.find((d) => d.isDefault) ?? mics[0])?.id ?? PHONE_MIC)
   const [loopback, setLoopback] = useState(false)
   const [loopbackId, setLoopbackId] = useState('')
@@ -59,7 +63,7 @@ export function CalibrationScreen() {
   // null = automatic: 3 with the phone (a repeat with a gap in the phone's recording is dropped), else 2.
   const [repeatsPick, setRepeats] = useState<string | null>(null)
   // Loopback kaynağında, kaynak cihazdaki hoparlörler ölçülemez (backend tüm ölçümü reddeder).
-  const onSource = (sp: { outputDeviceId: string }) => source.mode === 'loopback' && sp.outputDeviceId === source.deviceId
+  const onSource = (sp: { outputDeviceId: string }) => onSourceDevice(sp, source)
   const [chosen, setChosen] = useState<Set<string>>(
     () => new Set(speakers.filter((s) => !s.mute && !onSource(s)).map((s) => s.id)),
   )
@@ -67,7 +71,6 @@ export function CalibrationScreen() {
   const [advanced, setAdvanced] = useState(false)
 
   const [phase, setPhase] = useState<Phase>('setup')
-  const [progress, setProgress] = useState<CalibrationProgress | null>(null)
   const [result, setResult] = useState<CalibrationResult | null>(null)
   const [target, setTarget] = useState<LevelTarget>('quietest')
   const [excluded, setExcluded] = useState<Set<string>>(new Set())
@@ -82,34 +85,16 @@ export function CalibrationScreen() {
 
   const phoneMode = micId === PHONE_MIC && !loopback
   const phone = usePhoneLink(phoneMode)
-  const repeats = repeatsPick ?? (phoneMode ? '3' : '2')
+  const repeats = repeatsPick ?? String(defaultRepeats(phoneMode))
+  const cal = useCalibrationRun()
+  const progress = cal.progress
 
   useEffect(() => {
     if (!micId && mics[0]) setMicId(mics[0].id)
   }, [micId, mics])
 
-  useEffect(
-    () =>
-      api.onCalibration((p) => {
-        setProgress(p)
-        useStore.setState({ playing: p.phase === 'measuring' ? (p.speakerId ?? null) : null })
-      }),
-    [],
-  )
-  // Ölçüm sürerken ekrandan çıkılırsa iptal et: aksi halde sonuç kaybolur ve sonraki başlatma "zaten sürüyor" der.
-  const runningRef = useRef(false)
-  const mounted = useRef(true)
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-      useStore.setState({ playing: null })
-      if (runningRef.current) void api.cancelCalibration().catch(() => {})
-    }
-  }, [])
-
   const list = speakers.filter((s) => chosen.has(s.id) && !onSource(s))
-  const ref = list.some((s) => s.id === refId) ? refId : (list.find((s) => !isSubwoofer(s))?.id ?? list[0]?.id)
+  const ref = pickReference(list, refId)
   const renders = devices.filter((d) => d.flow === 'render')
   const effectiveMic = loopback ? loopbackId || renders[0]?.id : micId
   const canStart = list.length >= 1 && !!effectiveMic && (!phoneMode || !!phone.status?.connected)
@@ -129,52 +114,46 @@ export function CalibrationScreen() {
       setEqExcluded(new Set())
     }
     setAskConfirm(false)
-    setProgress({ phase: 'preparing', index: 0, total: list.length, message: 'Hazırlanıyor…' })
-    runningRef.current = true
-    try {
-      // Backend yapılandırmayı diskten okur: bekleyen kaydı önce yaz.
-      await useStore.getState().flushSave()
-      if (phoneMode) void api.phoneLinkPrompt(matchEq && mode !== 'verify' ? konum(prev.length, wantPositions) : null).catch(() => {})
-      const r = await api.calibrate({
+    const out = await cal.run(
+      calibrationRequest({
         micDeviceId: effectiveMic!,
-        micLoopback: loopback || undefined,
-        speakerIds: list.map((s) => s.id),
-        referenceSpeakerId: ref,
-        lowBandSpeakerIds: list.filter(isSubwoofer).map((s) => s.id),
+        loopback,
+        speakers: list,
+        referenceId: ref,
         repeats: Number(repeats),
         levelDb: Number(level),
-        responses: matchEq || undefined,
-        applyCorrections: mode === 'verify' || undefined,
-      })
-      if (!mounted.current) return
-      const all = [...prev, r]
-      setTaken(all)
-      setResult(all[0])
-      if (mode !== 'verify' && matchEq && all.length < wantPositions) {
-        setPhase('between')
-        if (phoneMode) void api.phoneLinkPrompt(`Şimdi: ${konum(all.length, wantPositions)}. Sonra “Ölçümü başlat”.`).catch(() => {})
-      } else {
-        setPhase('result')
-        if (phoneMode) void api.phoneLinkPrompt(null).catch(() => {})
-      }
-    } catch (e) {
-      if (!mounted.current) return
+        responses: matchEq,
+        verify: mode === 'verify',
+      }),
+      {
+        beforeStart: () => {
+          if (phoneMode) void api.phoneLinkPrompt(matchEq && mode !== 'verify' ? konum(prev.length, wantPositions) : null).catch(() => {})
+        },
+      },
+    )
+    if (!out) return
+    if (!out.ok) {
       setPhase(mode === 'next' ? 'between' : 'setup')
-      const msg = micPrivacyHint(e) ?? describeError(e)
-      if (msg === CANCELLED) showToast(msg, 3000)
-      else showToast(msg, 7000, { tone: 'error' })
-    } finally {
-      runningRef.current = false
-      useStore.setState({ playing: null })
-      // Backend ölçümden sonra motoru yeniden başlatır; başarısız olduysa üst çubuk eski durumu göstermesin.
-      void useStore.getState().syncRunState()
+      if (out.cancelled) showToast(out.message, 3000)
+      else showToast(out.message, 7000, { tone: 'error' })
+      return
+    }
+    const all = [...prev, out.result]
+    setTaken(all)
+    setResult(all[0])
+    if (mode !== 'verify' && matchEq && all.length < wantPositions) {
+      setPhase('between')
+      if (phoneMode) void api.phoneLinkPrompt(`Şimdi: ${konum(all.length, wantPositions)}. Sonra “Ölçümü başlat”.`).catch(() => {})
+    } else {
+      setPhase('result')
+      if (phoneMode) void api.phoneLinkPrompt(null).catch(() => {})
     }
   }
 
   // Telefondaki "Ölçümü başlat": kurulumda ilk konum, aradaysa sonraki konum.
   const phoneStartRef = useRef<() => void>(() => {})
   phoneStartRef.current = () => {
-    if (runningRef.current || !canStart) return
+    if (cal.isRunning() || !canStart) return
     if (phase === 'setup') void start('first')
     else if (phase === 'between') void start('next')
   }
@@ -188,14 +167,7 @@ export function CalibrationScreen() {
   const hz = result?.responseHz
   const matches = useMemo(() => {
     if (!hz || !result) return []
-    const inputs = list
-      .filter((s) => !isSubwoofer(s))
-      .map((s) => ({
-        speakerId: s.id,
-        highPassHz: s.highPassHz,
-        responses: taken.map((t) => t.speakers.find((m) => m.speakerId === s.id && m.ok)?.responseDb).filter((r): r is number[] => !!r),
-      }))
-    return matchSpeakers(hz, inputs, { target: eqTarget, referenceId: result.referenceSpeakerId })
+    return matchSpeakers(hz, matchInputs(list, taken), { target: eqTarget, referenceId: result.referenceSpeakerId })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hz, result, taken, eqTarget, speakers])
   const hasRoomEq = speakers.some((s) => (s.roomEq?.length ?? 0) > 0)
@@ -470,7 +442,7 @@ export function CalibrationScreen() {
               </p>
             )}
             <p className="mt-4 text-[13px] text-muted">Lütfen sessiz kal ve mikrofonu oynatma.</p>
-            <Button className="mt-4" variant="danger" onClick={() => void api.cancelCalibration()}>
+            <Button className="mt-4" variant="danger" onClick={() => void cal.cancel()}>
               İptal
             </Button>
           </Card>
@@ -638,11 +610,7 @@ export function CalibrationScreen() {
                   return
                 }
                 const at = new Date().toISOString()
-                const patches = calibrationPatches(rows, at)
-                for (const m of matches) {
-                  if (eqExcluded.has(m.speakerId)) continue
-                  patches[m.speakerId] = { ...patches[m.speakerId], roomEq: m.bands.length ? m.bands : undefined, calibratedAt: at }
-                }
+                const patches = withRoomEq(calibrationPatches(rows, at), matches, eqExcluded, at)
                 applyCalibration(patches, result.micDeviceId, at)
                 setPhase('setup')
                 if (phoneMode) void api.phoneLinkPrompt('Uygulandı. Doğrulamak için bilgisayardan “Doğrula”yı seç.').catch(() => {})
