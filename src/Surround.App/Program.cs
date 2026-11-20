@@ -13,11 +13,8 @@ public static class Program
         // and exits the process for them before any UI starts.
         VelopackApp.Build().Run();
 
-        // TODO(update): once a release feed exists (e.g. a GitHub repo), check for updates here or in the
-        // background after the window is up:
-        //   var mgr = new Velopack.UpdateManager(new Velopack.Sources.GithubSource("https://github.com/<owner>/<repo>", null, false));
-        //   var update = await mgr.CheckForUpdatesAsync();
-        //   if (update != null) { await mgr.DownloadUpdatesAsync(update); mgr.ApplyUpdatesAndRestart(update); }
+        // It also installs an update that was downloaded but never applied (auto-apply on startup). The checks
+        // themselves run in the background once the window is up (Bridge/AppUpdater.cs).
 
         using var instance = SingleInstance.TryAcquire();
         if (instance is null) return 0; // another instance exists and was asked to come to the front

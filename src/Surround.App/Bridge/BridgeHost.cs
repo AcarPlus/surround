@@ -8,7 +8,7 @@ namespace Surround.Desktop.Bridge;
 /// JSON-RPC over WebView2 messages.
 ///   page -> host: { id, method, params: [] }
 ///   host -> page: { id, result } | { id, error: { message, errors } }
-///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "engineState" | "deviceRejoined" | "calibration" | "profileApplied" | "phoneLink" | "phoneStart", data }
+///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "engineState" | "deviceRejoined" | "calibration" | "profileApplied" | "phoneLink" | "phoneStart" | "volume" | "update", data }
 /// </summary>
 public sealed class BridgeHost : IDisposable
 {
@@ -40,7 +40,13 @@ public sealed class BridgeHost : IDisposable
         _backend.ProfileApplied += OnProfileApplied;
         _backend.PhoneStatus += OnPhoneStatus;
         _backend.PhoneStartRequested += OnPhoneStart;
+        _backend.VolumeChanged += OnVolume;
+        _backend.Updater.Changed += OnUpdate;
     }
+
+    private void OnVolume(VolumeDto v) => PushEvent("volume", v);
+
+    private void OnUpdate(UpdateDto u) => PushEvent("update", u);
 
     private void OnPhoneStatus(Surround.Engine.Phone.PhoneLinkStatus s) => PushEvent("phoneLink", s);
 
@@ -151,6 +157,8 @@ public sealed class BridgeHost : IDisposable
         _backend.ProfileApplied -= OnProfileApplied;
         _backend.PhoneStatus -= OnPhoneStatus;
         _backend.PhoneStartRequested -= OnPhoneStart;
+        _backend.VolumeChanged -= OnVolume;
+        _backend.Updater.Changed -= OnUpdate;
         try { _web.WebMessageReceived -= OnMessage; } catch { }
     }
 }

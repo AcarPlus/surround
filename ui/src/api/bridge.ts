@@ -12,6 +12,8 @@ import {
   type PhoneLinkStatus,
   type CableSetupResult,
   type SinkStatus,
+  type UpdateState,
+  type VolumeState,
 } from './types'
 
 /**
@@ -19,7 +21,7 @@ import {
  *
  *   JS -> C#: { id, method, params: unknown[] }
  *   C# -> JS: { id, result } | { id, error: { message, errors? } }
- *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'engineState' | 'deviceRejoined' | 'calibration' | 'profileApplied' | 'phoneLink' | 'phoneStart', data }
+ *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'engineState' | 'deviceRejoined' | 'calibration' | 'profileApplied' | 'phoneLink' | 'phoneStart' | 'volume' | 'update', data }
  */
 
 interface WebViewHost {
@@ -53,6 +55,24 @@ function normalizeEngineState(d: any): EngineState {
   return typeof d?.message === 'string' ? { state, missing, message: d.message } : { state, missing }
 }
 
+export function normalizeVolume(d: any): VolumeState {
+  const level = typeof d?.level === 'number' && Number.isFinite(d.level) ? Math.min(1, Math.max(0, d.level)) : 1
+  return { available: d?.available === true, level, muted: d?.muted === true, db: typeof d?.db === 'number' ? d.db : 0 }
+}
+
+const UPDATE_STATES = ['unsupported', 'idle', 'checking', 'downloading', 'ready', 'error'] as const
+
+export function normalizeUpdate(d: any): UpdateState {
+  const state = UPDATE_STATES.includes(d?.state) ? d.state : 'unsupported'
+  return {
+    state,
+    current: typeof d?.current === 'string' ? d.current : '',
+    version: typeof d?.version === 'string' ? d.version : null,
+    progress: typeof d?.progress === 'number' ? d.progress : 0,
+    message: typeof d?.message === 'string' ? d.message : null,
+  }
+}
+
 type Pending ={ resolve: (v: unknown) => void; reject: (e: Error) => void }
 
 export function createBridgeApi(): SurroundApi {
@@ -68,6 +88,8 @@ export function createBridgeApi(): SurroundApi {
   const rejoinListeners = new Set<(names: string[]) => void>()
   const phoneListeners = new Set<(s: PhoneLinkStatus) => void>()
   const phoneStartListeners = new Set<() => void>()
+  const volumeListeners = new Set<(v: VolumeState) => void>()
+  const updateListeners = new Set<(u: UpdateState) => void>()
   let nextId = 1
 
   host.addEventListener('message', (e) => {
@@ -108,6 +130,16 @@ export function createBridgeApi(): SurroundApi {
         case 'phoneStart':
           phoneStartListeners.forEach((cb) => cb())
           break
+        case 'volume': {
+          const v = normalizeVolume(msg.data)
+          volumeListeners.forEach((cb) => cb(v))
+          break
+        }
+        case 'update': {
+          const u = normalizeUpdate(msg.data)
+          updateListeners.forEach((cb) => cb(u))
+          break
+        }
         case 'deviceRejoined': {
           const names: string[] = Array.isArray(msg.data?.names) ? msg.data.names.map(String) : []
           if (names.length) rejoinListeners.forEach((cb) => cb(names))
@@ -183,5 +215,13 @@ export function createBridgeApi(): SurroundApi {
     onPhoneStart: (cb) => subscribe(phoneStartListeners, cb),
     onProfileApplied: (cb) => subscribe(profileListeners, cb),
     onDeviceRejoined: (cb) => subscribe(rejoinListeners, cb),
+    getVolume: async () => normalizeVolume(await call<unknown>('getVolume')),
+    setVolume: async (level) => normalizeVolume(await call<unknown>('setVolume', level)),
+    setMute: async (muted) => normalizeVolume(await call<unknown>('setMute', muted)),
+    onVolume: (cb) => subscribe(volumeListeners, cb),
+    getUpdate: async () => normalizeUpdate(await call<unknown>('getUpdate')),
+    checkUpdate: async () => normalizeUpdate(await call<unknown>('checkUpdate')),
+    applyUpdate: () => call<void>('applyUpdate'),
+    onUpdate: (cb) => subscribe(updateListeners, cb),
   }
 }

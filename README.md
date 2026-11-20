@@ -34,8 +34,9 @@ Sürüm `src/Surround.App/Surround.App.csproj` içindeki `<Version>` değerinden
 Yapılandırma kurulum kökünün dışında, `%AppData%\Surround\config.json` içindedir (kaldırma/güncelleme silmez). WebView2 önbelleği `%LocalAppData%\Surround\WebView2` altındadır.
 Kurulum paketi, makinede yoksa Microsoft Edge WebView2 Runtime'ı da kurar.
 
-Uygulama tek kopya çalışır: ikinci kez açılırsa var olan pencere öne gelir. Otomatik güncelleme henüz yok
-(`Program.cs` içinde Velopack `UpdateManager` için işaretli bir TODO var).
+Uygulama tek kopya çalışır: ikinci kez açılırsa var olan pencere öne gelir. 0.3.4'ten itibaren kendini günceller: GitHub'daki
+yeni sürümü arka planda indirir, "Yeniden başlat ve güncelle" ile ya da bir sonraki açılışta kurar (`docs/api.md`, "Otomatik güncelleme").
+Ses düzeyi üst çubuktan ya da klavyedeki ses tuşlarıyla ayarlanır (`docs/api.md`, "Ses düzeyi").
 
 İlk açılışta kaynak, varsayılan oynatma cihazının loopback'i olur; hoparlör yoktur (geri besleme koruması yüzünden).
 Hoparlör yoksa kurulum sihirbazı kendiliğinden açılır.

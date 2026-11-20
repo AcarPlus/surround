@@ -8,6 +8,7 @@ Motor (C#) ile arayüz (TS) arasındaki config alanları. JSON camelCase. Alan y
 yakalama → mantıksal 12 kanal (map: kaynak en fazla 7.1 doldurur; üst şeritler türetilir, bkz. docs/duzen.md)
          → upmix (açıksa; çok kanallı kaynakta yalnızca içerik stereo iken, bkz. docs/upmix.md)
          → [genel işleme: preamp (ya da otomatik), 10 bant EQ, parametrik bantlar, bas güçlendirme, netlik, dinamik güçlendirme, ortam]  (tüm kanallara aynı ayar, dinamik bağlı; kullanılmayan üst şeritler atlanır)
+         → ana ses düzeyi (loopback kaynağının Windows ses düzeyi/sessizi; docs/api.md "Ses düzeyi")
          → seviye ölçerleri
          → kanal katlama: hiçbir hoparlörün çalmadığı kanallar komşulara (FC→FL+FR, SL→BL, …)
          → bas yolu: highPassHz'li hoparlörlerden kesilen bas → bassReceiver hoparlörlere

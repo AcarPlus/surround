@@ -524,3 +524,28 @@ export interface CalibrationResult {
 
 /** Kaynak kanal seviyeleri, dBFS (-90 .. 0). Eski motorlarda üst şeritler eksik olabilir; okurken `?? -90` kullan. */
 export type LevelFrame = Record<LogicalChannel, number>
+
+/**
+ * Ana ses düzeyi: loopback kaynağının Windows ses düzeyi (ses tuşları, görev çubuğu kaydırıcısı). Windows bu düzeyi
+ * loopback kaydına uygulamadığı için motor kendisi uygular. `available: false`: kaynak loopback değil / denetim yok.
+ */
+export interface VolumeState {
+  available: boolean
+  /** Windows kaydırıcısının konumu, 0..1. */
+  level: number
+  muted: boolean
+  /** Cihazın eğrisinde karşılığı (dB, ≤ 0). */
+  db: number
+}
+
+export type UpdateStateName = 'unsupported' | 'idle' | 'checking' | 'downloading' | 'ready' | 'error'
+
+/** Otomatik güncelleme (GitHub sürümleri). `unsupported`: kurulu kopya değil (geliştirme). `ready`: indirildi. */
+export interface UpdateState {
+  state: UpdateStateName
+  current: string
+  version?: string | null
+  /** İndirme ilerlemesi, 0..100. */
+  progress: number
+  message?: string | null
+}

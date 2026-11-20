@@ -3,6 +3,9 @@ import { useStore } from '../store/useStore'
 import { waitedLongEnough } from '../lib/waiting'
 import { cx } from './ui'
 import { ProfileMenu } from './ProfileMenu'
+import { VolumeControl } from './VolumeControl'
+import { api } from '../api/client'
+import { useUpdate } from '../lib/useSystem'
 import { IconMoon, IconPlay, IconRedo, IconStop, IconSun, IconUndo } from './icons'
 
 function StatusPill() {
@@ -112,6 +115,43 @@ function WaitingActions() {
   )
 }
 
+/** Yeni sürüm indirildi: yeniden başlatınca kurulur (kapatılırsa bir sonraki açılışta kendiliğinden kurulur). */
+function UpdateStrip() {
+  const update = useUpdate()
+  const showToast = useStore((s) => s.showToast)
+  const [hidden, setHidden] = useState(false)
+  const [busy, setBusy] = useState(false)
+  if (hidden || update?.state !== 'ready') return null
+  const apply = () => {
+    setBusy(true)
+    api.applyUpdate().catch((e: unknown) => {
+      setBusy(false)
+      showToast(e instanceof Error ? e.message : 'Güncelleme başlatılamadı.', 5000, { tone: 'error' })
+    })
+  }
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-accent/40 bg-accent/10 px-4 py-2 text-[13px]" role="status">
+      <span>
+        Surround <b>{update.version}</b> indirildi. Kurmak için uygulama yeniden başlar (birkaç saniye ses kesilir).
+      </span>
+      <button
+        onClick={apply}
+        disabled={busy}
+        className="rounded border border-accent bg-accent px-2.5 py-1 font-semibold text-accent-fg hover:brightness-110 disabled:opacity-60"
+      >
+        {busy ? 'Yeniden başlatılıyor…' : 'Yeniden başlat ve güncelle'}
+      </button>
+      <button
+        onClick={() => setHidden(true)}
+        title="Uygulamayı bir dahaki açışında kendiliğinden kurulur"
+        className="rounded px-2.5 py-1 font-semibold text-muted hover:bg-surface hover:text-fg"
+      >
+        Sonra
+      </button>
+    </div>
+  )
+}
+
 export function TopBar() {
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
@@ -127,9 +167,11 @@ export function TopBar() {
     <header className="flex h-14 shrink-0 items-center gap-4 border-b border-line bg-surface px-4">
       <div className="flex w-[104px] items-center gap-2">
         <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden className="text-accent">
-          <circle cx="12" cy="12" r="2.2" fill="currentColor" />
-          <circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.7" />
-          <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
+          <circle cx="12" cy="12" r="2.4" fill="currentColor" />
+          <g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+            <path d="M16.1 7.9a5.8 5.8 0 0 1 0 8.2M7.9 16.1a5.8 5.8 0 0 1 0-8.2" />
+            <path d="M19.6 4.4a10.8 10.8 0 0 1 0 15.2M4.4 19.6a10.8 10.8 0 0 1 0-15.2" opacity="0.6" />
+          </g>
         </svg>
         <span className="text-[15px] font-semibold tracking-tight">Surround</span>
       </div>
@@ -147,6 +189,7 @@ export function TopBar() {
       </div>
 
       <div className="ml-auto flex items-center gap-3">
+        <VolumeControl />
         <StatusPill />
         <IconButton label={theme === 'dark' ? 'Açık temaya geç' : 'Koyu temaya geç'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
           {theme === 'dark' ? <IconSun /> : <IconMoon />}
@@ -154,6 +197,7 @@ export function TopBar() {
       </div>
     </header>
     <WaitingActions />
+    <UpdateStrip />
     </>
   )
 }

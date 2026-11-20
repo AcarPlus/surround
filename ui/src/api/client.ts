@@ -11,6 +11,8 @@ import type {
   EngineState,
   LevelFrame,
   SinkStatus,
+  UpdateState,
+  VolumeState,
 } from './types'
 import { createMockApi } from './mock'
 import { createBridgeApi, hasBridge } from './bridge'
@@ -80,6 +82,19 @@ export interface SurroundApi {
   onProfileApplied(cb: (id: string) => void): () => void
   /** "Eksik cihaz olmadan başlat"tan sonra eksik cihaz geri geldi ve motora eklendi (cihaz adları). */
   onDeviceRejoined(cb: (names: string[]) => void): () => void
+  /** Ana ses düzeyi = loopback kaynağının Windows ses düzeyi; motor onu uygular. */
+  getVolume(): Promise<VolumeState>
+  /** 0..1; 0'dan büyükse sessizi de kaldırır. */
+  setVolume(level: number): Promise<VolumeState>
+  setMute(muted: boolean): Promise<VolumeState>
+  /** Ses tuşları, görev çubuğu ya da kaynak değişimi. */
+  onVolume(cb: (v: VolumeState) => void): () => void
+  /** Otomatik güncelleme: açılıştan kısa süre sonra ve birkaç saatte bir arka planda denetlenir ve indirilir. */
+  getUpdate(): Promise<UpdateState>
+  checkUpdate(): Promise<UpdateState>
+  /** İndirilen sürümü kurar: uygulama kapanır, güncellenir ve yeniden açılır. */
+  applyUpdate(): Promise<void>
+  onUpdate(cb: (u: UpdateState) => void): () => void
 }
 
 export const api: SurroundApi = hasBridge() ? createBridgeApi() : createMockApi()

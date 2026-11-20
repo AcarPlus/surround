@@ -82,6 +82,11 @@ export const IconVolume = (p: SVGProps<SVGSVGElement>) => (
     <path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
   </svg>
 )
+export const IconMute = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base({ width: 14, height: 14, ...p })}>
+    <path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5H4zM16 9.5l5 5M21 9.5l-5 5" />
+  </svg>
+)
 export const IconWand = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base({ width: 14, height: 14, ...p })}>
     <path d="M5 19 16 8M14 6l4 4M7 4v3M5.5 5.5h3M19 15v3M17.5 16.5h3" />

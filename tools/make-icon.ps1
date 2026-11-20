@@ -1,5 +1,5 @@
 ﻿# Surround uygulama simgesini (src/Surround.App/Assets/surround.ico) üretir.
-# Koyu yuvarlak kare + merkezde nokta ve ona doğru açılan eş merkezli yaylar (hoparlör/dalga).
+# Koyu yuvarlak kare + tam ortada nokta ve iki yana simetrik açılan eş merkezli yaylar (çevresel ses).
 # Kullanım: powershell -File tools/make-icon.ps1
 Add-Type -AssemblyName System.Drawing
 
@@ -26,18 +26,20 @@ function New-Frame([int]$s) {
     $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 21, 22, 25))), $path)
 
     $accent = [System.Drawing.Color]::FromArgb(255, 212, 242, 90)
-    $cx = $s * 0.36; $cy = $s * 0.5
+    # tam merkez: şekil iki eksende de simetrik
+    $cx = $s * 0.5; $cy = $s * 0.5
     # kaynak noktası
-    $dot = $s * 0.075
+    $dot = $s * 0.085
     $g.FillEllipse((New-Object System.Drawing.SolidBrush $accent), $cx - $dot, $cy - $dot, 2 * $dot, 2 * $dot)
-    # yaylar (sağa doğru yayılan)
+    # yaylar (iki yana, sağa ve sola simetrik yayılan)
     $w = [Math]::Max(1.2, $s * 0.062)
-    foreach ($i in 1..3) {
-        $rad = $s * (0.17 * $i + 0.02)
-        $alpha = [int](255 - ($i - 1) * 55)
+    foreach ($i in 1..2) {
+        $rad = $s * (0.155 * $i + 0.03)
+        $alpha = [int](255 - ($i - 1) * 70)
         $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb($alpha, $accent)), $w
         $pen.StartCap = 'Round'; $pen.EndCap = 'Round'
-        $g.DrawArc($pen, $cx - $rad, $cy - $rad, 2 * $rad, 2 * $rad, -48, 96)
+        $g.DrawArc($pen, $cx - $rad, $cy - $rad, 2 * $rad, 2 * $rad, -45, 90)
+        $g.DrawArc($pen, $cx - $rad, $cy - $rad, 2 * $rad, 2 * $rad, 135, 90)
     }
     $g.Dispose()
     return $bmp

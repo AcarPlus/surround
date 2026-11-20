@@ -18,6 +18,8 @@ import {
   type CableSetupResult,
   type SinkStatus,
   type Speaker,
+  type UpdateState,
+  type VolumeState,
 } from './types'
 import { computeAuto, presetLayout, round } from '../lib/geometry'
 
@@ -169,6 +171,37 @@ export function createMockApi(): SurroundApi {
   // Önizlemede telefonun "Ölçümü başlat" düğmesi.
   if (typeof window !== 'undefined')
     (window as unknown as { __phoneStart?: () => void }).__phoneStart = () => phoneStartListeners.forEach((cb) => cb())
+  // Ses düzeyi (Windows kaydırıcısının taklidi): konsoldan window.__volumeKey(0.3) ses tuşuna basmış gibi.
+  const volumeListeners = new Set<(v: VolumeState) => void>()
+  let volume: VolumeState = { available: true, level: 0.72, muted: false, db: -5 }
+  const setVol = (p: Partial<VolumeState>) => {
+    const level = p.level ?? volume.level
+    volume = { ...volume, ...p, db: level <= 0 ? -96 : Math.round(40 * Math.log10(level) * 10) / 10 }
+    volumeListeners.forEach((cb) => cb({ ...volume }))
+    return { ...volume }
+  }
+  if (typeof window !== 'undefined')
+    (window as unknown as { __volumeKey?: (l: number) => void }).__volumeKey = (l) => setVol({ level: l })
+  // Güncelleme: ?guncelleme ile birkaç saniye sonra yeni sürüm indirilmiş olur.
+  const updateListeners = new Set<(u: UpdateState) => void>()
+  let update: UpdateState = { state: 'idle', current: '0.3.4', version: null, progress: 0 }
+  const setUpdate = (u: Partial<UpdateState>) => {
+    update = { ...update, ...u }
+    updateListeners.forEach((cb) => cb({ ...update }))
+    return { ...update }
+  }
+  const fakeDownload = () => {
+    setUpdate({ state: 'downloading', version: '0.3.5', progress: 0 })
+    let p = 0
+    const id = setInterval(() => {
+      p += 20
+      if (p >= 100) {
+        clearInterval(id)
+        setUpdate({ state: 'ready', progress: 100 })
+      } else setUpdate({ progress: p })
+    }, 300)
+  }
+  if (query('guncelleme')) setTimeout(fakeDownload, 1500)
   let engineState: EngineState = { state: 'stopped', missing: [] }
   let dropTimers: ReturnType<typeof setTimeout>[] = []
 
@@ -473,6 +506,36 @@ export function createMockApi(): SurroundApi {
     onProfileApplied(cb) {
       profileListeners.add(cb)
       return () => profileListeners.delete(cb)
+    },
+    async getVolume() {
+      return { ...volume }
+    },
+    async setVolume(level) {
+      const l = Math.min(1, Math.max(0, level))
+      return setVol(l > 0 ? { level: l, muted: false } : { level: l })
+    },
+    async setMute(muted) {
+      return setVol({ muted })
+    },
+    onVolume(cb) {
+      volumeListeners.add(cb)
+      return () => volumeListeners.delete(cb)
+    },
+    async getUpdate() {
+      return { ...update }
+    },
+    async checkUpdate() {
+      if (update.state === 'ready' || update.state === 'downloading') return { ...update }
+      setUpdate({ state: 'checking' })
+      await new Promise((r) => setTimeout(r, 800))
+      return setUpdate({ state: 'idle', version: null })
+    },
+    async applyUpdate() {
+      setUpdate({ state: 'idle', current: update.version ?? update.current, version: null })
+    },
+    onUpdate(cb) {
+      updateListeners.add(cb)
+      return () => updateListeners.delete(cb)
     },
   }
 }

@@ -38,6 +38,8 @@ public sealed class SurroundEngine : IDisposable
     private long _dspTicks, _dspMaxTicks;
     private bool _started;
     private readonly PeakMeter _meter = new();
+    private readonly VolumeRamp _volume = new();
+    private SourceVolume? _sourceVolume;
     private const int CaptureBufferMs = 20;
 
     /// <summary>Raised (from audio/driver threads) when a capture or playback stream fails at runtime.</summary>
@@ -123,6 +125,17 @@ public sealed class SurroundEngine : IDisposable
                 _keepAlive = new WasapiOut(_srcDevice, AudioClientShareMode.Shared, true, 50);
                 _keepAlive.Init(new SilenceProvider(_srcDevice.AudioClient.MixFormat));
                 _keepAlive.Play();
+
+                // Windows applies the source's volume slider and mute to what it plays, not to the loopback tap:
+                // the engine applies them itself, so the volume keys work.
+                _sourceVolume = SourceVolume.TryAttach(_srcDevice, _log);
+                if (_sourceVolume != null)
+                {
+                    var vs = _sourceVolume.State;
+                    _volume.Reset(vs.Gain);
+                    _sourceVolume.Changed += v => _volume.SetTarget(v.Gain);
+                    _log?.Invoke($"Ses düzeyi Windows'tan izleniyor: %{vs.Level * 100:0}{(vs.Muted ? " (sessiz)" : "")}, {vs.Db:0.#} dB");
+                }
             }
 
             _capture.DataAvailable += OnData;
@@ -245,6 +258,8 @@ public sealed class SurroundEngine : IDisposable
         _upmix?.Process(span, frames);
         _heights?.Process(span, frames);
         _proc?.Process(span, frames);
+        // After the dynamics (whose makeup gain would undo a lower volume), before the bass bus and the sinks.
+        _volume.Process(span, frames, Channels.Count);
         _meter.Update(span, frames);
         _fold?.Process(span, frames);
 
@@ -287,8 +302,13 @@ public sealed class SurroundEngine : IDisposable
         return (Interlocked.Exchange(ref _dspTicks, 0) * k, Interlocked.Exchange(ref _dspMaxTicks, 0) * k);
     }
 
+    /// <summary>The Windows volume the engine applies (loopback source); <see cref="VolumeState.Unavailable"/> otherwise.</summary>
+    public VolumeState SourceVolumeState => _sourceVolume?.State ?? VolumeState.Unavailable;
+
     public void Dispose()
     {
+        _sourceVolume?.Dispose();
+        _sourceVolume = null;
         if (_capture != null)
         {
             _capture.DataAvailable -= OnData;

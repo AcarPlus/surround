@@ -57,6 +57,21 @@ public sealed class MainWindow : Window
             if (!_shutDown) _tray.SetRunning(st.State != EngineStateDto.StoppedName, st.State == EngineStateDto.WaitingName);
         });
 
+        _backend.Updater.Changed += u => _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (_shutDown || u.State != "ready") return;
+            if (!IsVisible) _tray.Balloon($"Surround {u.Version} indirildi. Pencereden yeniden başlatarak kurabilirsin; kapatıp açınca da kurulur.");
+        });
+        _backend.UpdateRestartRequested += () => _ = Dispatcher.InvokeAsync(() =>
+        {
+            if (_shutDown) return;
+            try
+            {
+                if (_backend.Updater.PrepareRestart()) ExitApplication();
+            }
+            catch (Exception ex) { _tray.Balloon("Güncelleme başlatılamadı: " + ex.Message); }
+        });
+
         Loaded += async (_, _) => await InitializeWebAsync();
         Closing += OnClosing;
         Closed += (_, _) => Shutdown();
@@ -65,6 +80,7 @@ public sealed class MainWindow : Window
     /// <summary>Launch-time chores that do not need the page: repair the default output after a crash, auto-start the engine.</summary>
     public async Task RunStartupAsync()
     {
+        _backend.Updater.StartBackground();
         var settings = _backend.Settings.Load();
         try { StartupRegistration.Apply(settings.StartWithWindows); } catch { /* keep the stored value */ }
 

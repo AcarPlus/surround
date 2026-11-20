@@ -41,6 +41,12 @@ Oda koordinatları metredir; (0,0) odanın sol-üst köşesi, y aşağı artar, 
 | `phoneLinkPrompt(text \| null)` | Telefon ekranında yönerge (ör. sonraki ölçüm konumu) |
 | `onPhoneLink(cb)` / `onPhoneStart(cb)` | `phoneLink` olayı (durum değişti: bağlandı/koptu, kayıt durumu); `phoneStart` olayı (telefonda "Ölçümü başlat"a basıldı; arayüz ölçümü başlatır) |
 | `calibration` olayı | Kalibrasyon sırasında itilen `CalibrationProgress` |
+| `getVolume()` | Ana ses düzeyi `VolumeState { available, level, muted, db }`: loopback kaynağının Windows ses düzeyi (`level` 0..1 = Windows kaydırıcısı, `db` cihazın eğrisindeki karşılığı). Kaynak loopback değilse `available: false`. Ayrıntı: aşağıda "Ses düzeyi" |
+| `setVolume(level)` / `setMute(muted)` | Kaynağın Windows ses düzeyini / sessizini yazar (0'dan büyük düzey sessizi de kaldırır); yeni `VolumeState` döner |
+| `onVolume(cb)` | `volume` olayı: ses tuşları, görev çubuğu kaydırıcısı, sayfa ya da kaydedilen yapılandırmada kaynak değişti |
+| `getUpdate()` / `checkUpdate()` | Otomatik güncelleme `UpdateState { state, current, version?, progress, message? }`; `state`: `unsupported` (kurulu kopya değil), `idle`, `checking`, `downloading` (`progress` 0..100), `ready` (indirildi), `error`. `checkUpdate` hemen denetler ve varsa indirir |
+| `applyUpdate()` | `ready` iken: uygulama düzgünce kapanır (motor durur, varsayılan çıkış geri yüklenir), Velopack güncellemeyi kurar ve yeni sürümü açar. `ready` değilse reddeder |
+| `onUpdate(cb)` | `update` olayı: güncelleme durumu değişti |
 | `saveAppSettings(settings)` | Verilen alanları kaydeder (eksik alan değişmez, bilinmeyen/`restore*` alanlar yok sayılır); başarıyla `null` döner. `startWithWindows` HKCU\...\Run altındaki `Surround` değerini yazar/siler (komut: `"<exe>" --tray`; Velopack kurulumunda güncellemelerden etkilenmeyen kök başlatıcı); yazılamazsa reddeder. Motor çalışırken `switchDefaultDevice` değişirse hemen uygulanır |
 
 ## Kalibrasyon (`calibrate`)
@@ -115,6 +121,23 @@ yeniden başlar ve `running` gelir.
   kendiliğinden başlar; Durdur beklemeyi bitirir. Bu sırada `saveConfig` de eksik cihaz yüzünden hata vermez. Yapılandırma hataları
   (geçersiz ayar, hoparlörü olmayan çıkış vb.) ve mevcut cihazın uygunsuzluğu (yanlış tür, az kanal) eskisi gibi hata olarak döner.
   Başlangıçta bekleme varsayılan çıkış korumasını devreye sokmaz (yalnızca önceki çökmeden kalan bir geri yükleme bekliyorsa yapılır).
+
+## Ses düzeyi
+WASAPI loopback, Windows'un cihaz ses düzeyini ve sessizini uygulamadan önceki karışımı yakalar (ölçüldü: VB-Cable'da %100, %30
+ve sessizde yakalanan sinyal aynı). Bu yüzden motor, loopback kaynağının uç nokta ses düzeyini (`IAudioEndpointVolume`) izler ve
+kendisi uygular: genel işlemeden (dinamik güçlendirmenin telafi kazancı kısılan sesi geri yükseltmesin diye) sonra, seviye
+ölçerlerinden, bas yolundan ve hoparlörlerden önce. Kazanç = Windows'un bildirdiği dB (`MasterVolumeLevel`, ör. %50 ≈ −10,5 dB),
+sessiz ya da %0'da 0; hiçbir zaman yükseltme yok. Değişiklik blok boyunca doğrusal rampayla uygulanır (tık yok). Böylece klavyedeki
+ses tuşları, görev çubuğu kaydırıcısı ve üst çubuktaki kaydırıcı aynı değeri değiştirir. `capture` kaynağında izlenmez.
+Kalibrasyon motoru kullanmaz, ses düzeyinden etkilenmez.
+
+## Otomatik güncelleme
+Kurulu kopya (Velopack) açıldıktan ~20 sn sonra ve 6 saatte bir `https://github.com/AcarPlus/surround` sürümlerini denetler
+(`releases.win.json`), yeni sürümü arka planda indirir ve `update` olayıyla bildirir; pencere gizliyse tepsi balonu da çıkar.
+Kurulum kullanıcıya bırakılır: "Yeniden başlat ve güncelle" ya da hiçbir şey yapmamak (indirilen sürüm bir sonraki açılışta
+`VelopackApp` tarafından kendiliğinden kurulur). Geliştirme derlemesinde (`dotnet run`) `unsupported` döner. Yayın: build.ps1
+çıktısındaki `Surround-*-full.nupkg`, `RELEASES`, `releases.win.json`, `assets.win.json`, Setup ve Portable aynı GitHub
+sürümüne yüklenir.
 
 ## Uygulama davranışı (masaüstü kabuğu)
 - **Varsayılan çıkış cihazı** (`switchDefaultDevice`): kaynak `loopback` ise motor başlayınca (ve kaynak değişerek yeniden başlayınca)

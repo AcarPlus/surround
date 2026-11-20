@@ -5,6 +5,7 @@ import { selectProfileModified, useStore } from '../store/useStore'
 import { Badge, Button, Card, ScreenHeader, SectionTitle, Switch, cx } from '../components/ui'
 import { IconTrash } from '../components/icons'
 import { MAX_PROFILE_NAME } from '../lib/profiles'
+import { useUpdate } from '../lib/useSystem'
 
 const ROWS: { key: keyof AppSettings; label: string; hint: string; recommended?: boolean }[] = [
   {
@@ -89,13 +90,73 @@ export function SettingsScreen() {
 
         <SetupCard />
 
-        <Card className="p-4">
-          <SectionTitle>Hakkında</SectionTitle>
-          <p className="text-[13px] font-medium">Surround</p>
-          <p className="mt-0.5 text-xs text-muted">Çoklu hoparlör çevresel ses uygulaması.</p>
-        </Card>
+        <AboutCard />
       </div>
     </div>
+  )
+}
+
+/* ---------- Hakkında + güncelleme ---------- */
+
+function AboutCard() {
+  const update = useUpdate()
+  const showToast = useStore((s) => s.showToast)
+  const fail = (e: unknown) => showToast(e instanceof Error ? e.message : 'İşlem başarısız.', 5000, { tone: 'error' })
+  const check = async () => {
+    try {
+      const u = await api.checkUpdate()
+      if (u.state === 'idle') showToast('Surround güncel.', 2500)
+      else if (u.state === 'error') showToast(`Güncelleme denetlenemedi: ${u.message ?? 'bilinmeyen hata'}`, 5000, { tone: 'error' })
+    } catch (e) {
+      fail(e)
+    }
+  }
+
+  let status = ''
+  switch (update?.state) {
+    case 'unsupported':
+      status = 'Bu kopya kurulu değil (geliştirme); otomatik güncelleme kapalı.'
+      break
+    case 'checking':
+      status = 'Güncelleme denetleniyor…'
+      break
+    case 'downloading':
+      status = `Surround ${update.version} indiriliyor… %${update.progress}`
+      break
+    case 'ready':
+      status = `Surround ${update.version} indirildi; yeniden başlatınca ya da bir dahaki açılışta kurulur.`
+      break
+    case 'error':
+      status = 'Son denetim başarısız oldu (internet bağlantısı?).'
+      break
+    case 'idle':
+      status = 'Güncellemeler kendiliğinden denetlenir ve arka planda indirilir.'
+      break
+  }
+  const busy = update?.state === 'checking' || update?.state === 'downloading'
+
+  return (
+    <Card className="p-4">
+      <SectionTitle>Hakkında</SectionTitle>
+      <p className="text-[13px] font-medium">
+        Surround{update?.current ? <span className="ml-1.5 font-normal text-muted">sürüm {update.current}</span> : null}
+      </p>
+      <p className="mt-0.5 text-xs text-muted">Çoklu hoparlör çevresel ses uygulaması.</p>
+      {status && <p className="mt-3 text-xs text-muted">{status}</p>}
+      {update && update.state !== 'unsupported' && (
+        <div className="mt-2 flex gap-2">
+          {update.state === 'ready' ? (
+            <Button size="sm" variant="primary" onClick={() => void api.applyUpdate().catch(fail)}>
+              Yeniden başlat ve güncelle
+            </Button>
+          ) : (
+            <Button size="sm" onClick={() => void check()} disabled={busy}>
+              Güncellemeleri denetle
+            </Button>
+          )}
+        </div>
+      )}
+    </Card>
   )
 }
 

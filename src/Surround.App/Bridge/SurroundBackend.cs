@@ -38,6 +38,11 @@ public sealed partial class SurroundBackend : IDisposable
     public event Action<SurroundConfig>? ConfigSaved;
     /// <summary>A profile was applied from the tray (not by the page), on a worker thread.</summary>
     public event Action<string>? ProfileApplied;
+    /// <summary>The page asked to install the downloaded update; the window exits so the updater can run.</summary>
+    public event Action? UpdateRestartRequested;
+
+    /// <summary>Automatic updates from the GitHub releases; the window starts the background checks.</summary>
+    public AppUpdater Updater { get; } = new();
 
     public SurroundBackend(ConfigStore? store = null, AppSettingsStore? settings = null, DefaultDeviceGuard? guard = null)
     {
@@ -46,6 +51,7 @@ public sealed partial class SurroundBackend : IDisposable
         _guard = guard ?? new DefaultDeviceGuard(new WasapiDefaultDeviceSwitcher(), _settings,
             msg => { System.Diagnostics.Debug.WriteLine(msg); _host.ReportError(msg); });
         StartRecovery();
+        ConfigSaved += OnConfigSavedForVolume;
     }
 
     public AppSettingsStore Settings => _settings;
@@ -75,6 +81,13 @@ public sealed partial class SurroundBackend : IDisposable
             case "cableSetup": return await CableSetupAsync();
             case "calibrate": return await CalibrateAsync(Arg(args, 0));
             case "cancelCalibration": Volatile.Read(ref _calCts)?.Cancel(); return null;
+            case "getVolume" or "setVolume" or "setMute": return await VolumeAsync(method, args);
+            case "getUpdate": return Updater.State;
+            case "checkUpdate": return await Updater.CheckAsync();
+            case "applyUpdate":
+                if (Updater.State.State != "ready") throw new BridgeException("Uygulanacak indirilmiş güncelleme yok.");
+                UpdateRestartRequested?.Invoke();
+                return null;
             case "phoneLinkStart" or "phoneLinkStop" or "phoneLinkStatus" or "phoneLinkPrompt" or "phoneLinkAllowFirewall": return await PhoneLinkAsync(method, args);
             default: throw new BridgeException($"Bilinmeyen yöntem: {method}");
         }
@@ -565,6 +578,8 @@ public sealed partial class SurroundBackend : IDisposable
         Volatile.Read(ref _calCts)?.Cancel();
         StopRecovery();
         DisposePhone();
+        DisposeVolume();
+        Updater.Dispose();
         _host.Dispose(); // stops the engine
         _guard.Restore(); // app exit / session end: give the user their default output back
     }
