@@ -123,7 +123,7 @@ export function CableSetup() {
 }
 
 /**
- * Basit kip için tek tıkla VB-Cable kartı (Kolay kurulum, Ölçmeden başla): neden gerektiğini tek cümleyle söyler,
+ * Tek tıkla VB-Cable kartı: neden gerektiğini tek cümleyle söyler,
  * kurar ya da 7.1 yapar; Windows yönetici onayı, yeniden başlatma ve hata durumlarını sade dille anlatır.
  */
 export function CableInstallCard({
@@ -172,8 +172,8 @@ export function CableInstallCard({
         <div className="mt-2 text-xs">
           <p className="text-warn">Olmadı: {auto.msg}</p>
           <p className="mt-0.5 text-muted">
-            Windows’un onay penceresinde “Hayır” dendiyse ya da internet yoksa kurulum yapılamaz. Tekrar deneyebilir ya da şimdilik
-            stereo ile devam edebilirsin.
+            Windows’un onay penceresinde “Hayır” dendiyse ya da internet yoksa kurulum yapılamaz. İnterneti kontrol edip tekrar
+            dene; onay penceresinde “Evet”i seç.
           </p>
         </div>
       )}
@@ -190,7 +190,7 @@ export type CableSetupOutcome = 'done' | 'reboot' | 'error'
 
 /**
  * Tek tıkla VB-Cable (`api.cableSetup`): kurar ya da 7.1 yapar, cihaz listesini yeniler ve kaynak olarak seçer.
- * Bağlantı ekranındaki rehber ve Kolay kurulum ortak kullanır.
+ * Uygulama kapısı (CableGate) kullanır.
  */
 export function useCableAutoSetup() {
   const refreshDevices = useStore((s) => s.refreshDevices)
@@ -600,7 +600,7 @@ export function Meters() {
         </div>
       </div>
       <p className="mt-2 text-xs text-faint">
-        {runState === 'running' ? 'Örnek veri · canlı' : 'Başlat’a basınca seviyeler hareket eder (örnek veri).'}
+        {runState === 'running' ? 'Canlı' : 'Başlat’a basınca seviyeler hareket eder.'}
       </p>
     </div>
   )

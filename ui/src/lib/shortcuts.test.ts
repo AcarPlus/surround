@@ -11,7 +11,7 @@ const key = (k: string, extra: Partial<KeyInput> = {}): KeyInput => ({
   ...extra,
 })
 const ctx = (extra: Partial<ShortcutContext> = {}): ShortcutContext => ({
-  screen: 'room',
+  screen: 'home',
   selection: 'spk-1',
   listenerSelected: false,
   modalOpen: false,
@@ -31,10 +31,10 @@ describe('resolveShortcut', () => {
     expect(resolveShortcut(key('z', { ctrlKey: true, typing: true }), ctx())).toBeNull()
   })
 
-  it('Delete / Esc / oklar yalnızca Oda ekranında', () => {
-    expect(resolveShortcut(key('Delete'), ctx({ screen: 'home' }))).toBeNull()
+  it('Delete / Esc / oklar yalnızca Oda (ana) ekranında', () => {
+    expect(resolveShortcut(key('Delete'), ctx({ screen: 'sound' }))).toBeNull()
     expect(resolveShortcut(key('Escape'), ctx({ screen: 'settings' }))).toBeNull()
-    expect(resolveShortcut(key('ArrowLeft'), ctx({ screen: 'home' }))).toBeNull()
+    expect(resolveShortcut(key('ArrowLeft'), ctx({ screen: 'sound' }))).toBeNull()
     expect(resolveShortcut(key('Delete'), ctx())).toEqual({ kind: 'delete' })
     expect(resolveShortcut(key('Escape'), ctx())).toEqual({ kind: 'deselect' })
     expect(resolveShortcut(key('ArrowUp'), ctx())).toEqual({ kind: 'nudge', dx: 0, dy: -NUDGE_M })

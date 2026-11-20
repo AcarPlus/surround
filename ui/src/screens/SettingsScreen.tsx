@@ -6,7 +6,6 @@ import { Badge, Button, Card, ScreenHeader, SectionTitle, Switch, cx } from '../
 import { IconTrash } from '../components/icons'
 import { MAX_PROFILE_NAME } from '../lib/profiles'
 import { useUpdate } from '../lib/useSystem'
-import { canUseAdvanced } from '../lib/mode'
 
 const ROWS: { key: keyof AppSettings; label: string; hint: string; recommended?: boolean }[] = [
   {
@@ -63,11 +62,9 @@ export function SettingsScreen() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-5">
+    <div className="h-full overflow-y-auto px-6 py-6">
+      <div className="mx-auto max-w-[860px] space-y-4">
       <ScreenHeader title="Ayarlar" sub="Profiller ve Windows ile bütünleşme." />
-
-      <div className="max-w-[760px] space-y-4">
-        <ModeCard />
 
         <ProfilesCard />
 
@@ -96,33 +93,6 @@ export function SettingsScreen() {
         <AboutCard />
       </div>
     </div>
-  )
-}
-
-/* ---------- Basit / Gelişmiş kip ---------- */
-
-function ModeCard() {
-  const uiMode = useStore((s) => s.uiMode)
-  const setUiMode = useStore((s) => s.setUiMode)
-  const showToast = useStore((s) => s.showToast)
-  const advanced = uiMode === 'advanced'
-  const change = (v: boolean) => {
-    if (setUiMode(v ? 'advanced' : 'simple') !== (v ? 'advanced' : 'simple')) {
-      showToast('Gelişmiş mod bu sürümde kullanılamıyor.', 4000, { tone: 'error' })
-    }
-  }
-  return (
-    <Card>
-      <label className="flex cursor-pointer items-start justify-between gap-6 p-4">
-        <span>
-          <span className="text-[13px] font-medium">Gelişmiş mod</span>
-          <span className="mt-0.5 block text-xs text-muted">
-            Oda planı, EQ, kalibrasyon ve tüm ayrıntılı ayarlar. Kapalıyken yalnızca basit ekran görünür.
-          </span>
-        </span>
-        <Switch checked={advanced} disabled={!advanced && !canUseAdvanced()} onChange={change} label="Gelişmiş mod" />
-      </label>
-    </Card>
   )
 }
 

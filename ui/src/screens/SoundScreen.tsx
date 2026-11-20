@@ -105,7 +105,7 @@ export function SoundScreen() {
   useEffect(() => () => setAb(false), [setAb])
 
   return (
-    <div className="h-full overflow-y-auto p-5">
+    <div className="screen-page h-full overflow-y-auto px-6 py-6">
       <ScreenHeader
         title="Ses"
         sub="Çevresel ses ve tüm çıkışlara uygulanan ses işleme. Profil (üst çubuk) bunların hepsini tek tıkla değiştirir."

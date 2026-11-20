@@ -19,17 +19,15 @@ import {
   type DeviceKit,
 } from '../lib/setup'
 import { ROLES } from '../lib/roles'
-import { findCable } from '../lib/health'
 import { deviceColorVar } from '../lib/colors'
 import { RoomCanvas } from '../components/RoomCanvas'
 import { RunButton } from '../components/TopBar'
 import { Badge, Button, Card, NumberField, Select, Switch, cx } from '../components/ui'
-import { IconCheck, IconVolume, IconWarn, IconX } from '../components/icons'
-import { CableSetup } from './SourcePanels'
+import { IconCheck, IconVolume, IconX } from '../components/icons'
 
-const STEPS = ['Ses kaynağı', 'Hoparlörler', 'Yerleşim', 'Bitti']
+const STEPS = ['Hoparlörler', 'Yerleşim', 'Bitti']
 
-/** İlk kurulum ve "yeniden kur": cihaz → ne bağlı → yerleşim → test. */
+/** Tek kurulum akışı (ilk kurulum ve "yeniden kur"): ne bağlı → yerleşim → test/ölçüm. VB-Cable'ı uygulama kapısı halleder. */
 export function SetupWizard() {
   const devices = useStore((s) => s.devices)
   const source = useStore((s) => s.source)
@@ -69,9 +67,6 @@ export function SetupWizard() {
     setScreen('home')
   }
 
-  const cable = findCable(devices)
-  const cableOk = !!cable && source.mode === 'loopback' && source.deviceId === cable.id && cable.channels >= 6
-
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-bg" role="dialog" aria-modal="true" aria-label="Kurulum sihirbazı">
       <header className="flex h-14 shrink-0 items-center gap-4 border-b border-line bg-surface px-5">
@@ -104,25 +99,8 @@ export function SetupWizard() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className={cx('mx-auto p-6', step === 2 ? 'h-full max-w-[1200px]' : 'max-w-[880px]')}>
+        <div className={cx('mx-auto p-6', step === 1 ? 'h-full max-w-[1200px]' : 'max-w-[880px]')}>
           {step === 0 && (
-            <div>
-              <h1 className="text-xl font-semibold tracking-tight">Ses nereden gelecek?</h1>
-              <p className="mb-4 mt-1 text-[13px] text-muted">
-                Windows tüm sesi sanal bir 7.1 kabloya (VB-Cable) gönderir; Surround bu kanalları alıp hoparlörlerine dağıtır.
-                Böylece oyun ve filmlerin gerçek 5.1/7.1 sesi de korunur.
-              </p>
-              <CableSetup />
-              {!cableOk && (
-                <p className="flex items-start gap-2 text-xs text-muted">
-                  <IconWarn className="mt-px shrink-0 text-warn" />
-                  Bu adımı şimdilik atlayabilirsin; Ana sayfadaki sistem kontrolü eksik kalanı hatırlatır.
-                </p>
-              )}
-            </div>
-          )}
-
-          {step === 1 && (
             <div>
               <h1 className="text-xl font-semibold tracking-tight">Hangi cihaza ne bağlı?</h1>
               <p className="mb-4 mt-1 text-[13px] text-muted">
@@ -152,9 +130,9 @@ export function SetupWizard() {
             </div>
           )}
 
-          {step === 2 && <PlacementStep />}
+          {step === 1 && <PlacementStep />}
 
-          {step === 3 && (
+          {step === 2 && (
             <div>
               <h1 className="text-xl font-semibold tracking-tight">Hazır!</h1>
               <p className="mb-5 mt-1 text-[13px] text-muted">
@@ -164,14 +142,14 @@ export function SetupWizard() {
                 <NextCard title="Sırayla dinle" text="Her hoparlörden kısa bir ton; haritada hangisinin çaldığı yanar.">
                   <TourButton />
                 </NextCard>
-                <NextCard title="Mikrofonla kalibre et" text="Cihaz gecikmelerini ve seviye farklarını ölçüp düzeltir. Önerilir.">
+                <NextCard title="Odayı ölç" text="Telefon ya da mikrofonla gecikme, seviye ve tınıyı ölçüp düzeltir. Önerilir.">
                   <Button
                     onClick={() => {
                       closeWizard()
                       setScreen('calibration')
                     }}
                   >
-                    Kalibrasyona git
+                    Ölçüme git
                   </Button>
                 </NextCard>
                 <NextCard title="Başlat" text="Ses motorunu çalıştır; profili üst çubuktan seçebilirsin.">
@@ -187,35 +165,30 @@ export function SetupWizard() {
       </div>
 
       <footer className="flex shrink-0 items-center gap-2 border-t border-line bg-surface px-5 py-3">
-        {step > 0 && step < 3 && (
+        {step > 0 && step < 2 && (
           <Button variant="ghost" onClick={() => setStep(step - 1)}>
             Geri
           </Button>
         )}
         <div className="ml-auto flex gap-2">
           {step === 0 && (
-            <Button variant="primary" onClick={() => setStep(1)}>
-              {cableOk ? 'Devam' : 'Şimdilik atla'}
-            </Button>
-          )}
-          {step === 1 && (
             <Button
               variant="primary"
               disabled={plan.length === 0}
               onClick={() => {
                 apply()
-                setStep(2)
+                setStep(1)
               }}
             >
               Hoparlörleri oluştur
             </Button>
           )}
-          {step === 2 && (
-            <Button variant="primary" onClick={() => setStep(3)}>
+          {step === 1 && (
+            <Button variant="primary" onClick={() => setStep(2)}>
               Devam
             </Button>
           )}
-          {step === 3 && (
+          {step === 2 && (
             <Button variant="primary" onClick={finish}>
               Bitir
             </Button>

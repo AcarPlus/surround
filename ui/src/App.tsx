@@ -1,23 +1,19 @@
 import { useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { useStore, LISTENER_ID } from './store/useStore'
-import { TopBar, UpdateStrip } from './components/TopBar'
+import { TopBar } from './components/TopBar'
+import { CableGate, cableMissing } from './components/CableGate'
 import { NavRail } from './components/NavRail'
-import { Inspector } from './components/Inspector'
 import { HomeScreen } from './screens/HomeScreen'
-import { RoomScreen } from './screens/RoomScreen'
-import { ConnectionScreen } from './screens/ConnectionScreen'
 import { CalibrationScreen } from './screens/CalibrationScreen'
 import { SoundScreen } from './screens/SoundScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { SetupWizard } from './screens/SetupWizard'
-import { SimpleHeader, SimpleHome } from './screens/SimpleHome'
-import { EasySetup } from './screens/EasySetup'
-import { QuickStart } from './screens/QuickStart'
 import { IconX } from './components/icons'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { InitErrorScreen } from './components/InitErrorScreen'
 import { cx } from './components/ui'
+import { frameEnergy, useLevels } from './lib/useLevels'
 import { resolveShortcut } from './lib/shortcuts'
 
 function isTyping(t: EventTarget | null) {
@@ -26,6 +22,12 @@ function isTyping(t: EventTarget | null) {
   const tag = el.tagName
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
 }
+
+/** Arka planda süzülen ışık tozları: sabit (tekrarlanabilir) konum, boy ve hız. */
+const DUST = Array.from({ length: 26 }, (_, i) => {
+  const r = (n: number) => ((Math.sin(i * 12.9898 + n * 78.233) * 43758.5453) % 1 + 1) % 1
+  return { x: r(1) * 100, y: r(2) * 100, s: 1.5 + r(3) * 2.5, t: 22 + r(4) * 30, dl: r(5) * 40 }
+})
 
 /** Sihirbaz ya da bir Dialog açık mı (ikisi de role="dialog" aria-modal="true" taşır). */
 const modalOpen = () => !!document.querySelector('[role="dialog"][aria-modal="true"]')
@@ -37,10 +39,10 @@ export function App() {
   const dismissToast = useStore((s) => s.dismissToast)
   const wizardOpen = useStore((s) => s.wizardOpen)
   const initError = useStore((s) => s.initError)
-  const uiMode = useStore((s) => s.uiMode)
-  const easySetupOpen = useStore((s) => s.easySetupOpen)
-  const quickStartOpen = useStore((s) => s.quickStartOpen)
-  const simple = uiMode === 'simple'
+  const devices = useStore((s) => s.devices)
+  const runState = useStore((s) => s.runState)
+  const energy = frameEnergy(useLevels(runState === 'running'))
+  const gate = cableMissing(devices)
 
   useEffect(() => {
     document.documentElement.dataset.theme = useStore.getState().theme
@@ -70,7 +72,7 @@ export function App() {
           screen: st.screen,
           selection: st.selection,
           listenerSelected: st.selection === LISTENER_ID,
-          modalOpen: st.wizardOpen || st.easySetupOpen || st.quickStartOpen || modalOpen(),
+          modalOpen: st.wizardOpen || modalOpen(),
         },
       )
       if (!action) return
@@ -108,68 +110,58 @@ export function App() {
     )
   ) : null
 
+  // VB-Cable hazır değilse uygulamanın tek ekranı kurulum kapısıdır.
+  if (ready && gate) {
+    return (
+      <div className="h-full min-w-[1000px]">
+        <ErrorBoundary compact>
+          <CableGate devices={devices} />
+        </ErrorBoundary>
+      </div>
+    )
+  }
+
   return (
-    <div className={cx('flex h-full flex-col', simple ? 'min-w-[360px]' : 'min-w-[1000px]')}>
-      {simple ? (
-        <>
-          <ErrorBoundary compact>
-            <SimpleHeader />
-            <UpdateStrip />
-          </ErrorBoundary>
-          <main className="min-h-0 flex-1 bg-bg">
-            {loading ?? (
-              <ErrorBoundary resetKey={screen}>
-                <div key={screen} className="screen-in h-full">
-                  {screen === 'settings' ? <SettingsScreen /> : <SimpleHome />}
-                </div>
-              </ErrorBoundary>
-            )}
-          </main>
-        </>
-      ) : (
-        <>
-          <ErrorBoundary compact>
-            <TopBar />
-          </ErrorBoundary>
-          <div className="flex min-h-0 flex-1">
-            <NavRail />
-            <main className="min-w-0 flex-1 bg-bg">
-              {loading ?? (
-                // Yalnızca CSS ile giriş geçişi: çıkış animasyonu yok, böylece pencere arka plandayken
-                // (requestAnimationFrame durur) ekran değişimi takılmaz.
-                <ErrorBoundary resetKey={screen}>
-                  <div key={screen} className="screen-in h-full">
-                    {screen === 'home' && <HomeScreen />}
-                    {screen === 'room' && <RoomScreen />}
-                    {screen === 'sound' && <SoundScreen />}
-                    {screen === 'calibration' && <CalibrationScreen />}
-                    {screen === 'connection' && <ConnectionScreen />}
-                    {screen === 'settings' && <SettingsScreen />}
-                  </div>
-                </ErrorBoundary>
-              )}
-            </main>
-            {screen === 'room' && (
-              <ErrorBoundary compact>
-                <Inspector />
-              </ErrorBoundary>
-            )}
-          </div>
-        </>
-      )}
+    <div className="relative isolate flex h-full min-w-[1000px] flex-col bg-bg" style={{ ['--energy' as string]: energy.toFixed(3) }}>
+      {/* Ortam ışığı: yavaşça dolaşan renk bulutları; motor çalışırken canlanır. Cam paneller bunun üstünde durur. */}
+      <div
+        aria-hidden
+        className={cx('ambient', runState === 'running' && 'ambient-live')}
+      >
+        <span className="ambient-blob ambient-a" />
+        <span className="ambient-blob ambient-b" />
+        <span className="ambient-blob ambient-c" />
+        {DUST.map((d, i) => (
+          <span
+            key={i}
+            className="dust"
+            style={{ left: `${d.x}%`, top: `${d.y}%`, animationDuration: `${d.t}s`, animationDelay: `-${d.dl}s`, width: d.s, height: d.s }}
+          />
+        ))}
+      </div>
+      <ErrorBoundary compact>
+        <TopBar />
+      </ErrorBoundary>
+      <div className="flex min-h-0 flex-1">
+        <NavRail />
+        <main className="min-w-0 flex-1">
+          {loading ?? (
+            // Yalnızca CSS ile giriş geçişi: çıkış animasyonu yok, böylece pencere arka plandayken
+            // (requestAnimationFrame durur) ekran değişimi takılmaz.
+            <ErrorBoundary resetKey={screen}>
+              <div key={screen} className="screen-in h-full">
+                {screen === 'home' && <HomeScreen />}
+                {screen === 'sound' && <SoundScreen />}
+                {screen === 'calibration' && <CalibrationScreen />}
+                {screen === 'settings' && <SettingsScreen />}
+              </div>
+            </ErrorBoundary>
+          )}
+        </main>
+      </div>
       {ready && wizardOpen && (
         <ErrorBoundary compact>
           <SetupWizard />
-        </ErrorBoundary>
-      )}
-      {ready && quickStartOpen && (
-        <ErrorBoundary compact>
-          <QuickStart />
-        </ErrorBoundary>
-      )}
-      {ready && easySetupOpen && (
-        <ErrorBoundary compact>
-          <EasySetup />
         </ErrorBoundary>
       )}
       <AnimatePresence>

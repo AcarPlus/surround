@@ -7,12 +7,12 @@ import { REF_FS, magnitude, peaking } from './eqCurve'
  *
  * İlke: hepsi AYNI mikrofonla ölçüldüğü için mikrofonun kendi rengi farkta birbirini götürür; mutlak doğru eğri değil,
  * hoparlörler arası fark düzeltilir. Seviye farkı kazançla ayrıca eşitlendiği için eğriler 500 Hz–4 kHz ortalamasına
- * göre hizalanır. Güvenlik: yükseltme en çok +6 dB (çukurları doldurmak hoparlörü zorlar), kısma en çok −12 dB;
+ * göre hizalanır. Güvenlik: yükseltme en çok +3 dB (çukurları doldurmak hoparlörü zorlar, duyulur fayda getirmez), kısma en çok −12 dB;
  * bas yönetimiyle kesilen bölge ve 12 kHz üstü (telefon mikrofonu, ışınlama) dışarıda bırakılır.
  */
 
 export const ROOM_EQ_MAX_BANDS = 8
-export const MAX_BOOST_DB = 6
+export const MAX_BOOST_DB = 3
 export const MAX_CUT_DB = 12
 export const MATCH_LO_HZ = 150
 export const MATCH_HI_HZ = 12000
@@ -20,7 +20,7 @@ export const MATCH_HI_HZ = 12000
 export const MATCH_TOLERANCE_DB = 1
 
 /**
- * Bant sınırları. Varsayılan (Gelişmiş kalibrasyon): yükseltme +6, kısma −12 dB (bant başına), 8 bant.
+ * Bant sınırları. Varsayılan (kalibrasyon): yükseltme +3, kısma −12 dB (bant başına), 8 bant.
  * `capTotalCut`: üst üste binen bantların TOPLAM kısması da `maxCutDb` ile sınırlanır.
  */
 export interface RoomEqLimits {
@@ -40,7 +40,7 @@ export const DEFAULT_ROOM_EQ_LIMITS: RoomEqLimits = {
 }
 
 /**
- * Basit kip (Kolay kurulum) "yumuşak oda düzeltmesi": yalnızca kısma (yükseltme yok), toplamda en çok −6 dB,
+ * "Yumuşak oda düzeltmesi" (şu an kullanılmıyor; kalibrasyon varsayılan sınırları kullanır): yalnızca kısma (yükseltme yok), toplamda en çok −6 dB,
  * en çok 4 bant, 1,5 dB altındaki farklar için bant yok.
  */
 export const GENTLE_ROOM_EQ_LIMITS: RoomEqLimits = {

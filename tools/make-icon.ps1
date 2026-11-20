@@ -1,5 +1,6 @@
 ﻿# Surround uygulama simgesini (src/Surround.App/Assets/surround.ico) üretir.
-# Koyu yuvarlak kare + tam ortada nokta ve iki yana simetrik açılan eş merkezli yaylar (çevresel ses).
+# "Gece" teması: çivit mavisinden mora geçen parlak yuvarlak kare (üstte ince ışık), üzerinde koyu lacivert
+# merkez noktası ve iki yana simetrik açılan eş merkezli yaylar (çevresel ses). Uygulamadaki logoyla aynı.
 # Kullanım: powershell -File tools/make-icon.ps1
 Add-Type -AssemblyName System.Drawing
 
@@ -23,19 +24,29 @@ function New-Frame([int]$s) {
     $path.AddArc($s - $d, $s - $d, $d, $d, 0, 90)
     $path.AddArc(0, $s - $d, $d, $d, 90, 90)
     $path.CloseFigure()
-    $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 21, 22, 25))), $path)
+    # zemin: sol üst çivit mavisi (#8EA2FF) -> sağ alt mor (#A58BFA)
+    $bgBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush (New-Object System.Drawing.PointF 0, 0), (New-Object System.Drawing.PointF $s, $s), ([System.Drawing.Color]::FromArgb(255, 142, 162, 255)), ([System.Drawing.Color]::FromArgb(255, 165, 139, 250))
+    $g.FillPath($bgBrush, $path)
+    if ($s -ge 32) {
+        # üst kenarda cam parıltısı
+        $g.SetClip($path)
+        $hl = New-Object System.Drawing.Drawing2D.LinearGradientBrush (New-Object System.Drawing.PointF 0, 0), (New-Object System.Drawing.PointF 0, ($s * 0.6)), ([System.Drawing.Color]::FromArgb(70, 255, 255, 255)), ([System.Drawing.Color]::FromArgb(0, 255, 255, 255))
+        # Fırça uzunluğundan biraz kısa doldur: döşeme sınırında ince çizgi kalmasın.
+        $g.FillRectangle($hl, 0, 0, $s, $s * 0.58)
+        $g.ResetClip()
+    }
 
-    $accent = [System.Drawing.Color]::FromArgb(255, 212, 242, 90)
+    $accent = [System.Drawing.Color]::FromArgb(255, 10, 13, 28)
     # tam merkez: şekil iki eksende de simetrik
     $cx = $s * 0.5; $cy = $s * 0.5
     # kaynak noktası
-    $dot = $s * 0.085
+    $dot = $s * 0.09
     $g.FillEllipse((New-Object System.Drawing.SolidBrush $accent), $cx - $dot, $cy - $dot, 2 * $dot, 2 * $dot)
     # yaylar (iki yana, sağa ve sola simetrik yayılan)
-    $w = [Math]::Max(1.2, $s * 0.062)
+    $w = [Math]::Max(1.4, $s * 0.068)
     foreach ($i in 1..2) {
         $rad = $s * (0.155 * $i + 0.03)
-        $alpha = [int](255 - ($i - 1) * 70)
+        $alpha = [int](255 - ($i - 1) * 55)
         $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb($alpha, $accent)), $w
         $pen.StartCap = 'Round'; $pen.EndCap = 'Round'
         $g.DrawArc($pen, $cx - $rad, $cy - $rad, 2 * $rad, 2 * $rad, -45, 90)

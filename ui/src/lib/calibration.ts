@@ -180,7 +180,7 @@ export function offCentreSuspect(rows: CalibrationRow[], speakers: Speaker[]): O
   return null
 }
 
-/* ---------- Ölçüm isteği ve sonuç birleştirme (Kalibrasyon ekranı ve Kolay kurulum ortak) ---------- */
+/* ---------- Ölçüm isteği ve sonuç birleştirme ---------- */
 
 /** Backend'in kullanıcı iptalinde döndürdüğü metin (hata sayılmaz). */
 export const CALIBRATION_CANCELLED = 'Kalibrasyon iptal edildi.'
@@ -259,3 +259,6 @@ export function withRoomEq(
   }
   return out
 }
+
+/** Bu SNR'nin altındaki ölçüm güvenilmez: o hoparlöre düzeltme uygulanmaz, seviye bir kez yükseltilip tekrarlanır. */
+export const MIN_SNR_DB = 15

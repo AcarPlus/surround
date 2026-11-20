@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import { canUseAdvanced, normalizeUiMode, resolveUiMode, shouldAutoOpenWizard, type UiMode } from '../lib/mode'
 import { api } from '../api/client'
 import {
   LOGICAL_CHANNELS,
@@ -33,7 +32,6 @@ import { ROLE_CUSTOM_MANUAL, ROLE_CUSTOM_MAP, computeMapSource, roleDef, rolePat
 import { plannedName, standardPosition, type BuildResult } from '../lib/setup'
 import { findCable, type FixId } from '../lib/health'
 import { explainError } from '../lib/errors'
-import { rejoinMessage } from '../lib/waiting'
 import {
   MAX_USER_PRESETS,
   cleanPresetName,
@@ -57,7 +55,7 @@ import {
   snapshotState,
 } from '../lib/profiles'
 
-export type Screen = 'home' | 'room' | 'sound' | 'calibration' | 'connection' | 'settings'
+export type Screen = 'home' | 'sound' | 'calibration' | 'settings'
 export type Theme = 'dark' | 'light'
 /** 'waiting': motor bir cihaz değişikliğiyle durdu, cihazlar dönünce kendiliğinden yeniden başlar (Durdur bitirir). */
 export type RunState = 'stopped' | 'starting' | 'running' | 'waiting'
@@ -113,6 +111,9 @@ interface HistoryEntry {
   label: string
 }
 const HISTORY_MAX = 100
+/** Kendiliğinden tampon büyütme: bu kadar yeni kesintide bir kez +20 ms, en çok bu kadar ms. */
+const AUTO_BUFFER_DROPS = 3
+const AUTO_BUFFER_MAX_MS = 200
 /** Aynı türden art arda gelen değişiklikler (sürükleme, kaydırıcı) bu süre içinde tek adım sayılır. */
 const COALESCE_MS = 900
 /**
@@ -159,14 +160,6 @@ interface State {
   lastCalibration: NonNullable<Config['lastCalibration']> | null
 
   wizardOpen: boolean
-  /** Basit / Gelişmiş arayüz (config'te `uiMode`; geri alma geçmişine girmez). Varsayılan Basit. */
-  uiMode: UiMode
-  /** Kolay kurulum (ölçümlü, rehberli) penceresi açık mı (bkz. screens/EasySetup.tsx). */
-  easySetupOpen: boolean
-  /** Kolay kurulum hangi adımdan açıldı: null = baştan; 'mic' = mevcut hoparlörleri yeniden ölç. */
-  easySetupStart: 'mic' | null
-  /** "Ölçmeden başla" penceresi açık mı (bkz. screens/QuickStart.tsx). */
-  quickStartOpen: boolean
   /** Test sesi çalan hoparlör (haritada vurgulanır). */
   playing: string | null
   past: HistoryEntry[]
@@ -223,19 +216,6 @@ interface State {
   ) => void
   openWizard: () => void
   closeWizard: () => void
-  /** Kip değiştirir; geçiş `canUseAdvanced()` (lisans) denetiminden geçer. Geçilen kipi döndürür (reddedilirse mevcut kip). */
-  setUiMode: (mode: UiMode) => UiMode
-  /**
-   * Kolay kurulumu açar ve o anki yapılandırmayı kontrol noktası olarak saklar (`cancelEasySetup` ona döner).
-   * `step: 'mic'` = hoparlörler zaten varsa doğrudan mikrofon adımından yeniden ölç.
-   */
-  openEasySetup: (opts?: { step?: 'mic' }) => void
-  /** Kolay kurulumu bitirip kapatır (yapılan değişiklikler kalır). */
-  closeEasySetup: () => void
-  /** Vazgeç: açılıştan beri yapılan yapılandırma değişiklikleri (kaynak, hoparlörler, ölçüm) geri alınır ve kapanır. */
-  cancelEasySetup: () => void
-  openQuickStart: () => void
-  closeQuickStart: () => void
   undo: () => void
   redo: () => void
   /** Sistem kontrolündeki "düzelt" düğmeleri. */
@@ -313,22 +293,6 @@ const initialTheme = (): Theme => {
   }
 }
 
-/** Açılışta yükleniyor ekranında doğru kabuğu (Basit/Gelişmiş) göstermek için son kipin tarayıcıdaki kopyası; asıl kaynak config'tir. */
-const UI_MODE_CACHE = 'surround.uiMode'
-const initialUiMode = (): UiMode => {
-  try {
-    return resolveUiMode(normalizeUiMode(localStorage.getItem(UI_MODE_CACHE)))
-  } catch {
-    return 'simple'
-  }
-}
-const cacheUiMode = (mode: UiMode) => {
-  try {
-    localStorage.setItem(UI_MODE_CACHE, mode)
-  } catch {
-    /* yoksay */
-  }
-}
 
 const sameRowStrict = (a: Speaker['source'], b: Speaker['source']): boolean => {
   const ka = Object.keys(a) as LogicalChannel[]
@@ -428,8 +392,6 @@ export const useStore = create<State>()((set, get) => {
   let listening = false
   let toastSeq = 0
   let toastTimer: ReturnType<typeof setTimeout> | undefined
-  /** Kolay kurulum açılırken yapılandırma ve geçmiş (Vazgeç bunlara döner). */
-  let easyCheckpoint: { snap: Snapshot; past: HistoryEntry[]; future: HistoryEntry[] } | null = null
 
   /**
    * Kaydedilecek belge: hoparlörlerin `auto` bayrakları da içinde taşınır. Hiçbir hoparlörün kullanmadığı
@@ -448,7 +410,6 @@ export const useStore = create<State>()((set, get) => {
     ...(s.userSpeakerPresets.length ? { userSpeakerPresets: s.userSpeakerPresets } : {}),
     ...(s.abBypass ? { abBypass: true } : {}),
     ...(s.activeProfileId ? { activeProfileId: s.activeProfileId } : {}),
-    uiMode: s.uiMode,
     ...(s.setupDone ? { setupDone: true } : {}),
     ...(s.lastCalibration ? { lastCalibration: s.lastCalibration } : {}),
   })
@@ -458,6 +419,46 @@ export const useStore = create<State>()((set, get) => {
     saveTimer = setTimeout(() => {
       api.saveConfig(buildConfig(get())).catch((e) => get().showError(e, 6000))
     }, delayMs)
+  }
+
+  /**
+   * Kesinti olan cihazın tamponunu kendiliğinden büyütür (kullanıcı ayar görmez): son büyütmeden beri en az
+   * `AUTO_BUFFER_DROPS` kesinti olduysa +20 ms, en çok `AUTO_BUFFER_MAX_MS`, iki büyütme arası en az 15 sn.
+   * Geri alma geçmişine girmez. Motor yeniden başlayınca sayaçlar sıfırlanır; taban da onlarla birlikte düşer.
+   */
+  const bufferBase: Record<string, { drops: number; at: number }> = {}
+  const autoBuffer = (status: SinkStatus[]) => {
+    if (get().runState !== 'running') return
+    const now = Date.now()
+    let outputs = get().outputs
+    for (const st of status) {
+      const drops = st.underruns
+      const base = bufferBase[st.deviceId]
+      if (!base || drops < base.drops) {
+        bufferBase[st.deviceId] = { drops, at: base?.at ?? 0 }
+        continue
+      }
+      const o = outputs.find((v) => v.deviceId === st.deviceId)
+      if (!o || drops - base.drops < AUTO_BUFFER_DROPS || now - base.at < 15000 || o.bufferMs >= AUTO_BUFFER_MAX_MS) continue
+      outputs = outputs.map((v) => (v === o ? { ...v, bufferMs: Math.min(AUTO_BUFFER_MAX_MS, o.bufferMs + 20) } : v))
+      bufferBase[st.deviceId] = { drops, at: now }
+    }
+    if (outputs !== get().outputs) {
+      set({ outputs })
+      scheduleSave(400)
+    }
+  }
+
+  /**
+   * Kaynak her zaman VB-Cable'dır (loopback) ve kullanıcı değiştirmez: kablo varsa kaynak kendiliğinden ona geçer.
+   * Geri alma geçmişine girmez; kablo yoksa kaynak olduğu gibi kalır (Bağlantı ekranı kurulum kartını gösterir).
+   */
+  const followCable = () => {
+    const { devices, source } = get()
+    const cable = findCable(devices)
+    if (!cable || (source.mode === 'loopback' && source.deviceId === cable.id)) return
+    set({ source: { ...source, mode: 'loopback', deviceId: cable.id } })
+    scheduleSave(400)
   }
 
   /**
@@ -528,13 +529,10 @@ export const useStore = create<State>()((set, get) => {
     lastCalibration: null,
 
     wizardOpen: false,
-    uiMode: initialUiMode(),
-    easySetupOpen: false,
-    easySetupStart: null,
-    quickStartOpen: false,
     playing: null,
     past: [],
     future: [],
+    // Düşük gecikme kapalı (arayüzde anahtarı yok): Bluetooth ve ağ hoparlörleri de kullanılır.
     lowLatency: false,
     theme: initialTheme(),
     screen: 'home',
@@ -603,10 +601,7 @@ export const useStore = create<State>()((set, get) => {
       // A/B açıkken uygulama kapandıysa config'te işleme kapalı kalmıştır; işaretten geri açılır.
       const abLeftover = cfg.abBypass === true
       const loaded = normalizeProcessing(cfg.processing)
-      const uiMode = resolveUiMode(normalizeUiMode(cfg.uiMode))
-      cacheUiMode(uiMode)
       set({
-        uiMode,
         abBypass: false,
         userSoundPresets: normalizeUserSoundPresets(cfg.userSoundPresets),
         userSpeakerPresets: normalizeUserSpeakerPresets(cfg.userSpeakerPresets),
@@ -624,25 +619,28 @@ export const useStore = create<State>()((set, get) => {
         auto,
         setupDone: !!cfg.setupDone || speakers.length > 0,
         lastCalibration: cfg.lastCalibration ?? null,
-        wizardOpen: shouldAutoOpenWizard(uiMode, speakers.length, !!cfg.setupDone),
+        // Yeni kullanıcıda (hoparlör yok, kurulum yapılmamış) sihirbaz kendiliğinden açılır.
+        wizardOpen: speakers.length === 0 && !cfg.setupDone,
         past: [],
         future: [],
         ready: true,
       })
       if (abLeftover) scheduleSave(100)
+      followCable()
       if (!listening) {
         listening = true
-        api.onStatus((status) => set({ status }))
+        api.onStatus((status) => {
+          set({ status })
+          autoBuffer(status)
+        })
         api.onEngine((info) => set({ engine: info.sourceRate > 0 ? info : null }))
         api.onEngineError((msg) => get().showError(new Error(msg), 7000))
         api.onEngineState((e) => get().setEngineState(e))
-        api.onDeviceRejoined((names) => get().showToast(rejoinMessage(names), 6000))
         // Tepsiden seçilen profil: backend kaydetti ve uyguladı; arayüz de aynı değerlere geçer (geri alınabilir).
         api.onProfileApplied((id) => {
           const p = get().profiles.find((v) => v.id === id)
           if (!p) return
           get().selectProfile(id)
-          get().showToast(`Profil: ${p.name} (tepsiden)`, 2500)
         })
       }
       // Ayar dosyası okunamadıysa backend varsayılanı yükledi ve eskisini yedekledi: bir kez haber ver.
@@ -695,7 +693,10 @@ export const useStore = create<State>()((set, get) => {
             const n = devices[i]
             return d.id === n.id && d.name === n.name && d.channels === n.channels && d.isDefault === n.isDefault
           })
-        if (!same) set({ devices })
+        if (!same) {
+          set({ devices })
+          followCable()
+        }
       } catch {
         /* sonraki denemede */
       }
@@ -711,7 +712,7 @@ export const useStore = create<State>()((set, get) => {
       }
     },
     // Seçim yalnızca Oda ekranında anlamlı (Delete ve ok tuşları orada çalışır).
-    setScreen: (screen) => set(screen === 'room' ? { screen } : { screen, selection: null }),
+    setScreen: (screen) => set(screen === 'home' ? { screen } : { screen, selection: null }),
     select: (selection) => set({ selection }),
 
     async toggleRun() {
@@ -822,7 +823,8 @@ export const useStore = create<State>()((set, get) => {
         `${label} düzeni`,
       )
       const msg = dropped > 0 ? `${label} düzeni uygulandı; ${dropped} hoparlör çıkarıldı.` : `${label} düzeni uygulandı.`
-      get().showToast(clashes > 0 ? `${msg} ${CLASH_WARNING}` : msg, 6000, { action: undoAction })
+      // Bildirim yalnızca dikkat gerektiğinde: boş kanal kalmadıysa düzen zaten sahnede görünüyor.
+      if (clashes > 0) get().showToast(`${msg} ${CLASH_WARNING}`, 6000, { action: undoAction })
     },
 
     applySetup(r, opts = {}) {
@@ -846,10 +848,9 @@ export const useStore = create<State>()((set, get) => {
         150,
         'Kurulum sihirbazı',
       )
-      if (!opts.silent) get().showToast(`Kurulum tamam: ${r.speakers.length} hoparlör.`, 6000, { action: undoAction })
     },
 
-    applyCalibration(patches, micDeviceId, at, opts = {}) {
+    applyCalibration(patches, micDeviceId, at, _opts = {}) {
       const { speakers, auto } = get()
       const nextAuto = { ...auto }
       for (const [id, p] of Object.entries(patches)) {
@@ -866,41 +867,10 @@ export const useStore = create<State>()((set, get) => {
         150,
         'Kalibrasyon',
       )
-      if (!opts.silent) get().showToast(`Kalibrasyon uygulandı (${n} hoparlör).`, 6000, { action: undoAction })
     },
 
     openWizard: () => set({ wizardOpen: true }),
     closeWizard: () => set({ wizardOpen: false, selection: null }),
-    setUiMode(mode) {
-      const next = mode === 'advanced' && !canUseAdvanced() ? 'simple' : mode
-      if (next === get().uiMode) return next
-      // Basit kipte Ayarlar dışında ekran yok: Gelişmiş'ten dönerken ana sayfaya git.
-      set({ uiMode: next, selection: null, ...(next === 'simple' && get().screen !== 'settings' ? { screen: 'home' as Screen } : {}) })
-      cacheUiMode(next)
-      scheduleSave(150)
-      return next
-    },
-    openEasySetup(opts = {}) {
-      const cur = get()
-      easyCheckpoint = { snap: snapshot(cur), past: cur.past, future: cur.future }
-      set({ easySetupOpen: true, easySetupStart: opts.step === 'mic' && cur.speakers.length > 0 ? 'mic' : null })
-    },
-    closeEasySetup() {
-      easyCheckpoint = null
-      set({ easySetupOpen: false, easySetupStart: null })
-    },
-    cancelEasySetup() {
-      const cp = easyCheckpoint
-      easyCheckpoint = null
-      set({ easySetupOpen: false, easySetupStart: null })
-      if (!cp) return
-      const now = snapshot(get())
-      if (HISTORY_KEYS.every((k) => now[k] === cp.snap[k])) return
-      restore(cp.snap)
-      set({ past: cp.past, future: cp.future })
-    },
-    openQuickStart: () => set({ quickStartOpen: true }),
-    closeQuickStart: () => set({ quickStartOpen: false }),
 
     undo() {
       const { past, future } = get()
@@ -908,7 +878,6 @@ export const useStore = create<State>()((set, get) => {
       if (!e) return
       set({ past: past.slice(0, -1), future: [...future, { snap: snapshot(get()), label: e.label }] })
       restore(e.snap)
-      get().showToast(`Geri alındı: ${e.label}`, 2500)
     },
 
     redo() {
@@ -917,20 +886,16 @@ export const useStore = create<State>()((set, get) => {
       if (!e) return
       set({ future: future.slice(0, -1), past: [...past, { snap: snapshot(get()), label: e.label }] })
       restore(e.snap)
-      get().showToast(`Yinelendi: ${e.label}`, 2500)
     },
 
     fixHealth(id, arg) {
       const st = get()
       switch (id) {
         case 'open-setup':
-          // Basit kipte sihirbaz yerine Kolay kurulum.
-          if (st.uiMode === 'simple') st.openEasySetup()
-          else st.openWizard()
+          st.openWizard()
           break
         case 'open-calibration':
-          if (st.uiMode === 'simple') st.openEasySetup({ step: 'mic' })
-          else st.setScreen('calibration')
+          st.setScreen('calibration')
           break
         case 'open-sound-panel':
           api.openSoundPanel().catch((e) => st.showError(e, 6000))
@@ -952,7 +917,7 @@ export const useStore = create<State>()((set, get) => {
         case 'select-speaker':
           if (arg) {
             set({ selection: arg })
-            st.setScreen('room')
+            st.setScreen('home')
           }
           break
         case 'raise-buffer': {

@@ -28,13 +28,16 @@ describe('roomEq', () => {
     expect(r0.isTarget).toBe(true)
     expect(r0.bands).toEqual([])
     expect(r1.rmsBefore).toBeGreaterThan(2)
-    expect(r1.rmsAfter).toBeLessThan(0.6)
-    const cut = r1.bands.find((b) => b.freqHz > 2000 && b.freqHz < 3200)
-    expect(cut?.gainDb).toBeLessThan(-5)
+    // 400 Hz'deki −4 dB çukur yalnızca +3 dB'ye kadar doldurulur (bilerek): kalan sapma 1 dB'nin altında.
+    expect(r1.rmsAfter).toBeLessThan(1)
+    // Bantların toplam etkisi tepenin olduğu yerde belirgin bir kesme olmalı (tek tek bantlara bölünmüş olabilir).
+    const eq = bandsDb(HZ, r1.bands)
+    const at2500 = eq[HZ.findIndex((f) => f >= 2500)]
+    expect(at2500).toBeLessThan(-5)
     expect(r1.bands.length).toBeLessThanOrEqual(8)
   })
 
-  it('derin çukuru doldurmaz: yükseltme +6 dB ile sınırlı', () => {
+  it('derin çukuru doldurmaz: yükseltme +3 dB ile sınırlı', () => {
     const dip = add(flat, pk(3000, 4, -12))
     const [, r] = matchSpeakers(HZ, [
       { speakerId: 'ref', responses: [flat] },

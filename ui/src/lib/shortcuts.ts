@@ -49,7 +49,7 @@ export function resolveShortcut(e: KeyInput, ctx: ShortcutContext): ShortcutActi
     return null
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return null
-  if (ctx.screen !== 'room' || !ctx.selection) return null
+  if (ctx.screen !== 'home' || !ctx.selection) return null
   if (e.key === 'Delete') return ctx.listenerSelected ? null : { kind: 'delete' }
   if (e.key === 'Escape') return { kind: 'deselect' }
   const v = ARROWS[e.key]

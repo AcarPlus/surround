@@ -10,7 +10,7 @@ export type CalibrationOutcome =
   | { ok: false; message: string; cancelled: boolean }
 
 /**
- * Bir ölçüm turunu yürütür (Kalibrasyon ekranı ve Kolay kurulum ortak):
+ * Bir ölçüm turunu yürütür:
  * ilerleme aboneliği (çalan hoparlör vurgusu dahil), bekleyen kaydı önce diske yazma, hata metni (mikrofon gizlilik
  * ipucu dahil), bitince motor durumunu eşitleme; ekrandan çıkılırsa süren ölçümü iptal eder (aksi halde sonuç kaybolur ve
  * sonraki başlatma "zaten sürüyor" der).

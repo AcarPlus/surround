@@ -10,7 +10,6 @@ import {
   calibrationPercent,
   calibrationRequest,
   computeCalibration,
-  defaultRepeats,
   isSubwoofer,
   matchInputs,
   micDevices,
@@ -19,12 +18,13 @@ import {
   onSourceDevice,
   pickReference,
   withRoomEq,
+  MIN_SNR_DB,
   type LevelTarget,
 } from '../lib/calibration'
 import { useCalibrationRun } from '../lib/useCalibrationRun'
 import { fmt, fmtSigned } from '../lib/format'
 import { RoomCanvas } from '../components/RoomCanvas'
-import { Badge, Button, Card, Field, NumberField, ScreenHeader, SectionTitle, Segmented, Select, Switch, cx } from '../components/ui'
+import { Badge, Button, Card, Field, NumberField, ScreenHeader, SectionTitle, Select, cx } from '../components/ui'
 import { IconCheck, IconMic, IconVolume, IconWarn } from '../components/icons'
 
 type Phase = 'setup' | 'running' | 'between' | 'result'
@@ -38,11 +38,16 @@ const POSITIONS = [
   'Dinleme noktasının ~20 cm arkasına (ya da biraz yukarı)',
 ]
 
-const LEVELS = [
-  { value: '-30', label: 'Kısık' },
-  { value: '-20', label: 'Orta' },
-  { value: '-12', label: 'Yüksek' },
-]
+/**
+ * Ölçüm her zaman en iyi ayarla yapılır, kullanıcıya seçenek bırakılmaz: tını eşleme açık, 5 nokta, 3 tekrar (medyan).
+ * Tarama seviyesi kendiliğinden ayarlanır: "Yüksek"te başlar; bir hoparlör ortam gürültüsünden yeterince ayrılmazsa
+ * aynı nokta bir kez "Çok yüksek"te tekrarlanır, mikrofon doyarsa kısılıp tekrarlanır.
+ */
+const POSITION_COUNT = POSITIONS.length
+const REPEATS = 3
+const LEVEL_HIGH_DB = -12
+const LEVEL_VERY_HIGH_DB = -6
+const LEVEL_SAFE_DB = -20
 
 export function CalibrationScreen() {
   const devices = useStore((s) => s.devices)
@@ -57,35 +62,31 @@ export function CalibrationScreen() {
 
   const mics = micDevices(devices)
   const [micId, setMicId] = useState(() => (mics.find((d) => d.isDefault) ?? mics[0])?.id ?? PHONE_MIC)
-  const [loopback, setLoopback] = useState(false)
-  const [loopbackId, setLoopbackId] = useState('')
-  const [level, setLevel] = useState('-20')
-  // null = automatic: 3 with the phone (a repeat with a gap in the phone's recording is dropped), else 2.
-  const [repeatsPick, setRepeats] = useState<string | null>(null)
+  // Son kullanılan seviye: bir kez yükseltilmesi gerektiyse sonraki noktalar da o seviyede ölçülür.
+  const [level, setLevel] = useState(LEVEL_HIGH_DB)
   // Loopback kaynağında, kaynak cihazdaki hoparlörler ölçülemez (backend tüm ölçümü reddeder).
   const onSource = (sp: { outputDeviceId: string }) => onSourceDevice(sp, source)
   const [chosen, setChosen] = useState<Set<string>>(
     () => new Set(speakers.filter((s) => !s.mute && !onSource(s)).map((s) => s.id)),
   )
-  const [refId, setRefId] = useState(() => speakers.find((s) => !s.mute && !isSubwoofer(s))?.id ?? speakers[0]?.id ?? '')
-  const [advanced, setAdvanced] = useState(false)
+  // Referans (zaman damgası) kendiliğinden: ilk sessize alınmamış, subwoofer olmayan hoparlör (genelde ön sol).
+  const refId = speakers.find((s) => !s.mute && !isSubwoofer(s))?.id ?? speakers[0]?.id ?? ''
 
   const [phase, setPhase] = useState<Phase>('setup')
   const [result, setResult] = useState<CalibrationResult | null>(null)
-  const [target, setTarget] = useState<LevelTarget>('quietest')
-  const [excluded, setExcluded] = useState<Set<string>>(new Set())
+  // Seviye en sessiz hoparlöre eşitlenir: hiçbir hoparlör yükseltilmez, kırpılma payı korunur.
+  const target: LevelTarget = 'quietest'
   // Mikrofon ortada değil şüphesi: kullanıcı onaylayana kadar uygulanmaz.
   const [askConfirm, setAskConfirm] = useState(false)
   // Tını eşleme: frekans yanıtları, birkaç konumda ölçülüp ortalanır.
-  const [matchEq, setMatchEq] = useState(true)
-  const [positions, setPositions] = useState('3')
   const [taken, setTaken] = useState<CalibrationResult[]>([])
-  const [eqTarget, setEqTarget] = useState<MatchTarget>('reference')
-  const [eqExcluded, setEqExcluded] = useState<Set<string>>(new Set())
+  // Tını hedefi referans (ön) hoparlör: içeriğin çoğunu çalan önler değişmez, diğerleri onlara benzetilir.
+  const eqTarget: MatchTarget = 'reference'
 
-  const phoneMode = micId === PHONE_MIC && !loopback
+  const matchEq = true
+  const phoneMode = micId === PHONE_MIC
   const phone = usePhoneLink(phoneMode)
-  const repeats = repeatsPick ?? String(defaultRepeats(phoneMode))
+  const repeats = REPEATS
   const cal = useCalibrationRun()
   const progress = cal.progress
 
@@ -95,33 +96,30 @@ export function CalibrationScreen() {
 
   const list = speakers.filter((s) => chosen.has(s.id) && !onSource(s))
   const ref = pickReference(list, refId)
-  const renders = devices.filter((d) => d.flow === 'render')
-  const effectiveMic = loopback ? loopbackId || renders[0]?.id : micId
+  const effectiveMic = micId
   const canStart = list.length >= 1 && !!effectiveMic && (!phoneMode || !!phone.status?.connected)
-  const wantPositions = matchEq ? Number(positions) : 1
+  const wantPositions = POSITION_COUNT
 
   /**
    * Bir ölçüm turu. `mode`: 'first' yeni ölçüm (konum 1), 'next' tını eşlemenin sonraki konumu, 'verify' düzeltmeler
    * açıkken doğrulama (tek konum).
    */
-  const start = async (mode: 'first' | 'next' | 'verify' = 'first') => {
+  const start = async (mode: 'first' | 'next' | 'verify' = 'first', levelDb = level, retried = false): Promise<void> => {
     const prev = mode === 'next' ? taken : []
     setPhase('running')
     if (mode !== 'next') {
       setResult(null)
       setTaken([])
-      setExcluded(new Set())
-      setEqExcluded(new Set())
     }
     setAskConfirm(false)
     const out = await cal.run(
       calibrationRequest({
         micDeviceId: effectiveMic!,
-        loopback,
+        loopback: false,
         speakers: list,
         referenceId: ref,
         repeats: Number(repeats),
-        levelDb: Number(level),
+        levelDb,
         responses: matchEq,
         verify: mode === 'verify',
       }),
@@ -137,6 +135,19 @@ export function CalibrationScreen() {
       if (out.cancelled) showToast(out.message, 3000)
       else showToast(out.message, 7000, { tone: 'error' })
       return
+    }
+    // Otomatik seviye: zayıf ölçümde bir kez daha yüksek sesle, mikrofon doyduysa daha kısık tekrarla.
+    if (!retried) {
+      const weak = out.result.speakers.some((m) => m.ok && m.snrDb < MIN_SNR_DB) || out.result.speakers.some((m) => !m.ok)
+      const next = out.result.micClipped
+        ? Math.max(LEVEL_SAFE_DB, levelDb - 8)
+        : weak && levelDb < LEVEL_VERY_HIGH_DB
+          ? LEVEL_VERY_HIGH_DB
+          : null
+      if (next !== null && next !== levelDb) {
+        setLevel(next)
+        return start(mode, next, true)
+      }
     }
     const all = [...prev, out.result]
     setTaken(all)
@@ -159,6 +170,12 @@ export function CalibrationScreen() {
   }
   useEffect(() => api.onPhoneStart(() => phoneStartRef.current()), [])
 
+  // Ölçülemeyen ya da gürültüden yeterince ayrılmayan hoparlörlere düzeltme uygulanmaz (seçenek yok).
+  const excluded = useMemo(
+    () => new Set(result ? result.speakers.filter((m) => !m.ok || m.snrDb < MIN_SNR_DB).map((m) => m.speakerId) : []),
+    [result],
+  )
+  const eqExcluded = excluded
   const rows = useMemo(
     () => (result ? computeCalibration(result, speakers, { target, excluded, outputs }) : []),
     [result, speakers, target, excluded, outputs],
@@ -170,11 +187,10 @@ export function CalibrationScreen() {
     return matchSpeakers(hz, matchInputs(list, taken), { target: eqTarget, referenceId: result.referenceSpeakerId })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hz, result, taken, eqTarget, speakers])
-  const hasRoomEq = speakers.some((s) => (s.roomEq?.length ?? 0) > 0)
 
   if (speakers.length === 0) {
     return (
-      <div className="h-full overflow-y-auto p-5">
+      <div className="screen-page h-full overflow-y-auto px-6 py-6">
         <ScreenHeader title="Kalibrasyon" sub="Mikrofonla gecikme ve seviye ölçümü." />
         <Card className="mx-auto max-w-[620px] p-6 text-center">
           <p className="text-[13px] text-muted">Önce hoparlörlerini tanıtmalısın.</p>
@@ -187,7 +203,7 @@ export function CalibrationScreen() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-5">
+    <div className="screen-page h-full overflow-y-auto px-6 py-6">
       <ScreenHeader
         title="Kalibrasyon"
         sub="Her hoparlörden kısa bir tarama sesi çalınır, mikrofon dinleme noktasında kaydeder. Cihaz gecikmeleri ve seviye farkları ölçülüp düzeltilir."
@@ -216,7 +232,7 @@ export function CalibrationScreen() {
             <Card className="p-4">
               <SectionTitle>1 · Mikrofon</SectionTitle>
               <Field label="Kayıt cihazı">
-                <Select ariaLabel="Mikrofon" value={micId} onChange={setMicId} disabled={loopback}>
+                <Select ariaLabel="Mikrofon" value={micId} onChange={setMicId}>
                   <option value={PHONE_MIC}>Telefon mikrofonu (QR kod ile)</option>
                   {mics.map((d) => (
                     <option key={d.id} value={d.id}>
@@ -269,116 +285,21 @@ export function CalibrationScreen() {
                     </span>
                     {isSubwoofer(s) && <Badge>bas bandı</Badge>}
                     {s.calibratedAt && <Badge tone="ok">ölçülmüş</Badge>}
-                    <label className="flex items-center gap-1.5 text-xs text-muted">
-                      <input
-                        type="radio"
-                        name="ref"
-                        className="accent-[rgb(var(--accent))]"
-                        checked={ref === s.id}
-                        disabled={!chosen.has(s.id) || onSource(s)}
-                        onChange={() => setRefId(s.id)}
-                      />
-                      referans
-                    </label>
+                    {ref === s.id && <span className="text-xs text-faint">referans</span>}
                   </li>
                 ))}
               </ul>
-              <p className="mt-2 text-xs text-faint">
-                Referans hoparlör her ölçümde zaman damgası olarak birlikte çalar; genelde ön sol iyi bir seçimdir.
-              </p>
             </Card>
 
             <Card className="p-4">
-              <SectionTitle>3 · Tını eşleme (EQ)</SectionTitle>
-              <label className="flex items-center justify-between gap-3 text-[13px]">
-                <span>
-                  Hoparlörlerin sesini birbirine benzet
-                  <span className="block text-xs text-muted">
-                    Her hoparlörün frekans eğrisi ölçülür; hedefe göre en fazla 8 bantlık otomatik EQ önerilir (kendi EQ ayarların
-                    korunur). Gecikme ve seviye her zaman ölçülür.
-                  </span>
-                </span>
-                <Switch checked={matchEq} onChange={setMatchEq} label="Tını eşleme" />
-              </label>
-              {matchEq && (
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <Field label="Ölçüm konumu sayısı">
-                    <Segmented
-                      value={positions}
-                      onChange={setPositions}
-                      size="sm"
-                      options={[
-                        { value: '1', label: '1' },
-                        { value: '3', label: '3 (önerilen)' },
-                        { value: '5', label: '5' },
-                      ]}
-                    />
-                  </Field>
-                  <p className="min-w-[220px] flex-1 text-xs text-faint">
-                    Tek noktadaki ölçüm odanın o noktaya özgü tepe/çukurlarını da yakalar; birkaç yakın noktanın ortalaması
-                    hoparlörün asıl rengini verir. Konumlar arasında mikrofonu/telefonu taşıyacaksın.
-                  </p>
-                </div>
-              )}
-              {hasRoomEq && (
-                <div className="mt-3 flex items-center justify-between gap-3 border-t border-line pt-3 text-xs text-muted">
-                  <span>Bazı hoparlörlerde kalibrasyondan gelen tını EQ’su var.</span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      const patches: Record<string, Partial<Speaker>> = {}
-                      for (const s of speakers) if (s.roomEq?.length) patches[s.id] = { roomEq: undefined }
-                      useStore.getState().applyCalibration(patches, lastCalibration?.micDeviceId ?? '', new Date().toISOString())
-                    }}
-                  >
-                    Tını EQ’sunu kaldır
-                  </Button>
-                </div>
-              )}
-            </Card>
-
-            <Card className="p-4">
-              <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => setAdvanced((v) => !v)}>
-                {advanced ? '▾' : '▸'} Gelişmiş
-              </button>
-              {advanced && (
-                <div className="mt-3 space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Tarama seviyesi">
-                      <Segmented value={level} onChange={setLevel} options={LEVELS} size="sm" />
-                    </Field>
-                    <Field label="Tekrar (medyan alınır)">
-                      <Segmented
-                        value={repeats}
-                        onChange={setRepeats}
-                        size="sm"
-                        options={[
-                          { value: '1', label: '1' },
-                          { value: '2', label: '2' },
-                          { value: '3', label: '3' },
-                        ]}
-                      />
-                    </Field>
-                  </div>
-                  <label className="flex items-center justify-between gap-3 text-[13px]">
-                    <span>
-                      Mikrofon yerine çıkış cihazının loopback’i (deneme)
-                      <span className="block text-xs text-faint">Sesi dijital olarak geri okur; akustik ölçmez, zinciri sınar.</span>
-                    </span>
-                    <Switch checked={loopback} onChange={setLoopback} label="Loopback ile dene" />
-                  </label>
-                  {loopback && (
-                    <Select ariaLabel="Loopback cihazı" value={loopbackId || renders[0]?.id || ''} onChange={setLoopbackId}>
-                      {renders.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.name}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </div>
-              )}
+              <SectionTitle>3 · Tını eşleme</SectionTitle>
+              <p className="text-[13px]">Hoparlörlerin sesi birbirine benzetilir; ayar gerekmez.</p>
+              <ul className="mt-2 space-y-1 text-xs text-muted">
+                <li>· Her hoparlör {POSITION_COUNT} noktada ölçülür; noktalar arasında mikrofonu/telefonu taşıyacaksın.</li>
+                <li>· Her ölçüm {REPEATS} kez tekrarlanır, ortadaki değer alınır.</li>
+                <li>· Ses seviyesi kendiliğinden ayarlanır: oda gürültülüyse daha yüksek sesle tekrarlanır.</li>
+                <li>· Kendi EQ ayarların korunur; gecikme ve seviye de aynı turda ölçülür.</li>
+              </ul>
             </Card>
           </div>
 
@@ -465,7 +386,6 @@ export function CalibrationScreen() {
             <Button variant="primary" disabled={!canStart} onClick={() => void start('next')}>
               <IconMic /> Devam: konum {taken.length + 1}
             </Button>
-            <Button onClick={() => setPhase('result')}>Bu kadarı yeter, sonuca geç</Button>
             <Button variant="ghost" onClick={() => setPhase('setup')}>
               Vazgeç
             </Button>
@@ -483,24 +403,11 @@ export function CalibrationScreen() {
               {result.micClipped && (
                 <Badge tone="warn">Mikrofon kırpıldı: seviyeyi düşürüp tekrar ölç</Badge>
               )}
-              <div className="ml-auto flex items-center gap-2 text-xs text-muted">
-                Seviye hedefi
-                <Segmented
-                  size="sm"
-                  value={target}
-                  onChange={setTarget}
-                  options={[
-                    { value: 'quietest', label: 'En sessize eşitle' },
-                    { value: 'median', label: 'Ortancaya eşitle' },
-                  ]}
-                />
-              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-[13px]">
                 <thead className="text-[11px] uppercase tracking-[0.06em] text-faint">
                   <tr className="border-b border-line">
-                    <th className="py-2 pr-2 font-semibold">Uygula</th>
                     <th className="py-2 pr-2 font-semibold">Hoparlör</th>
                     <th className="py-2 pr-2 text-right font-semibold">Varış</th>
                     <th className="py-2 pr-2 text-right font-semibold">Seviye</th>
@@ -514,21 +421,6 @@ export function CalibrationScreen() {
                 <tbody>
                   {rows.map((r) => (
                     <tr key={r.speakerId} className={cx('border-b border-line align-top', !r.include && 'text-faint')}>
-                      <td className="py-2 pr-2">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 accent-[rgb(var(--accent))]"
-                          checked={r.include}
-                          disabled={!r.ok}
-                          aria-label={`${r.name} uygulansın`}
-                          onChange={(e) => {
-                            const n = new Set(excluded)
-                            if (e.target.checked) n.delete(r.speakerId)
-                            else n.add(r.speakerId)
-                            setExcluded(n)
-                          }}
-                        />
-                      </td>
                       <td className="py-2 pr-2 font-medium">
                         {r.name}
                         {r.speakerId === result.referenceSpeakerId && <span className="ml-1.5 text-xs text-faint">(referans)</span>}
@@ -594,10 +486,7 @@ export function CalibrationScreen() {
               speakers={speakers}
               positions={taken.length}
               verified={!!result.verified}
-              target={eqTarget}
-              onTarget={setEqTarget}
               excluded={eqExcluded}
-              onExcluded={setEqExcluded}
             />
           )}
           <div className="flex flex-wrap gap-2">
@@ -713,10 +602,7 @@ function TimbreCard(props: {
   speakers: Speaker[]
   positions: number
   verified: boolean
-  target: MatchTarget
-  onTarget: (t: MatchTarget) => void
   excluded: Set<string>
-  onExcluded: (s: Set<string>) => void
 }) {
   const { hz, matches, speakers, verified, excluded } = props
   const name = (id: string) => speakers.find((s) => s.id === id)?.name ?? id
@@ -727,18 +613,6 @@ function TimbreCard(props: {
         <span className="text-xs text-muted">
           {props.positions} konumun ortalaması · 1/6 oktav yumuşatılmış · seviye ayrı eşitlenir
         </span>
-        <div className="ml-auto flex items-center gap-2 text-xs text-muted">
-          Hedef
-          <Segmented
-            size="sm"
-            value={props.target}
-            onChange={props.onTarget}
-            options={[
-              { value: 'reference', label: 'Referans hoparlör' },
-              { value: 'average', label: 'Hepsinin ortalaması' },
-            ]}
-          />
-        </div>
       </div>
       <div className="grid grid-cols-1 gap-3 min-[900px]:grid-cols-2 min-[1400px]:grid-cols-3">
         {matches.map((m) => {
@@ -747,18 +621,6 @@ function TimbreCard(props: {
           return (
             <div key={m.speakerId} className={cx('rounded-md border border-line p-3', excluded.has(m.speakerId) && 'opacity-50')}>
               <div className="mb-1 flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 accent-[rgb(var(--accent))]"
-                  checked={!excluded.has(m.speakerId)}
-                  aria-label={`${name(m.speakerId)} tını EQ'su uygulansın`}
-                  onChange={(e) => {
-                    const n = new Set(excluded)
-                    if (e.target.checked) n.delete(m.speakerId)
-                    else n.add(m.speakerId)
-                    props.onExcluded(n)
-                  }}
-                />
                 <span className="flex-1 truncate text-[13px] font-medium">{name(m.speakerId)}</span>
                 {m.isTarget ? (
                   <Badge>hedef</Badge>
@@ -780,7 +642,7 @@ function TimbreCard(props: {
       </div>
       <p className="mt-3 text-xs text-faint">
         Kesikli: hedef · ince turuncu: ölçülen · kalın: önerilen EQ ile. Gri bölgeler eşlenmez (bas yönetimiyle kesilen ya da
-        hoparlörün doğal olarak düştüğü uçlar, 12 kHz üstü). Çukurlar en fazla +6 dB doldurulur; derin çukur hoparlörün değil odanın/konumun olabilir. Subwoofer’lar eşlenmez.
+        hoparlörün doğal olarak düştüğü uçlar, 12 kHz üstü). Çukurlar en fazla +3 dB doldurulur; derin çukur hoparlörün değil odanın/konumun olabilir. Subwoofer’lar eşlenmez.
       </p>
     </Card>
   )

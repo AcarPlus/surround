@@ -102,21 +102,21 @@ describe('kopyala ve düzen şablonu boş kanal seçer', () => {
     st().applyLayout({ floor: 4, sub: 0, height: 0 })
     const keys = st().speakers.map((s) => `${s.outputDeviceId}#${s.deviceChannel}`)
     expect(new Set(keys).size).toBe(4)
-    expect(st().toast?.message).not.toMatch(/Boş kanal/)
+    expect(st().toast?.message ?? '').not.toMatch(/Boş kanal/)
     st().applyLayout({ floor: 5, sub: 1, height: 0 })
     expect(st().toast?.message).toMatch(/Boş kanal/)
   })
 })
 
 describe('seçim', () => {
-  it('Oda dışına geçince ve sihirbaz kapanınca seçim temizlenir', () => {
-    st().setScreen('room')
-    st().select(st().speakers[0].id)
-    st().setScreen('room')
-    expect(st().selection).not.toBeNull()
+  it('Oda (ana ekran) dışına geçince ve sihirbaz kapanınca seçim temizlenir', () => {
     st().setScreen('home')
+    st().select(st().speakers[0].id)
+    st().setScreen('home')
+    expect(st().selection).not.toBeNull()
+    st().setScreen('sound')
     expect(st().selection).toBeNull()
-    st().setScreen('room')
+    st().setScreen('home')
     st().select(st().speakers[0].id)
     st().openWizard()
     st().closeWizard()

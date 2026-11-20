@@ -1,46 +1,22 @@
 import type { ReactNode } from 'react'
 import { useStore, type Screen } from '../store/useStore'
-import { checkHealth } from '../lib/health'
-import { IconEq, IconGear, IconHome, IconMic, IconPlug, IconRoom } from './icons'
+import { IconEq, IconGear, IconMic, IconRoom } from './icons'
 import { cx } from './ui'
 
 const ITEMS: { id: Screen; label: string; icon: ReactNode }[] = [
-  { id: 'home', label: 'Ana sayfa', icon: <IconHome /> },
-  { id: 'room', label: 'Oda', icon: <IconRoom /> },
+  { id: 'home', label: 'Oda', icon: <IconRoom /> },
   { id: 'sound', label: 'Ses', icon: <IconEq /> },
-  { id: 'calibration', label: 'Kalibrasyon', icon: <IconMic /> },
-  { id: 'connection', label: 'Bağlantı', icon: <IconPlug /> },
+  { id: 'calibration', label: 'Ölçüm', icon: <IconMic /> },
 ]
 
 /** Alta sabitlenir. */
 const SETTINGS_ITEM: { id: Screen; label: string; icon: ReactNode } = { id: 'settings', label: 'Ayarlar', icon: <IconGear /> }
 
-/** Ana sayfa simgesinde hata/uyarı sayısı rozeti. */
-function useProblemCount(): { n: number; error: boolean } {
-  const s = useStore()
-  const items = checkHealth({
-    devices: s.devices,
-    source: s.source,
-    speakers: s.speakers,
-    upmix: s.upmix,
-    upmixOptions: s.upmixOptions,
-    processing: s.processing,
-    running: s.runState === 'running',
-    status: s.status,
-    lowLatency: s.lowLatency,
-    calibrated: true,
-    waiting: s.runState === 'waiting' ? { missing: s.waitingFor, message: s.waitMessage } : null,
-  })
-  const bad = items.filter((i) => i.level !== 'info')
-  return { n: bad.length, error: bad.some((i) => i.level === 'error') }
-}
-
 export function NavRail() {
   const screen = useStore((s) => s.screen)
   const setScreen = useStore((s) => s.setScreen)
-  const problems = useProblemCount()
   return (
-    <nav aria-label="Ana gezinme" className="flex w-[84px] shrink-0 flex-col gap-1 border-r border-line bg-surface px-2 py-3">
+    <nav aria-label="Ana gezinme" className="glass flex w-[84px] shrink-0 flex-col items-center gap-1.5 border-r border-line/70 py-4">
       {[...ITEMS, SETTINGS_ITEM].map((it) => {
         const active = screen === it.id
         return (
@@ -49,26 +25,14 @@ export function NavRail() {
             onClick={() => setScreen(it.id)}
             aria-current={active ? 'page' : undefined}
             className={cx(
-              'relative flex flex-col items-center gap-1 rounded-md py-2 text-[11px] font-medium transition-colors',
+              'flex h-[58px] w-[64px] flex-col items-center justify-center gap-1 rounded-2xl text-[11px] font-medium transition-colors',
               it.id === 'settings' && 'mt-auto',
-              active ? 'bg-raised text-fg' : 'text-muted hover:bg-raised/60 hover:text-fg',
+              active
+                ? 'bg-accent/[0.14] text-accent shadow-[inset_0_0_0_1px_rgb(var(--accent)/0.25),0_0_24px_rgb(var(--accent)/0.18)]'
+                : 'text-muted hover:bg-raised/60 hover:text-fg',
             )}
           >
-            {active && <span className="absolute -left-2 bottom-2 top-2 w-[3px] rounded-r bg-accent" />}
-            <span className={cx('relative', active && 'text-accent')}>
-              {it.icon}
-              {it.id === 'home' && problems.n > 0 && (
-                <span
-                  className={cx(
-                    'num absolute -right-2.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold text-bg',
-                    problems.error ? 'bg-err' : 'bg-warn',
-                  )}
-                  aria-label={`${problems.n} sorun`}
-                >
-                  {problems.n}
-                </span>
-              )}
-            </span>
+            {it.icon}
             {it.label}
           </button>
         )

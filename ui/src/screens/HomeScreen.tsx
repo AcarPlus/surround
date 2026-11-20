@@ -1,199 +1,267 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
-import { checkHealth, type HealthItem } from '../lib/health'
-import { countLayout, formatLayout } from '../lib/layout'
+import { RoomStage } from '../components/RoomStage'
+import { SpeakerPopover } from '../components/SpeakerPopover'
+import { LayoutPicker } from '../components/LayoutPicker'
+import { Inspector } from '../components/Inspector'
+import { Menu, type MenuItem } from '../components/Dialog'
+import { Button, NumberField, cx } from '../components/ui'
+import { IconPlus, IconVolume, IconX } from '../components/icons'
+import { ROLES, effectiveRole } from '../lib/roles'
+import { GHOST_ROLES } from '../components/RoomStage'
+import { primaryChannel } from '../lib/geometry'
+import { deviceColorVar } from '../lib/colors'
+import { speakerLevel, useLevels } from '../lib/useLevels'
 import { upmixStateLabel } from '../lib/upmix'
-import { RoomCanvas } from '../components/RoomCanvas'
-import { RunButton } from '../components/TopBar'
-import { Badge, Button, Card, SectionTitle, cx } from '../components/ui'
-import { IconCheck, IconInfo, IconVolume, IconWarn } from '../components/icons'
 
+/** Ana ekran: odanın kendisi. Hoparlörler burada yerleştirilir, eklenir, ayarlanır; altta canlı seviyeler. */
 export function HomeScreen() {
-  const s = useStore()
+  const speakers = useStore((s) => s.speakers)
+  const playing = useStore((s) => s.playing)
+  const selection = useStore((s) => s.selection)
+  const playTour = useStore((s) => s.playTour)
+  const stopTour = useStore((s) => s.stopTour)
+  const openWizard = useStore((s) => s.openWizard)
+  const [editing, setEditing] = useState(false)
+  const [details, setDetails] = useState(false)
+
   // Bu ekrandan başlatılan "sırayla çal" ekrandan çıkınca dursun.
   useEffect(() => () => useStore.getState().stopTour(), [])
-  const items = useMemo(
-    () =>
-      checkHealth({
-        devices: s.devices,
-        source: s.source,
-        speakers: s.speakers,
-        upmix: s.upmix,
-        upmixOptions: s.upmixOptions,
-        processing: s.processing,
-        running: s.runState === 'running',
-        status: s.status,
-        lowLatency: s.lowLatency,
-        calibrated: !!s.lastCalibration,
-        waiting: s.runState === 'waiting' ? { missing: s.waitingFor, message: s.waitMessage } : null,
-      }),
-    [s.devices, s.source, s.speakers, s.upmix, s.upmixOptions, s.processing, s.runState, s.status, s.lowLatency, s.lastCalibration, s.waitingFor, s.waitMessage],
-  )
-  const counts = countLayout(s.speakers)
-  // 2.1 setin dahili subwoofer'ı (bas alıcısı ön hoparlörler) da ".1" sayılır.
-  if (counts.sub === 0 && s.speakers.some((sp) => sp.bassReceiver && !sp.mute)) counts.sub = 1
-  const layout = formatLayout(counts)
-  const running = s.runState === 'running'
-  const src = s.devices.find((d) => d.id === s.source.deviceId)
+  // Seçim kalkınca ayrıntı paneli de kapansın.
+  useEffect(() => {
+    if (!selection) setDetails(false)
+  }, [selection])
+  useEffect(() => {
+    if (speakers.length === 0) setEditing(false)
+  }, [speakers.length])
 
   return (
-    <div className="h-full overflow-y-auto p-5">
-      <div className="mx-auto grid max-w-[1180px] grid-cols-1 gap-4 min-[1180px]:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="space-y-4">
-          <Card className="flex flex-wrap items-center gap-5 p-5">
-            <RunButton big />
-            <div className="min-w-0 flex-1">
-              <p className="text-[15px] font-semibold">
-                {running ? 'Ses tüm hoparlörlere dağıtılıyor' : s.speakers.length ? 'Hazır' : 'Kurulum gerekli'}
-              </p>
-              <p className="mt-0.5 text-[13px] text-muted">
-                {s.speakers.length === 0
-                  ? 'Önce hoparlörlerini tanıtalım; birkaç soru yeterli.'
-                  : `${layout} düzen · ${s.speakers.length} hoparlör · kaynak: ${src?.name ?? 'yok'}`}
-              </p>
-              {running && s.engine && (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <Badge tone={s.engine.upmix === 'stereo' ? 'accent' : s.engine.upmix === 'native' ? 'ok' : 'neutral'}>
-                    {upmixStateLabel(s.engine)}
-                  </Badge>
-                  {s.engine.upmixLatencyMs > 0 && s.engine.upmix === 'stereo' && (
-                    <span className="num text-xs text-faint">+{Math.round(s.engine.upmixLatencyMs)} ms</span>
-                  )}
-                </div>
-              )}
-            </div>
-            {s.speakers.length === 0 && (
-              <Button variant="primary" onClick={s.openWizard}>
-                Kurulum sihirbazı
-              </Button>
-            )}
-          </Card>
-
-          <ProfileCards />
-
-          <Card className="overflow-hidden">
-            <div className="flex items-center justify-between border-b border-line px-4 py-2.5">
-              <SectionTitle>Oda</SectionTitle>
-              <div className="flex gap-2">
-                <Button size="sm" onClick={() => (s.playing ? s.stopTour() : void s.playTour())} disabled={!s.speakers.length}>
-                  <IconVolume /> {s.playing ? 'Durdur' : 'Sırayla çal'}
-                </Button>
-                <Button size="sm" onClick={() => s.setScreen('room')}>
-                  Düzenle
-                </Button>
-              </div>
-            </div>
-            <div className="h-[340px]">
-              <RoomCanvas editable={false} compact />
-            </div>
-          </Card>
-        </div>
-
-        <div className="space-y-4">
-          <Card className="p-4">
-            <SectionTitle right={<HealthSummary items={items} />}>Sistem kontrolü</SectionTitle>
-            {items.length === 0 ? (
-              <p className="flex items-center gap-2 text-[13px] text-ok">
-                <IconCheck /> Her şey yolunda.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {items.map((it) => (
-                  <HealthRow key={it.id} item={it} onFix={() => it.fix && s.fixHealth(it.fix.id, it.fix.arg)} />
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <Card className="p-4">
-            <SectionTitle>Hoparlörler</SectionTitle>
-            {s.speakers.length === 0 ? (
-              <p className="text-[13px] text-muted">Tanımlı hoparlör yok.</p>
-            ) : (
-              <ul className="divide-y divide-line">
-                {s.speakers.map((sp) => (
-                  <li key={sp.id} className="flex items-center gap-2 py-1.5">
-                    <span className={cx('min-w-0 flex-1 truncate text-[13px]', sp.mute && 'text-faint line-through')}>{sp.name}</span>
-                    {sp.calibratedAt && <Badge tone="ok">Ölçüldü</Badge>}
-                    <button
-                      type="button"
-                      onClick={() => void s.playTone(sp.id)}
-                      className={cx('rounded p-1 text-muted hover:text-fg', s.playing === sp.id && 'text-accent')}
-                      aria-label={`${sp.name} test sesi`}
-                      title="Test sesi"
-                    >
-                      <IconVolume />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => s.updateSpeaker(sp.id, { mute: !sp.mute })}
-                      className="w-14 rounded border border-line-strong px-1.5 py-0.5 text-[11px] text-muted hover:text-fg"
-                    >
-                      {sp.mute ? 'Aç' : 'Sustur'}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-6 pb-1 pt-4">
+        <LayoutPicker />
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <ToolButton onClick={() => (playing ? stopTour() : void playTour())} disabled={speakers.length === 0}>
+            <IconVolume width={15} height={15} /> {playing ? 'Durdur' : 'Sırayla çal'}
+          </ToolButton>
+          {editing && <OtherRolesMenu />}
+          <ToolButton active={editing} onClick={() => setEditing((v) => !v)} disabled={speakers.length === 0}>
+            <IconPlus width={15} height={15} /> {editing ? 'Bitti' : 'Hoparlör ekle'}
+          </ToolButton>
+          <RoomMenu />
         </div>
       </div>
-    </div>
-  )
-}
 
-function HealthSummary({ items }: { items: HealthItem[] }) {
-  const e = items.filter((i) => i.level === 'error').length
-  const w = items.filter((i) => i.level === 'warn').length
-  if (e) return <Badge tone="err">{e} hata</Badge>
-  if (w) return <Badge tone="warn">{w} uyarı</Badge>
-  return <Badge tone="ok">Sorun yok</Badge>
-}
-
-function HealthRow({ item, onFix }: { item: HealthItem; onFix: () => void }) {
-  const tone = item.level === 'error' ? 'text-err' : item.level === 'warn' ? 'text-warn' : 'text-muted'
-  return (
-    <li className="flex gap-2.5 rounded-md border border-line p-2.5">
-      <span className={cx('mt-0.5 shrink-0', tone)}>{item.level === 'info' ? <IconInfo /> : <IconWarn />}</span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[13px] font-medium">{item.title}</p>
-        <p className="mt-0.5 text-xs text-muted">{item.detail}</p>
-        {item.fix && (
-          <Button size="sm" className="mt-2" variant={item.level === 'info' ? 'default' : 'primary'} onClick={onFix}>
-            {item.fix.label}
-          </Button>
+      <div className="relative min-h-0 flex-1">
+        <RoomStage
+          editing={editing}
+          renderPopover={(sp, anchor) =>
+            details ? null : <SpeakerPopover speaker={sp} anchor={anchor} onDetails={() => setDetails(true)} />
+          }
+        />
+        {editing && (
+          <p className="pointer-events-none absolute inset-x-0 top-2 text-center text-xs text-accent">
+            Eklemek istediğin yere dokun · kaldırmak için hoparlöre dokun
+          </p>
+        )}
+        {speakers.length === 0 && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center">
+            <p className="text-[22px] font-semibold tracking-tight">Odanı kuralım</p>
+            <p className="max-w-[420px] text-[14px] text-muted">
+              Hangi hoparlörlerin bağlı olduğunu birkaç soruyla öğrenip odaya yerleştiririz. Sonra istediğin gibi sürükleyip
+              düzenlersin.
+            </p>
+            <Button variant="primary" className="h-11 px-6 text-[14px]" onClick={openWizard}>
+              Kurulumu başlat
+            </Button>
+          </div>
+        )}
+        {details && selection && (
+          <div className="screen-in absolute inset-y-0 right-0 z-30 flex shadow-[-20px_0_60px_rgb(0_0_0/0.45)]">
+            <button
+              type="button"
+              aria-label="Ayrıntıları kapat"
+              onClick={() => setDetails(false)}
+              className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:bg-raised hover:text-fg"
+            >
+              <IconX width={13} height={13} />
+            </button>
+            <Inspector />
+          </div>
         )}
       </div>
-    </li>
+
+      <LevelStrip />
+    </div>
   )
 }
 
-function ProfileCards() {
-  const profiles = useStore((s) => s.profiles)
-  const active = useStore((s) => s.activeProfileId)
-  const select = useStore((s) => s.selectProfile)
-  const hint: Record<string, string> = {
-    'builtin-film': 'Diyalog önde, geniş sahne',
-    'builtin-game': 'Düşük gecikme, net yön',
-    'builtin-music': 'Doğal, temiz stereo',
-  }
+function ToolButton({
+  children,
+  onClick,
+  disabled,
+  active,
+}: {
+  children: React.ReactNode
+  onClick: () => void
+  disabled?: boolean
+  active?: boolean
+}) {
   return (
-    <div className="grid grid-cols-2 gap-3 min-[900px]:grid-cols-4">
-      {profiles.slice(0, 4).map((p) => (
-        <button
-          key={p.id}
-          type="button"
-          onClick={() => select(p.id)}
-          aria-pressed={active === p.id}
-          className={cx(
-            'rounded-lg border p-3 text-left transition-colors',
-            active === p.id ? 'border-accent bg-accent/10' : 'border-line bg-surface hover:border-line-strong',
-          )}
-        >
-          <span className={cx('block text-[14px] font-semibold', active === p.id && 'text-accent')}>{p.name}</span>
-          <span className="mt-0.5 block text-xs text-muted">{hint[p.id] ?? (p.upmix ? 'Upmix açık' : 'Upmix kapalı')}</span>
-        </button>
-      ))}
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      className={cx(
+        'flex h-9 items-center gap-2 rounded-xl border px-3.5 text-[13px] font-medium transition-colors disabled:opacity-40',
+        active ? 'border-accent bg-accent text-accent-fg' : 'border-line bg-surface hover:border-line-strong',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** Sahnede yuvası olmayan roller (geniş, arka orta, üst orta, rolsüz). */
+function OtherRolesMenu() {
+  const speakers = useStore((s) => s.speakers)
+  const addSpeaker = useStore((s) => s.addSpeaker)
+  const used = new Set(speakers.map((s) => effectiveRole(s)))
+  const items: MenuItem[] = [
+    { header: true, label: 'Diğer konumlar', onSelect: () => {} },
+    ...ROLES.filter((r) => !GHOST_ROLES.includes(r.id)).map((r) => ({
+      label: r.label,
+      hint: used.has(r.id) ? 'zaten var' : undefined,
+      onSelect: () => addSpeaker(r.id),
+    })),
+    { label: 'Rolsüz hoparlör', hint: 'boş kalan kanala atanır', onSelect: () => addSpeaker() },
+  ]
+  return (
+    <Menu
+      align="right"
+      items={items}
+      trigger={({ toggle, open }) => (
+        <ToolButton onClick={toggle} active={open}>
+          Diğer…
+        </ToolButton>
+      )}
+    />
+  )
+}
+
+/** Oda boyutu ve seyrek kullanılan oda işlemleri. */
+function RoomMenu() {
+  const room = useStore((s) => s.room)
+  const setRoomSize = useStore((s) => s.setRoomSize)
+  const autoAll = useStore((s) => s.autoAll)
+  const openWizard = useStore((s) => s.openWizard)
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <ToolButton onClick={() => setOpen((v) => !v)} active={open}>
+        <span className="num">
+          {room.widthM.toFixed(1).replace('.', ',')} × {room.depthM.toFixed(1).replace('.', ',')} m
+        </span>
+      </ToolButton>
+      {open && (
+        <div className="screen-in absolute right-0 top-11 z-40 w-[280px] space-y-3 rounded-2xl border border-line-strong bg-surface p-4 shadow-[var(--shadow)]">
+          <div>
+            <p className="mb-2 text-xs text-muted">Oda boyutu</p>
+            <div className="flex items-center gap-2">
+              <NumberField ariaLabel="Oda genişliği (m)" className="w-[92px]" value={room.widthM} min={2} max={20} step={0.5} unit="m" onChange={(v) => setRoomSize(v, room.depthM)} />
+              <span className="text-faint">×</span>
+              <NumberField ariaLabel="Oda derinliği (m)" className="w-[92px]" value={room.depthM} min={2} max={20} step={0.5} unit="m" onChange={(v) => setRoomSize(room.widthM, v)} />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1 border-t border-line pt-3">
+            <button
+              type="button"
+              onClick={() => {
+                autoAll()
+                setOpen(false)
+              }}
+              className="rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-raised"
+            >
+              Gecikme ve seviyeyi mesafeden hesapla
+              <span className="block text-xs text-muted">Ölçülen değerler de mesafeye döner</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                openWizard()
+                setOpen(false)
+              }}
+              className="rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-raised"
+            >
+              Kurulumu baştan yap
+              <span className="block text-xs text-muted">Cihazlara ne bağlı olduğunu yeniden sorar</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+/** Alt şerit: her hoparlörün canlı seviyesi ve motorun ne yaptığı. */
+function LevelStrip() {
+  const speakers = useStore((s) => s.speakers)
+  const devices = useStore((s) => s.devices)
+  const runState = useStore((s) => s.runState)
+  const engine = useStore((s) => s.engine)
+  const status = useStore((s) => s.status)
+  const source = useStore((s) => s.source)
+  const running = runState === 'running'
+  const levels = useLevels(running)
+  const src = devices.find((d) => d.id === source.deviceId)
+  const drops = status.reduce((a, s) => a + s.underruns + s.overruns, 0)
+
+  const stats: { k: string; v: string }[] = [
+    { k: 'Kaynak', v: src ? `${src.name.split(' (')[0]}${engine?.sourceRate ? ` · ${Math.round(engine.sourceRate / 1000)} kHz` : ''}` : 'seçilmedi' },
+    { k: 'Yayılım', v: running && engine ? upmixStateLabel(engine) : '—' },
+    { k: 'Ek gecikme', v: running && engine && engine.upmix === 'stereo' && engine.upmixLatencyMs > 0 ? `${Math.round(engine.upmixLatencyMs)} ms` : '—' },
+    { k: 'Kesinti', v: running ? (drops > 0 ? String(drops) : 'yok') : '—' },
+  ]
+
+  return (
+    <footer className="glass flex h-[118px] shrink-0 items-stretch gap-7 border-t border-line/70 px-6">
+      <div className="flex w-[132px] shrink-0 flex-col justify-center gap-1">
+        <span className="text-[11px] font-medium tracking-[0.08em] text-muted">CANLI SEVİYE</span>
+        <span className="text-xs text-faint">{running ? 'Her hoparlör, şu an çaldığı kadar' : 'Motor durdu'}</span>
+      </div>
+      <div className="flex min-w-0 flex-1 items-end gap-3 overflow-x-auto pb-3 pt-4">
+        {speakers.map((s) => {
+          const lv = speakerLevel(s, levels)
+          const color = deviceColorVar(s.outputDeviceId, devices)
+          const ch = primaryChannel(s.source)
+          return (
+            <div key={s.id} className="flex w-10 shrink-0 flex-col items-center gap-1.5" title={s.name}>
+              <div className="relative h-[60px] w-3 overflow-hidden rounded-[3px]">
+                <div className="led absolute inset-0 bg-raised" />
+                <div
+                  className="led absolute inset-x-0 bottom-0 transition-[height] duration-100 ease-linear"
+                  style={{
+                    height: `${Math.round(lv * 100)}%`,
+                    background: `linear-gradient(0deg, ${color} 0%, ${color} 70%, rgb(var(--warn)) 92%, rgb(var(--err)) 100%)`,
+                    backgroundSize: '100% 60px',
+                    backgroundPosition: 'bottom',
+                    filter: `drop-shadow(0 0 6px ${color})`,
+                  }}
+                />
+              </div>
+              <span className={cx('num text-[11px]', s.mute ? 'text-faint line-through' : 'text-fg/80')}>{ch === 'LFE' ? 'SUB' : ch ?? '—'}</span>
+            </div>
+          )
+        })}
+      </div>
+      <dl className="grid min-w-[360px] shrink-0 grid-cols-2 content-center gap-x-7 gap-y-2.5 border-l border-line pl-7">
+        {stats.map((st) => (
+          <div key={st.k} className="min-w-0">
+            <dt className="text-[11px] text-muted">{st.k}</dt>
+            <dd className="num truncate text-[13px] font-medium">{st.v}</dd>
+          </div>
+        ))}
+      </dl>
+    </footer>
   )
 }

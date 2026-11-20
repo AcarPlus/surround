@@ -28,37 +28,58 @@ export function ProfileMenu() {
     }
   }, [open])
 
+  // İlk üç profil (Film/Oyun/Müzik) tek dokunuşla; seçili profil başka biriyse o da görünür.
+  const quick = profiles.slice(0, 3)
+  if (active && !quick.some((p) => p.id === active.id)) quick.push(active)
+
   return (
-    <div ref={root} className="flex items-center gap-2">
-      <span className="hidden text-xs text-faint xl:inline">Profil</span>
+    <div ref={root} className="flex items-center">
+      <div role="group" aria-label="Ses profili" className="flex gap-0.5 rounded-xl border border-line bg-bg/60 p-1">
+        {quick.map((p) => {
+          const on = p.id === active?.id
+          return (
+            <button
+              key={p.id}
+              type="button"
+              aria-pressed={on}
+              onClick={() => !on && selectProfile(p.id)}
+              title={on && modified ? 'Profil değiştirildi (kaydedilmedi)' : p.name}
+              className={cx(
+                'flex h-8 max-w-[120px] items-center gap-1 rounded-lg px-3.5 text-[13px] font-semibold transition-colors',
+                on ? 'bg-raised text-accent shadow-[inset_0_0_0_1px_rgb(var(--accent)/0.45),0_0_18px_rgb(var(--accent)/0.12)]' : 'text-muted hover:text-fg',
+              )}
+            >
+              <span className="truncate">{p.name}</span>
+              {on && modified && (
+                <span aria-label="değiştirildi" className="text-warn">
+                  •
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
       <div className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title={modified ? 'Profil değiştirildi (kaydedilmedi)' : 'Profil seç'}
+        aria-label="Tüm profiller"
+        title="Tüm profiller"
         className={cx(
-          'inline-flex h-8 w-[132px] items-center justify-between gap-1.5 rounded border bg-surface px-2.5 text-[13px] font-medium transition-colors',
-          open ? 'border-accent' : 'border-line-strong hover:border-muted',
+          'ml-1 flex h-9 w-7 items-center justify-center rounded-lg text-muted transition-colors hover:text-fg',
+          open && 'text-accent',
         )}
       >
-        <span className={cx('flex min-w-0 items-center gap-1', !active && 'text-muted')}>
-          <span className="truncate">{active ? active.name : 'Profil yok'}</span>
-          {active && modified && (
-            <span aria-label="değiştirildi" className="text-warn">
-              •
-            </span>
-          )}
-        </span>
-        <IconChevron className={cx('shrink-0 text-faint transition-transform', open && 'rotate-180')} />
+        <IconChevron className={cx('shrink-0 transition-transform', open && 'rotate-180')} />
       </button>
 
       {open && (
         <div
           role="menu"
           aria-label="Profiller"
-          className="absolute left-0 top-full z-50 mt-1.5 w-[220px] rounded-lg border border-line-strong bg-raised p-1 shadow-[var(--shadow)]"
+          className="absolute right-0 top-full z-50 mt-1.5 w-[220px] rounded-lg border border-line-strong bg-raised p-1 shadow-[var(--shadow)]"
         >
           {profiles.map((p) => {
             const isActive = p.id === active?.id
