@@ -3,116 +3,407 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Surround · İndir</title>
-<meta name="description" content="Surround: Windows'ta tüm hoparlörlerinizi tek bir çevresel ses sistemine çeviren ücretsiz uygulama. Tek tıkla kurulum.">
-<meta name="theme-color" content="#0e1013">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%23d4f25a' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23d4f25a'/%3E%3C/svg%3E">
+<title>Surround · Tüm hoparlörler, tek çevresel ses sistemi</title>
+<meta name="description" content="Surround: Windows'ta farklı cihazlara bağlı tüm hoparlörlerinizi tek bir 7.1 çevresel ses sistemine çeviren ücretsiz uygulama. Telefonla kalibrasyon, Bluetooth senkronu, upmix ve EQ.">
+<meta property="og:title" content="Surround">
+<meta property="og:description" content="Turn every speaker on your Windows PC, on any device, into one 7.1 surround system. Phone calibration, Bluetooth sync, upmix and EQ.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://acarplus.github.io/surround/">
+<meta name="theme-color" content="#07090d">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%238ea2ff'/%3E%3Cstop offset='1' stop-color='%235cc8f2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='18' fill='url(%23g)'/%3E%3Ccircle cx='32' cy='32' r='5.5' fill='%23061018'/%3E%3Cpath d='M22 22a14 14 0 0 0 0 20M42 22a14 14 0 0 1 0 20M15 15a24 24 0 0 0 0 34M49 15a24 24 0 0 1 0 34' fill='none' stroke='%23061018' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+<script>(function(){var h=document.documentElement;h.classList.add('js');try{var q=new URLSearchParams(location.search).get('lang'),s=localStorage.getItem('dil');h.lang=q==='en'||q==='tr'?q:s||((navigator.language||'tr').toLowerCase().indexOf('tr')===0?'tr':'en')}catch(e){}})()</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap">
+<link rel="stylesheet" href="aile.css">
 <style>
-  :root {
-    --bg: #0e1013; --panel: #161a1f; --line: #262b33; --fg: #eef0f2; --muted: #9aa3ad; --faint: #6b737d;
-    --accent: #d4f25a; --accent-fg: #141808; --warn: #f5b041;
+  :root { --a: #8ea2ff; --a2: #5cc8f2; --a-rgb: 142, 162, 255; --a2-rgb: 92, 200, 242; --a-fg: #080b1c;
+    --d0: #5cc8f2; --d1: #f2a65a; --d2: #f07aa8; }
+  @media (prefers-color-scheme: light) { :root { --ink: #4c5fd5; --ink2: #1c6cc4; --d0: #1c8fc4; --d1: #cc6a1c; --d2: #c43464; } }
+
+  /* hero scene: the room, seen from above */
+  .room { position: relative; padding: 14px 14px 0; }
+  .room-top { display: flex; align-items: center; gap: 8px; padding: 2px 4px 12px; font-size: 12.5px; }
+  .room-top .lay { padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--muted); font-weight: 600; }
+  .room-top .lay.on { color: var(--a-fg); border-color: transparent; background: linear-gradient(135deg, var(--a), var(--a2)); }
+  .room-top .prof { margin-left: auto; display: flex; border: 1px solid var(--line-2); border-radius: 999px; overflow: hidden; }
+  .room-top .prof span { padding: 5px 10px; color: var(--muted); font-weight: 600; }
+  .room-top .prof span.on { background: rgba(var(--a-rgb), .16); color: var(--fg); }
+  .plan { width: 100%; height: auto; overflow: visible; }
+  .plan .floor { fill: rgba(var(--a-rgb), .035); stroke: var(--line-2); }
+  .plan .grid { stroke: var(--line); }
+  .plan .beam { stroke-width: 2; stroke-linecap: round; stroke-dasharray: 1.5 11; animation: flow 1.6s linear infinite; opacity: .85; }
+  @keyframes flow { to { stroke-dashoffset: -25; } }
+  .spk .wave { fill: none; stroke-width: 2; transform-box: fill-box; transform-origin: center; animation: wave 2.4s cubic-bezier(.2, .6, .3, 1) infinite; opacity: 0; }
+  .spk .wave + .wave { animation-delay: 1.2s; }
+  @keyframes wave { 0% { transform: scale(1); opacity: .7; } 100% { transform: scale(3.2); opacity: 0; } }
+  .spk .core { stroke-width: 2.5; fill: var(--surface); }
+  .spk text { font: 700 10px/1 var(--font); fill: var(--fg); text-anchor: middle; dominant-baseline: central; }
+  .spk .name { font: 500 9.5px/1 var(--font); fill: var(--faint); }
+  .me .ring { fill: none; stroke: rgba(var(--a-rgb), .55); stroke-dasharray: 3 6; transform-box: fill-box; transform-origin: center; animation: spin 24s linear infinite; }
+  .me .shock { fill: none; stroke: rgba(var(--a-rgb), .9); stroke-width: 2; transform-box: fill-box; transform-origin: center; animation: shock 3.2s ease-out infinite; opacity: 0; }
+  .me .head { fill: url(#meg); }
+  .me text { font: 700 11px/1 var(--font); fill: var(--a-fg); text-anchor: middle; dominant-baseline: central; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes shock { 0%, 55% { transform: scale(.6); opacity: 0; } 60% { opacity: .9; } 100% { transform: scale(2.6); opacity: 0; } }
+  .devs { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 4px 6px 12px; font-size: 12px; color: var(--muted); }
+  .devs > span { display: inline-flex; align-items: center; gap: 6px; }
+  .devs i { width: 9px; height: 9px; border-radius: 3px; }
+  .leds { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; padding: 12px 18px 14px; border-top: 1px solid var(--line); background: rgba(0, 0, 0, .12); }
+  .led { text-align: center; font: 600 10px/1 var(--font); color: var(--faint); }
+  .led div { height: 34px; margin-bottom: 6px; border-radius: 4px; display: flex; align-items: flex-end; overflow: hidden;
+    background: repeating-linear-gradient(0deg, var(--line) 0 3px, transparent 3px 5px); }
+  .led div i { display: block; width: 100%; height: 60%; transform-origin: bottom; border-radius: 2px;
+    background: linear-gradient(0deg, var(--a2), var(--a) 70%, #ffb86b); -webkit-mask: repeating-linear-gradient(0deg, #000 0 3px, transparent 3px 5px); mask: repeating-linear-gradient(0deg, #000 0 3px, transparent 3px 5px);
+    animation: lvl var(--t, .9s) ease-in-out infinite alternate; }
+  @keyframes lvl { 0% { transform: scaleY(.25); } 45% { transform: scaleY(.9); } 70% { transform: scaleY(.55); } 100% { transform: scaleY(1); } }
+  .f-qr { top: -24px; left: -40px; }
+  .f-bt { bottom: 62px; right: -30px; animation-delay: -3s; }
+  .f-bt .dot { background: linear-gradient(135deg, #f07aa8, #b48cff); }
+
+  /* feature visuals */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chips span { font: 600 13px/1 var(--font); padding: 8px 12px; border-radius: 999px; border: 1px solid var(--line-2); color: var(--muted); }
+  .chips span.on { color: var(--a-fg); border-color: transparent; background: linear-gradient(135deg, var(--a), var(--a2)); }
+  .seg { display: inline-flex; padding: 4px; border-radius: 14px; border: 1px solid var(--line-2); background: var(--card); gap: 4px; }
+  .seg > span { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 10px; font-weight: 600; font-size: 14px; color: var(--muted); }
+  .seg > span.on { background: rgba(var(--a-rgb), .16); color: var(--fg); box-shadow: inset 0 0 0 1px rgba(var(--a-rgb), .4); }
+  .seg svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .upmix { display: flex; align-items: center; gap: 14px; margin-top: 18px; font: 700 15px/1 var(--display); color: var(--muted); }
+  .upmix b { color: var(--fg); font-size: 22px; }
+  .upmix .arrow { flex: 1; height: 2px; background: linear-gradient(90deg, var(--line-2), var(--a)); position: relative; max-width: 160px; }
+  .upmix .arrow::after { content: ""; position: absolute; right: -2px; top: -4px; border: 5px solid transparent; border-left-color: var(--a); }
+  .eq { display: flex; align-items: flex-end; gap: 5px; height: 64px; margin-top: 20px; }
+  .eq i { flex: 1; border-radius: 4px 4px 2px 2px; background: linear-gradient(0deg, rgba(var(--a2-rgb), .35), var(--a)); }
+  .sync { display: grid; gap: 7px; margin-top: 18px; font-size: 12.5px; }
+  .sync div { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: center; gap: 10px; color: var(--muted); }
+  .sync div span { height: 8px; border-radius: 4px; position: relative; background: var(--line); }
+  .sync div span::after { content: ""; position: absolute; top: 0; bottom: 0; left: var(--o); width: 34%; border-radius: 4px; background: var(--c); }
+  .health { display: grid; gap: 8px; margin-top: 18px; }
+  .health div { display: flex; align-items: center; gap: 10px; font-size: 13.5px; padding: 9px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); color: var(--muted); }
+  .health i { width: 8px; height: 8px; border-radius: 50%; flex: none; background: #4fd1b5; box-shadow: 0 0 0 4px rgba(79, 209, 181, .15); }
+  .health i.w { background: #f2b34a; box-shadow: 0 0 0 4px rgba(242, 179, 74, .15); }
+  @media (max-width: 520px) {
+    .leds { gap: 5px; padding: 10px 12px; }
+    .room-top .prof span:not(.on) { display: none; }
   }
-  @media (prefers-color-scheme: light) {
-    :root { --bg: #f6f7f4; --panel: #ffffff; --line: #e1e4dc; --fg: #15181b; --muted: #555d66; --faint: #8a929b;
-      --accent: #5c7a00; --accent-fg: #ffffff; --warn: #a35f00; }
-  }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; background: var(--bg); color: var(--fg); }
-  body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  a { color: inherit; }
-  .wrap { max-width: 880px; margin: 0 auto; padding: 0 16px; }
-  header { display: flex; align-items: center; gap: 10px; padding: 22px 0; font-weight: 650; font-size: 18px; }
-  header svg { flex: none; }
-  header .gh { margin-left: auto; font-weight: 500; font-size: 14px; color: var(--muted); text-decoration: none; }
-  header .gh:hover { color: var(--fg); }
-  .hero { padding: 40px 0 28px; }
-  h1 { font-size: clamp(30px, 6vw, 46px); line-height: 1.1; letter-spacing: -0.02em; margin: 0 0 14px; }
-  .lead { font-size: 18px; color: var(--muted); max-width: 620px; margin: 0 0 28px; }
-  .cta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
-  .btn { display: inline-flex; align-items: center; gap: 10px; background: var(--accent); color: var(--accent-fg);
-    font-weight: 700; font-size: 18px; padding: 15px 26px; border-radius: 12px; text-decoration: none; }
-  .btn:hover { filter: brightness(1.06); }
-  .btn:focus-visible, .ghost:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
-  .meta { font-size: 14px; color: var(--faint); }
-  .ghost { color: var(--muted); font-size: 14px; }
-  section { padding: 26px 0; border-top: 1px solid var(--line); }
-  h2 { font-size: 20px; margin: 0 0 16px; }
-  .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
-  .steps li { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
-  .n { display: inline-flex; width: 26px; height: 26px; border-radius: 50%; align-items: center; justify-content: center;
-    background: var(--accent); color: var(--accent-fg); font-weight: 700; font-size: 14px; margin-bottom: 8px; }
-  .steps b { display: block; margin-bottom: 4px; }
-  .steps p { margin: 0; color: var(--muted); font-size: 15px; }
-  .feat { display: grid; gap: 10px 24px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin: 0; padding: 0; list-style: none; }
-  .feat li { padding-left: 22px; position: relative; color: var(--muted); }
-  .feat li::before { content: ""; position: absolute; left: 0; top: 9px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
-  .feat strong { color: var(--fg); font-weight: 600; }
-  .note { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; color: var(--muted); font-size: 15px; }
-  .note + .note { margin-top: 10px; }
-  .note b { color: var(--fg); }
-  footer { padding: 28px 0 40px; color: var(--faint); font-size: 13px; border-top: 1px solid var(--line); }
 </style>
 </head>
-<body>
-<div class="wrap">
-  <header>
-    <svg width="26" height="26" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="14" fill="none" stroke="currentColor" stroke-width="3" style="color:var(--accent)"/><circle cx="16" cy="16" r="6" fill="currentColor" style="color:var(--accent)"/></svg>
-    Surround
-    <a class="gh" href="https://github.com/AcarPlus/surround">GitHub</a>
-  </header>
+<body data-app="surround" data-repo="AcarPlus/surround" data-title-tr="Surround · Tüm hoparlörler, tek çevresel ses sistemi" data-title-en="Surround · Every speaker, one surround system">
+<div class="backdrop" aria-hidden="true"><div class="aurora a1"></div><div class="aurora a2"></div></div>
 
-  <div class="hero">
-    <h1>Evdeki tüm hoparlörler,<br>tek bir çevresel ses sistemi.</h1>
-    <p class="lead">Surround, Windows'ta farklı cihazlara bağlı hoparlörleri (kablolu, Bluetooth, çok kanallı kart) birlikte çalıştırır, sesi 7.1'e açar ve telefonunuzun mikrofonuyla senkronlar.</p>
-    <div class="cta">
-      <a class="btn" id="dl" href="https://github.com/AcarPlus/surround/releases/latest/download/Surround-win-Setup.exe">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M4 20h16"/></svg>
-        Windows için indir
-      </a>
-      <span class="meta" id="ver">Windows 10/11 · ücretsiz</span>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#"><span class="mark"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/><path d="M8 8a5.7 5.7 0 0 0 0 8M16 8a5.7 5.7 0 0 1 0 8M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg></span>Surround</a>
+    <nav class="links" aria-label="Bölümler">
+      <a href="#ozellikler"><span data-tr>Özellikler</span><span data-en>Features</span></a>
+      <a href="#kurulum"><span data-tr>Kurulum</span><span data-en>Install</span></a>
+      <a href="#sss"><span data-tr>SSS</span><span data-en>FAQ</span></a>
+    </nav>
+    <span class="sp"></span>
+    <button class="iconbtn" id="dil" type="button">EN</button>
+    <a class="iconbtn" href="https://github.com/AcarPlus/surround" aria-label="GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg></a>
+    <a class="btn primary small cta" href="https://github.com/AcarPlus/surround/releases/latest/download/Surround-win-Setup.exe"><span data-tr>İndir</span><span data-en>Download</span></a>
+  </div>
+</header>
+
+<main>
+<section class="hero" style="padding-top:64px">
+  <div class="wrap">
+    <div class="rv">
+      <a class="pill" href="https://github.com/AcarPlus/surround/releases/latest"><b data-ver>v0.5.0</b><span data-tr>Yeni arayüz: sese tepki veren oda</span><span data-en>New look: a room that reacts to sound</span></a>
+      <h1><span data-tr>Evdeki tüm hoparlörler, <span class="grad">tek bir çevresel ses.</span></span><span data-en>Every speaker you own, <span class="grad">one surround system.</span></span></h1>
+      <p class="lead" data-tr>Surround, Windows'ta farklı cihazlara bağlı hoparlörleri (kablolu, Bluetooth, çok kanallı kart) birlikte çalıştırır, sesi 7.1'e açar ve telefonunun mikrofonuyla senkronlar.</p>
+      <p class="lead" data-en>Surround makes speakers on different devices (wired, Bluetooth, multichannel cards) play together on Windows, opens stereo up to 7.1 and syncs them all with your phone's microphone.</p>
+      <div class="btns">
+        <a class="btn primary" href="https://github.com/AcarPlus/surround/releases/latest/download/Surround-win-Setup.exe">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M5 20h14"/></svg>
+          <span data-tr>Windows için indir</span><span data-en>Download for Windows</span>
+        </a>
+        <a class="btn ghost" href="https://github.com/AcarPlus/surround">
+          <svg class="gh" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.4-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+          <span data-tr>Kaynak kodu</span><span data-en>Source code</span>
+        </a>
+      </div>
+      <div class="meta">
+        <span>Windows 10 / 11</span>
+        <span data-tr>Ücretsiz</span><span data-en>Free</span>
+        <span data-tr>Yönetici izni gerekmez</span><span data-en>No admin rights needed</span>
+        <span hidden><span data-asset="^Surround-win-Setup\.exe$"></span></span>
+      </div>
+    </div>
+
+    <div class="stage rv" aria-hidden="true">
+      <div class="float f-qr"><span class="dot"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h3M21 18v3"/></svg></span><span><b data-tr>Telefonla ölç</b><b data-en>Measure with your phone</b><small data-tr>QR'ı okut, gerisi otomatik</small><small data-en>Scan the QR, the rest is automatic</small></span></div>
+      <div class="float f-bt"><span class="dot"><svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg></span><span><b data-tr>Bluetooth senkron</b><b data-en>Bluetooth in sync</b><small data-tr>+190 ms ölçüldü, eşitlendi</small><small data-en>+190 ms measured and matched</small></span></div>
+      <div class="win">
+        <div class="win-bar"><i></i><i></i><i></i><span>Surround</span><em class="live" style="font-style:normal"><span data-tr>ÇALIŞIYOR</span><span data-en>RUNNING</span></em></div>
+        <div class="room">
+          <div class="room-top">
+            <span class="lay">5.1</span><span class="lay on">7.1</span><span class="lay">7.1.4</span>
+            <span class="prof"><span class="on" data-tr>Film</span><span class="on" data-en>Movie</span><span data-tr>Oyun</span><span data-en>Game</span><span data-tr>Müzik</span><span data-en>Music</span></span>
+          </div>
+          <svg class="plan" viewBox="0 0 520 330">
+            <defs>
+              <linearGradient id="meg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="var(--a)"/><stop offset="1" stop-color="var(--a2)"/></linearGradient>
+              <pattern id="gp" width="26" height="26" patternUnits="userSpaceOnUse"><path class="grid" d="M26 0H0V26" fill="none"/></pattern>
+            </defs>
+            <rect class="floor" x="30" y="14" width="460" height="300" rx="18"/>
+            <rect x="30" y="14" width="460" height="300" rx="18" fill="url(#gp)" opacity=".7"/>
+            <!-- beams: speaker → listener -->
+            <g>
+              <line class="beam" x1="260" y1="58" x2="260" y2="164" stroke="var(--d0)"/>
+              <line class="beam" x1="185" y1="76" x2="246" y2="168" stroke="var(--d0)"/>
+              <line class="beam" x1="335" y1="76" x2="274" y2="168" stroke="var(--d0)"/>
+              <line class="beam" x1="96" y1="180" x2="236" y2="180" stroke="var(--d1)" style="animation-duration:1.9s"/>
+              <line class="beam" x1="424" y1="180" x2="284" y2="180" stroke="var(--d1)" style="animation-duration:1.9s"/>
+              <line class="beam" x1="185" y1="284" x2="246" y2="194" stroke="var(--d2)" style="animation-duration:2.3s"/>
+              <line class="beam" x1="335" y1="284" x2="274" y2="194" stroke="var(--d2)" style="animation-duration:2.3s"/>
+            </g>
+            <g class="spk" transform="translate(260 58)" style="--c:var(--d0)"><circle class="wave" r="15" stroke="var(--d0)"/><circle class="wave" r="15" stroke="var(--d0)"/><circle class="core" r="15" stroke="var(--d0)"/><text>C</text></g>
+            <g class="spk" transform="translate(185 76)"><circle class="wave" r="15" stroke="var(--d0)" style="animation-delay:.3s"/><circle class="wave" r="15" stroke="var(--d0)" style="animation-delay:1.5s"/><circle class="core" r="15" stroke="var(--d0)"/><text>FL</text></g>
+            <g class="spk" transform="translate(335 76)"><circle class="wave" r="15" stroke="var(--d0)" style="animation-delay:.5s"/><circle class="wave" r="15" stroke="var(--d0)" style="animation-delay:1.7s"/><circle class="core" r="15" stroke="var(--d0)"/><text>FR</text></g>
+            <g class="spk" transform="translate(84 46)"><circle class="wave" r="17" stroke="var(--d0)" style="animation-duration:1.6s"/><circle class="core" r="17" stroke="var(--d0)"/><text>LFE</text></g>
+            <g class="spk" transform="translate(96 180)"><circle class="wave" r="15" stroke="var(--d1)" style="animation-delay:.8s"/><circle class="wave" r="15" stroke="var(--d1)" style="animation-delay:2s"/><circle class="core" r="15" stroke="var(--d1)"/><text>SL</text></g>
+            <g class="spk" transform="translate(424 180)"><circle class="wave" r="15" stroke="var(--d1)" style="animation-delay:.2s"/><circle class="wave" r="15" stroke="var(--d1)" style="animation-delay:1.4s"/><circle class="core" r="15" stroke="var(--d1)"/><text>SR</text></g>
+            <g class="spk" transform="translate(185 284)"><circle class="wave" r="15" stroke="var(--d2)" style="animation-delay:1s"/><circle class="wave" r="15" stroke="var(--d2)" style="animation-delay:2.2s"/><circle class="core" r="15" stroke="var(--d2)"/><text>BL</text></g>
+            <g class="spk" transform="translate(335 284)"><circle class="wave" r="15" stroke="var(--d2)" style="animation-delay:.6s"/><circle class="wave" r="15" stroke="var(--d2)" style="animation-delay:1.8s"/><circle class="core" r="15" stroke="var(--d2)"/><text>BR</text></g>
+            <g class="me" transform="translate(260 180)">
+              <circle class="shock" r="24"/>
+              <circle class="ring" r="36"/>
+              <circle class="head" r="22"/>
+              <text data-tr>Sen</text><text data-en>You</text>
+            </g>
+          </svg>
+          <div class="devs">
+            <span><i style="background:var(--d0)"></i><span data-tr>Ses kartı 7.1</span><span data-en>7.1 sound card</span></span>
+            <span><i style="background:var(--d1)"></i>USB DAC</span>
+            <span><i style="background:var(--d2)"></i>Bluetooth</span>
+          </div>
+        </div>
+        <div class="leds">
+          <div class="led"><div><i style="--t:.82s"></i></div>FL</div>
+          <div class="led"><div><i style="--t:.64s"></i></div>C</div>
+          <div class="led"><div><i style="--t:.9s"></i></div>FR</div>
+          <div class="led"><div><i style="--t:1.1s"></i></div>SL</div>
+          <div class="led"><div><i style="--t:.95s"></i></div>SR</div>
+          <div class="led"><div><i style="--t:1.3s"></i></div>BL</div>
+          <div class="led"><div><i style="--t:1.2s"></i></div>BR</div>
+          <div class="led"><div><i style="--t:.48s"></i></div>LFE</div>
+        </div>
+      </div>
     </div>
   </div>
+</section>
 
-  <section>
-    <h2>Kurulum: tek tık, bir onay</h2>
-    <ol class="steps">
-      <li><span class="n">1</span><b>İndir ve çalıştır</b><p>Surround kendi kendine kurulur ve açılır. Yönetici izni gerekmez.</p></li>
-      <li><span class="n">2</span><b>“Hepsini kur”a bas</b><p>Sanal 7.1 kabloyu (VB-Cable) resmi sitesinden indirip kurar, 7.1'e ayarlar ve kaynak yapar. Windows bir kez “Evet” sorar.</p></li>
-      <li><span class="n">3</span><b>Hoparlörleri tanıt</b><p>Sihirbaz hangi cihaza ne bağlı olduğunu sorar; istersen telefonla kalibre et (QR kod).</p></li>
-    </ol>
-  </section>
-
-  <section>
-    <h2>Neler yapar</h2>
-    <ul class="feat">
-      <li><strong>Ayrı cihazlar birlikte:</strong> her hoparlör kendi cihazında, gecikmeleri eşitlenmiş.</li>
-      <li><strong>Telefonla kalibrasyon:</strong> QR'ı okut, gecikme, seviye ve tını otomatik ayarlanır.</li>
-      <li><strong>Bluetooth desteği:</strong> yüzlerce ms gecikmeli hoparlörler de senkron.</li>
-      <li><strong>Stereo → 7.1:</strong> film, oyun ve müzik için yükseltme profilleri.</li>
-      <li><strong>EQ ve ön ayarlar:</strong> parametrik EQ, A/B karşılaştırma.</li>
-      <li><strong>Kendini toparlar:</strong> cihaz çıkıp takılınca devam eder, tepsiden profil seçilir.</li>
-    </ul>
-  </section>
-
-  <section>
-    <div class="note"><b>Windows “bilinmeyen yayıncı” uyarısı verirse:</b> uygulama imzasız olduğu için SmartScreen sorar. <b>Ek bilgi → Yine de çalıştır</b>.</div>
-    <div class="note"><b>Kurulumsuz kullanım:</b> <a class="ghost" href="https://github.com/AcarPlus/surround/releases/latest/download/Surround-win-Portable.zip">taşınabilir ZIP</a>. Tüm sürümler ve değişiklikler: <a class="ghost" href="https://github.com/AcarPlus/surround/releases">sürüm sayfası</a>.</div>
-    <div class="note"><b>Not:</b> FxSound gibi başka bir ses işleme uygulaması aynı anda açıksa ses yankılı gelebilir; Surround kullanırken kapatın. VB-Cable, VB-Audio'nun bağışla desteklenen ücretsiz sürücüsüdür (<a class="ghost" href="https://vb-audio.com/Cable/">vb-audio.com</a>).</div>
-  </section>
-
-  <footer>Surround açık kaynaktır · <a href="https://github.com/AcarPlus/surround">github.com/AcarPlus/surround</a></footer>
+<div class="wrap rv">
+  <div class="stats">
+    <div><b>7.1.4</b><span data-tr>düzene kadar, 2.0'dan başlayarak</span><span data-en>layouts, starting from 2.0</span></div>
+    <div><b>5</b><span data-tr>noktadan tek akış ölçüm</span><span data-en>measuring points, one pass</span></div>
+    <div><b>10</b><span data-tr>bant EQ + parametrik bantlar</span><span data-en>band EQ + parametric bands</span></div>
+    <div><b>1</b><span data-tr>tıkla sanal 7.1 kablo kurulumu</span><span data-en>click virtual 7.1 cable setup</span></div>
+  </div>
 </div>
-<script>
-  // Show the latest version next to the button; the link itself always points at the latest release.
-  fetch('https://api.github.com/repos/AcarPlus/surround/releases/latest')
-    .then((r) => (r.ok ? r.json() : null))
-    .then((rel) => {
-      if (!rel || !rel.tag_name) return;
-      const setup = (rel.assets || []).find((a) => a.name === 'Surround-win-Setup.exe');
-      const mb = setup ? ' · ' + Math.round(setup.size / 1048576) + ' MB' : '';
-      document.getElementById('ver').textContent = 'Sürüm ' + rel.tag_name.replace(/^v/, '') + mb + ' · Windows 10/11 · ücretsiz';
-    })
-    .catch(() => {});
-</script>
+
+<section id="ozellikler">
+  <div class="wrap">
+    <div class="rv">
+      <div class="eyebrow"><span data-tr>Özellikler</span><span data-en>Features</span></div>
+      <h2 data-tr>Elindeki hoparlörler, sinema gibi.</h2>
+      <h2 data-en>The speakers you have, like a cinema.</h2>
+      <p class="sub" data-tr>Yeni bir ses sistemi almadan: Surround hepsini aynı ana getirir, odana göre ayarlar ve sesi etrafına yayar.</p>
+      <p class="sub" data-en>No new sound system needed: Surround lines them all up in time, tunes them to your room and spreads the sound around you.</p>
+    </div>
+    <div class="bento">
+      <div class="card w2 rv">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="12" cy="13" r="2.5"/><path d="M7 7h.01M17 7h.01M7 17h.01M17 17h.01"/></svg></div>
+        <h3 data-tr>Oda, ana ekranın</h3><h3 data-en>Your room is the home screen</h3>
+        <p data-tr>Odanın kuşbakışı planında hoparlörleri ve kendini sürükle; düzeni tek dokunuşla değiştir. Eksik hoparlörler "+" olarak belirir.</p>
+        <p data-en>Drag your speakers and yourself around a top-down plan of the room and switch layouts with one tap. Missing speakers show up as "+".</p>
+        <div class="viz chips"><span>2.0</span><span>2.1</span><span>3.1</span><span>5.1</span><span class="on">7.1</span><span>5.1.2</span><span>7.1.4</span><span data-tr>Başka…</span><span data-en>Other…</span></div>
+      </div>
+      <div class="card rv">
+        <div class="ic"><svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><circle cx="12" cy="14" r="4"/><path d="M12 6h.01"/></svg></div>
+        <h3 data-tr>Ayrı cihazlar, tek ses</h3><h3 data-en>Separate devices, one sound</h3>
+        <p data-tr>Her hoparlör kendi cihazında çalar; gecikmeler eşitlenir, hepsi aynı anda duyulur.</p>
+        <p data-en>Every speaker plays on its own device; delays are matched so they all land at the same moment.</p>
+        <div class="sync">
+          <div><b style="color:var(--d0);font-weight:600" data-tr>Ses kartı</b><b style="color:var(--d0);font-weight:600" data-en>Sound card</b><span style="--o:40%;--c:var(--d0)"></span></div>
+          <div><b style="color:var(--d1);font-weight:600">USB DAC</b><span style="--o:40%;--c:var(--d1)"></span></div>
+          <div><b style="color:var(--d2);font-weight:600">Bluetooth</b><span style="--o:40%;--c:var(--d2)"></span></div>
+        </div>
+      </div>
+      <div class="card rv">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></svg></div>
+        <h3 data-tr>Telefonla kalibrasyon</h3><h3 data-en>Phone calibration</h3>
+        <p data-tr>QR'ı okut, telefonun mikrofon olsun: gecikme, seviye ve tını tek turda ölçülür ve uygulanır. Mikrofon yoksa kulakla seviye eşitleme var.</p>
+        <p data-en>Scan the QR and your phone becomes the mic: delay, level and tone are measured in one pass and applied. No mic? Match levels by ear.</p>
+      </div>
+      <div class="card w2 rv">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M2 12h3l3-8 4 16 3-8h7"/></svg></div>
+        <h3 data-tr>Stereo'dan 7.1'e</h3><h3 data-en>From stereo to 7.1</h3>
+        <p data-tr>Film, oyun ve müzik için yükseltme (upmix) profilleri; üst çubuktan tek dokunuşla geçilir. Arka kanalların gecikmesi, tiz kesimi ve ayrışması ayarlanabilir.</p>
+        <p data-en>Upmix profiles for movies, games and music, one tap away in the top bar. Rear-channel delay, treble cut and separation are all adjustable.</p>
+        <div class="viz">
+          <div class="seg">
+            <span class="on"><svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16M17 4v16M2 9h5M2 15h5M17 9h5M17 15h5"/></svg><span data-tr>Film</span><span data-en>Movie</span></span>
+            <span><svg viewBox="0 0 24 24"><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01"/><path d="M17.32 5H6.68a4 4 0 0 0-3.98 3.59l-.6 6A3 3 0 0 0 5.08 18c.86 0 1.67-.43 2.15-1.15L8.5 15h7l1.27 1.85A2.6 2.6 0 0 0 18.92 18a3 3 0 0 0 2.98-3.41l-.6-6A4 4 0 0 0 17.32 5z"/></svg><span data-tr>Oyun</span><span data-en>Game</span></span>
+            <span><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg><span data-tr>Müzik</span><span data-en>Music</span></span>
+          </div>
+          <div class="upmix"><b>2.0</b><span class="arrow"></span><b class="grad">7.1</b></div>
+        </div>
+      </div>
+      <div class="card rv">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M7 7l10 10-5 5V2l5 5L7 17"/></svg></div>
+        <h3 data-tr>Bluetooth da senkron</h3><h3 data-en>Bluetooth stays in sync</h3>
+        <p data-tr>Bluetooth hoparlörlerin 150–250 ms gecikmesi ölçülür, diğerleri ona göre bekletilir.</p>
+        <p data-en>A Bluetooth speaker's 150–250 ms lag is measured and the others wait for it.</p>
+      </div>
+      <div class="card rv">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg></div>
+        <h3 data-tr>EQ ve ön ayarlar</h3><h3 data-en>EQ and presets</h3>
+        <p data-tr>10 bant ve parametrik EQ, kendi ön ayarların, A/B karşılaştırma, limiter.</p>
+        <p data-en>10-band and parametric EQ, your own presets, A/B comparison and a limiter.</p>
+        <div class="eq"><i style="height:55%"></i><i style="height:72%"></i><i style="height:64%"></i><i style="height:48%"></i><i style="height:40%"></i><i style="height:46%"></i><i style="height:58%"></i><i style="height:70%"></i><i style="height:82%"></i><i style="height:66%"></i></div>
+      </div>
+      <div class="card rv">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></svg></div>
+        <h3 data-tr>Sese tepki veren Gece teması</h3><h3 data-en>A night theme that moves with the sound</h3>
+        <p data-tr>Hoparlörden sana akan ışınlar, seviye yayları, bas vuruşunda şok dalgası ve ses pusulası.</p>
+        <p data-en>Light flowing from each speaker to you, level arcs, a shockwave on every bass hit and a sound compass.</p>
+      </div>
+      <div class="card w2 rv">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+        <h3 data-tr>Kendini toparlar</h3><h3 data-en>Looks after itself</h3>
+        <p data-tr>Cihaz çıkıp takılınca kaldığı yerden devam eder. Sistem kontrolü yanlış kanalı, eksik hoparlörü ya da geri beslemeyi önceden söyler; profili tepsiden seçersin.</p>
+        <p data-en>Unplug a device and plug it back in, and it picks up where it left off. A system check flags wrong channels, missing speakers or feedback loops up front, and profiles are a tray click away.</p>
+        <div class="health">
+          <div><i></i><span data-tr>Kaynak VB-Cable · 7.1 kanal</span><span data-en>Source VB-Cable · 7.1 channels</span></div>
+          <div><i class="w"></i><span data-tr>Arka sol hoparlörün cihazı bekleniyor…</span><span data-en>Waiting for the rear-left speaker's device…</span></div>
+        </div>
+      </div>
+      <div class="card rv">
+        <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></svg></div>
+        <h3 data-tr>Geri al, yedekle</h3><h3 data-en>Undo and back up</h3>
+        <p data-tr>Her değişiklik geri alınabilir; ayarlarını yedek olarak indirip geri yükleyebilirsin.</p>
+        <p data-en>Every change can be undone, and you can download your setup as a backup and restore it later.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="kurulum">
+  <div class="wrap">
+    <div class="rv">
+      <div class="eyebrow"><span data-tr>Kurulum</span><span data-en>Install</span></div>
+      <h2 data-tr>Tek tık, bir onay.</h2>
+      <h2 data-en>One click, one prompt.</h2>
+      <p class="sub" data-tr>Surround kendi kendine kurulur ve açılır; gerisini o yönlendirir.</p>
+      <p class="sub" data-en>Surround installs and opens by itself, then guides you through the rest.</p>
+    </div>
+    <div class="steps">
+      <div class="card step rv"><div class="num"></div>
+        <h3 data-tr>İndir ve çalıştır</h3><h3 data-en>Download and run</h3>
+        <p data-tr>Kurulum kendiliğinden biter ve uygulama açılır. Yönetici izni gerekmez.</p>
+        <p data-en>Setup finishes on its own and the app opens. No admin rights needed.</p>
+      </div>
+      <div class="card step rv"><div class="num"></div>
+        <h3 data-tr>Sanal kabloyu kur</h3><h3 data-en>Install the virtual cable</h3>
+        <p data-tr>Tek tıkla VB-Cable resmi sitesinden indirilir, imzası doğrulanır, kurulur, 7.1'e ayarlanır ve kaynak yapılır. Windows bir kez "Evet" sorar.</p>
+        <p data-en>One click downloads VB-Cable from its official site, verifies its signature, installs it, sets it to 7.1 and makes it the source. Windows asks "Yes" once.</p>
+      </div>
+      <div class="card step rv"><div class="num"></div>
+        <h3 data-tr>Hoparlörleri tanıt</h3><h3 data-en>Introduce your speakers</h3>
+        <p data-tr>Sihirbaz hangi cihaza ne bağlı olduğunu sorar; istersen telefonla ölçersin (QR kod).</p>
+        <p data-en>The wizard asks what is connected to which device, and you can measure with your phone (QR code) if you like.</p>
+      </div>
+    </div>
+    <div class="duo" style="margin-top:16px">
+      <div class="card rv">
+        <h3 data-tr>Nasıl çalışır?</h3><h3 data-en>How does it work?</h3>
+        <ul class="ticks" style="margin-top:16px" data-tr>
+          <li><b>Windows sesi sanal kabloya gider:</b> VB-Cable 7.1 kanallı bir kaynak gibi davranır.</li>
+          <li><b>Surround kanalları dağıtır:</b> gerekirse 7.1'e açar, EQ uygular, her hoparlörün cihazına kendi gecikmesi ve seviyesiyle gönderir.</li>
+          <li><b>Her şey bilgisayarında:</b> telefonla ölçüm yerel ağ üzerinden yapılır.</li>
+        </ul>
+        <ul class="ticks" style="margin-top:16px" data-en>
+          <li><b>Windows audio goes into a virtual cable:</b> VB-Cable acts as a 7.1 source.</li>
+          <li><b>Surround spreads the channels:</b> upmixes to 7.1 when needed, applies EQ and sends each speaker its own delay and level on its own device.</li>
+          <li><b>Everything stays on your PC:</b> phone measurement runs over your local network.</li>
+        </ul>
+      </div>
+      <div class="card rv">
+        <h3 data-tr>Kurulumsuz kullanım</h3><h3 data-en>No-install option</h3>
+        <p style="margin-top:10px" data-tr>Taşınabilir ZIP'i açıp çalıştırabilirsin. Tüm sürümler ve değişiklikler sürüm sayfasında.</p>
+        <p style="margin-top:10px" data-en>Unzip the portable ZIP and run it. Every release and its changes are on the releases page.</p>
+        <div class="btns" style="margin-top:20px">
+          <a class="btn ghost small" href="https://github.com/AcarPlus/surround/releases/latest/download/Surround-win-Portable.zip"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M5 20h14"/></svg><span data-tr>Taşınabilir ZIP</span><span data-en>Portable ZIP</span></a>
+          <a class="btn ghost small" href="https://github.com/AcarPlus/surround/releases"><span data-tr>Tüm sürümler</span><span data-en>All releases</span></a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="sss">
+  <div class="wrap">
+    <div class="center rv">
+      <div class="eyebrow"><span data-tr>SSS</span><span data-en>FAQ</span></div>
+      <h2 data-tr>Sık sorulanlar</h2><h2 data-en>Questions, answered</h2>
+      <p class="sub"></p>
+    </div>
+    <div class="faq">
+      <details class="rv"><summary><span data-tr>Windows "bilinmeyen yayıncı" uyarısı veriyor</span><span data-en>Windows warns about an "unknown publisher"</span></summary>
+        <p data-tr>Uygulama henüz imzalı olmadığı için SmartScreen sorar: <b>Ek bilgi → Yine de çalıştır</b>.</p>
+        <p data-en>The app isn't code-signed yet, so SmartScreen asks: <b>More info → Run anyway</b>.</p></details>
+      <details class="rv"><summary><span data-tr>VB-Cable neden gerekli?</span><span data-en>Why do I need VB-Cable?</span></summary>
+        <p data-tr>Surround Windows'un sesini bu sanal kablodan alır; o olmadan çalışmaz. Lisansı gereği kurulum dosyasına gömülmez, bu yüzden ilk açılışta resmi sitesinden indirilir. VB-Cable, VB-Audio'nun bağışla desteklenen ücretsiz sürücüsüdür (<a href="https://vb-audio.com/Cable/">vb-audio.com</a>).</p>
+        <p data-en>Surround takes Windows' audio from this virtual cable and can't work without it. Its licence doesn't allow bundling, so it is downloaded from the official site on first launch. VB-Cable is VB-Audio's free, donation-supported driver (<a href="https://vb-audio.com/Cable/">vb-audio.com</a>).</p></details>
+      <details class="rv"><summary><span data-tr>Ses yankılı geliyor</span><span data-en>The sound has an echo</span></summary>
+        <p data-tr>FxSound gibi başka bir ses işleme uygulaması aynı anda açıksa olur; Surround kullanırken onu kapat.</p>
+        <p data-en>That happens when another audio processor such as FxSound runs at the same time; close it while you use Surround.</p></details>
+      <details class="rv"><summary><span data-tr>Mikrofonum yok, yine de olur mu?</span><span data-en>I don't have a microphone. Will it still work?</span></summary>
+        <p data-tr>Evet. Telefonunu QR ile mikrofon olarak kullanabilir ya da seviyeleri kulakla eşitleyebilirsin.</p>
+        <p data-en>Yes. Use your phone as the mic via the QR code, or match the levels by ear.</p></details>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="band rv">
+      <h2 data-tr>Sesi <span class="grad">etrafına yay.</span></h2>
+      <h2 data-en>Let the sound <span class="grad">surround you.</span></h2>
+      <p class="sub" data-tr>Ücretsiz, açık kaynak kodlu, Windows 10 ve 11 için.</p>
+      <p class="sub" data-en>Free, source available, for Windows 10 and 11.</p>
+      <div class="btns">
+        <a class="btn primary" href="https://github.com/AcarPlus/surround/releases/latest/download/Surround-win-Setup.exe"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M5 20h14"/></svg><span data-tr>Windows için indir</span><span data-en>Download for Windows</span></a>
+        <a class="btn ghost" href="https://github.com/AcarPlus/surround/issues"><span data-tr>Sorun bildir</span><span data-en>Report an issue</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section style="padding-top:72px">
+  <div class="wrap">
+    <div class="eyebrow rv"><span data-tr>Aynı aileden</span><span data-en>From the same family</span></div>
+    <div class="family rv" id="aile"></div>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <a class="brand" href="#"><span class="mark"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/><path d="M8 8a5.7 5.7 0 0 0 0 8M16 8a5.7 5.7 0 0 1 0 8M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg></span>Surround</a>
+    <div>
+      <p data-tr>Surround'un kaynak kodu GitHub'da açıktır. VB-Cable, VB-Audio Software'in ürünüdür; Surround onlarla bağlantılı değildir.</p>
+      <p data-en>Surround's source code is public on GitHub. VB-Cable is a product of VB-Audio Software; Surround is not affiliated with them.</p>
+      <p>© <span id="yil">2026</span> AcarPlus</p>
+    </div>
+    <nav><a href="https://github.com/AcarPlus/surround">GitHub</a><a href="https://github.com/AcarPlus/surround/releases"><span data-tr>Sürümler</span><span data-en>Releases</span></a></nav>
+  </div>
+</footer>
+
+<script src="aile.js"></script>
 </body>
 </html>
