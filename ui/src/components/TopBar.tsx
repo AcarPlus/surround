@@ -5,6 +5,7 @@ import { checkHealth } from '../lib/health'
 import { upmixStateLabel } from '../lib/upmix'
 import { cx } from './ui'
 import { ProfileMenu } from './ProfileMenu'
+import { SurroundMark } from './SurroundMark'
 import { VolumeControl } from './VolumeControl'
 import { api } from '../api/client'
 import { useUpdate } from '../lib/useSystem'
@@ -264,14 +265,8 @@ export function TopBar() {
     <header className="glass relative z-20 flex h-[72px] shrink-0 items-center gap-5 border-b border-line/70 px-5">
       {running && <span className="run-line" aria-hidden />}
       <div className="flex w-[124px] shrink-0 items-center gap-2.5">
-        <span className="logo-pulse flex h-9 w-9 items-center justify-center rounded-xl bg-[linear-gradient(135deg,rgb(var(--accent)),rgb(var(--dev-3)))] text-accent-fg">
-          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden>
-            <circle cx="12" cy="12" r="2.4" fill="currentColor" />
-            <g fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M16.1 7.9a5.8 5.8 0 0 1 0 8.2M7.9 16.1a5.8 5.8 0 0 1 0-8.2" />
-              <path d="M19.6 4.4a10.8 10.8 0 0 1 0 15.2M4.4 19.6a10.8 10.8 0 0 1 0-15.2" opacity="0.6" />
-            </g>
-          </svg>
+        <span className="logo-pulse flex h-9 w-9 items-center justify-center rounded-xl">
+          <SurroundMark size={36} />
         </span>
         <span className="text-[16px] font-semibold tracking-tight">Surround</span>
       </div>

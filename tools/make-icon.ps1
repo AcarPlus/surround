@@ -1,6 +1,8 @@
 ﻿# Surround uygulama simgesini (src/Surround.App/Assets/surround.ico) üretir.
-# "Gece" teması: çivit mavisinden mora geçen parlak yuvarlak kare (üstte ince ışık), üzerinde koyu lacivert
-# merkez noktası ve iki yana simetrik açılan eş merkezli yaylar (çevresel ses). Uygulamadaki logoyla aynı.
+# "Pusula": koyu lacivert yuvarlak kare üzerinde, dinleyicinin (merkez nokta) çevresinde ışınsal çubuklar;
+# çubuklar 5.1 hoparlör yönlerinde (ön orta, ön sol/sağ, arka sol/sağ) uzar — uygulamadaki ses pusulası.
+# Büyük boylarda 24 çubuk, <= 32 px'te 12 çubuk (16 px'te de seçilsin diye). ui/src/components/SurroundMark.tsx ve
+# site/index.html aynı geometriyi kullanır.
 # Kullanım: powershell -File tools/make-icon.ps1
 Add-Type -AssemblyName System.Drawing
 
@@ -8,6 +10,8 @@ $root = Split-Path $PSScriptRoot -Parent
 $outDir = Join-Path $root 'src/Surround.App/Assets'
 New-Item -ItemType Directory -Force $outDir | Out-Null
 $sizes = 16, 24, 32, 48, 64, 128, 256
+# hoparlör yönleri (ekran açısı, -90 = yukarı): C, R, L, SR, SL
+$speakers = -90, -60, -120, 20, 160
 
 function New-Frame([int]$s) {
     $bmp = New-Object System.Drawing.Bitmap $s, $s, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
@@ -15,7 +19,7 @@ function New-Frame([int]$s) {
     $g.SmoothingMode = 'AntiAlias'
     $g.Clear([System.Drawing.Color]::Transparent)
 
-    # arka plan: yuvarlatılmış kare
+    # arka plan: yuvarlatılmış koyu lacivert kare
     $r = $s * 0.22
     $path = New-Object System.Drawing.Drawing2D.GraphicsPath
     $d = 2 * $r
@@ -24,34 +28,38 @@ function New-Frame([int]$s) {
     $path.AddArc($s - $d, $s - $d, $d, $d, 0, 90)
     $path.AddArc(0, $s - $d, $d, $d, 90, 90)
     $path.CloseFigure()
-    # zemin: sol üst çivit mavisi (#8EA2FF) -> sağ alt mor (#A58BFA)
-    $bgBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush (New-Object System.Drawing.PointF 0, 0), (New-Object System.Drawing.PointF $s, $s), ([System.Drawing.Color]::FromArgb(255, 142, 162, 255)), ([System.Drawing.Color]::FromArgb(255, 165, 139, 250))
-    $g.FillPath($bgBrush, $path)
-    if ($s -ge 32) {
-        # üst kenarda cam parıltısı
-        $g.SetClip($path)
-        $hl = New-Object System.Drawing.Drawing2D.LinearGradientBrush (New-Object System.Drawing.PointF 0, 0), (New-Object System.Drawing.PointF 0, ($s * 0.6)), ([System.Drawing.Color]::FromArgb(70, 255, 255, 255)), ([System.Drawing.Color]::FromArgb(0, 255, 255, 255))
-        # Fırça uzunluğundan biraz kısa doldur: döşeme sınırında ince çizgi kalmasın.
-        $g.FillRectangle($hl, 0, 0, $s, $s * 0.58)
-        $g.ResetClip()
-    }
+    $g.FillPath((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 15, 19, 48))), $path)
 
-    $accent = [System.Drawing.Color]::FromArgb(255, 10, 13, 28)
-    # tam merkez: şekil iki eksende de simetrik
-    $cx = $s * 0.5; $cy = $s * 0.5
-    # kaynak noktası
-    $dot = $s * 0.09
-    $g.FillEllipse((New-Object System.Drawing.SolidBrush $accent), $cx - $dot, $cy - $dot, 2 * $dot, 2 * $dot)
-    # yaylar (iki yana, sağa ve sola simetrik yayılan)
-    $w = [Math]::Max(1.4, $s * 0.068)
-    foreach ($i in 1..2) {
-        $rad = $s * (0.155 * $i + 0.03)
-        $alpha = [int](255 - ($i - 1) * 55)
-        $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb($alpha, $accent)), $w
-        $pen.StartCap = 'Round'; $pen.EndCap = 'Round'
-        $g.DrawArc($pen, $cx - $rad, $cy - $rad, 2 * $rad, 2 * $rad, -45, 90)
-        $g.DrawArc($pen, $cx - $rad, $cy - $rad, 2 * $rad, 2 * $rad, 135, 90)
+    $c = $s / 2.0
+    if ($s -ge 48) {
+        # 256 px tasarımı: 24 çubuk, iç yarıçap 48, taban 12, genlik 44, sigma 14
+        $u = $s / 256.0; $n = 24; $r0 = 48 * $u; $base = 12 * $u; $amp = 44 * $u; $sig = 14; $cap = $false
+        $w = 10 * $u; $dot = 20 * $u
+    } else {
+        # 64 px tasarımı: 12 çubuk, iç yarıçap 12, taban 3, genlik 12, sigma 20, tavanlı
+        $u = $s / 64.0; $n = 12; $r0 = 12 * $u; $base = 3 * $u; $amp = 12 * $u; $sig = 20; $cap = $true
+        $w = [Math]::Max(1.4, 6 * $u); $dot = [Math]::Max(1.6, 5 * $u)
     }
+    for ($i = 0; $i -lt $n; $i++) {
+        $a = $i * 360.0 / $n - 90
+        $sum = 0.0
+        foreach ($b in $speakers) {
+            $dd = [Math]::Abs(((($a - $b + 540) % 360) - 180))
+            $sum += [Math]::Exp(-($dd * $dd) / (2 * $sig * $sig))
+        }
+        if ($cap) { $sum = [Math]::Min(1.0, $sum) }
+        $len = $base + $amp * $sum
+        $k = [Math]::Min(1.0, $sum)
+        $col = if ($k -gt 0.5) { [System.Drawing.Color]::FromArgb(185, 166, 255) } else { [System.Drawing.Color]::FromArgb(142, 162, 255) }
+        $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb([int](255 * (0.45 + 0.55 * $k)), $col)), $w
+        $pen.StartCap = 'Round'; $pen.EndCap = 'Round'
+        $t = $a * [Math]::PI / 180
+        $g.DrawLine($pen, [single]($c + $r0 * [Math]::Cos($t)), [single]($c + $r0 * [Math]::Sin($t)),
+            [single]($c + ($r0 + $len) * [Math]::Cos($t)), [single]($c + ($r0 + $len) * [Math]::Sin($t)))
+        $pen.Dispose()
+    }
+    # dinleyici
+    $g.FillEllipse((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 238, 241, 255))), $c - $dot, $c - $dot, 2 * $dot, 2 * $dot)
     $g.Dispose()
     return $bmp
 }

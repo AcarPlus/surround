@@ -1,6 +1,7 @@
 import type { Device } from '../api/types'
 import { findCable } from '../lib/health'
 import { useCableAutoSetup } from '../screens/SourcePanels'
+import { SurroundMark } from './SurroundMark'
 
 /** VB-Cable yoksa ya da Windows'ta 7.1 değilse true: uygulama ancak kablo hazır olunca açılır. */
 export function cableMissing(devices: Device[]): boolean {
@@ -29,14 +30,8 @@ export function CableGate({ devices }: { devices: Device[] }) {
   return (
     <div className="stage-bg flex h-full items-center justify-center overflow-y-auto p-8">
       <div className="screen-in w-full max-w-[560px] text-center">
-        <span className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-[linear-gradient(135deg,rgb(var(--accent)),rgb(var(--dev-3)))] text-accent-fg shadow-[0_10px_40px_rgb(var(--accent)/0.4)]">
-          <svg width="32" height="32" viewBox="0 0 24 24" aria-hidden>
-            <circle cx="12" cy="12" r="2.4" fill="currentColor" />
-            <g fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M16.1 7.9a5.8 5.8 0 0 1 0 8.2M7.9 16.1a5.8 5.8 0 0 1 0-8.2" />
-              <path d="M19.6 4.4a10.8 10.8 0 0 1 0 15.2M4.4 19.6a10.8 10.8 0 0 1 0-15.2" opacity="0.6" />
-            </g>
-          </svg>
+        <span className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl shadow-[0_10px_40px_rgb(var(--accent)/0.4)]">
+          <SurroundMark size={64} />
         </span>
         <h1 className="text-[26px] font-semibold tracking-tight">
           {cable ? 'VB-Cable’ı 7.1 yapalım' : 'Önce VB-Cable’ı kuralım'}
