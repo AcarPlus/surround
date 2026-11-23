@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { REF_FS, magnitude, peaking } from './eqCurve'
-import { GENTLE_ROOM_EQ_LIMITS, HF_MAX_CUT_DB, MAX_BOOST_DB, MAX_Q, alignLevel, bandsDb, matchSpeakers, spatialAverage } from './roomEq'
+import { GENTLE_ROOM_EQ_LIMITS, HF_MAX_CUT_DB, MAX_BOOST_DB, MAX_Q, alignLevel, bandsDb, flatnessScore, matchSpeakers, spatialAverage } from './roomEq'
 
 /** C# ResponseGrid ile aynı: 100 Hz'den 1/12 oktav, 89 nokta. */
 const HZ = Array.from({ length: 89 }, (_, i) => 100 * Math.pow(2, i / 12))
@@ -49,6 +49,37 @@ describe('roomEq', () => {
       if (f >= 4000) expect(eq[i]).toBeGreaterThanOrEqual(-HF_MAX_CUT_DB - 0.3)
     })
     for (const b of r.bands) expect(b.q).toBeLessThanOrEqual(MAX_Q)
+  })
+
+  it("'best' hedefi en düz hoparlörü seçer: iyi hoparlöre EQ yok, donuk olanlar ona çekilir", () => {
+    const dull = add(flat, HZ.map((f) => (f >= 5000 ? -8 : 0)), pk(1000, 2, 5))
+    const good = add(flat, pk(3000, 1, 1))
+    const rs = matchSpeakers(HZ, [
+      { speakerId: 'monL', responses: [dull] },
+      { speakerId: 'monR', responses: [dull] },
+      { speakerId: 'beats', responses: [good] },
+    ], { target: 'best', referenceId: 'monL' })
+    const beats = rs.find((r) => r.speakerId === 'beats')!
+    expect(beats.isTarget).toBe(true)
+    expect(beats.bands).toEqual([])
+    const mon = rs.find((r) => r.speakerId === 'monL')!
+    expect(mon.isTarget).toBe(false)
+    // 1 kHz tepesi kısılır.
+    expect(bandsDb(HZ, mon.bands)[HZ.findIndex((f) => f >= 1000)]).toBeLessThan(-3)
+    expect(mon.rmsAfter).toBeLessThan(mon.rmsBefore)
+  })
+
+  it("'best' güvenilmeyen ölçümü hedef seçmez", () => {
+    const rs = matchSpeakers(HZ, [
+      { speakerId: 'a', responses: [add(flat, pk(2000, 2, 6))] },
+      { speakerId: 'b', responses: [flat] },
+    ], { target: 'best', avoid: new Set(['b']) })
+    expect(rs.find((r) => r.isTarget)!.speakerId).toBe('a')
+  })
+
+  it('düzlük puanı: düz hoparlör, tizi düşenden iyi', () => {
+    const al = (c: number[]) => alignLevel(HZ, c)
+    expect(flatnessScore(HZ, al(flat))).toBeLessThan(flatnessScore(HZ, al(add(flat, HZ.map((f) => (f >= 5000 ? -8 : 0))))))
   })
 
   it('derin çukuru doldurmaz: yükseltme +3 dB ile sınırlı', () => {

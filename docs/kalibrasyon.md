@@ -113,13 +113,18 @@ Arayüz (`ui/src/lib/roomEq.ts`) bunlardan `speaker.roomEq` önerir:
   kadar ölçülen konumların ortalamasıyla yapılır.
 - Eğriler 500 Hz–4 kHz ortalamasına hizalanır (seviye kazançla ayrıca eşitlenir). Aynı mikrofonla ölçüldüğü için
   mikrofonun rengi farkta düşer: mutlak düz eğri değil hoparlörler arası eşleşme hedeflenir.
-- Hedef: referans hoparlörün eğrisi (ona EQ yok; içeriğin çoğunu çalan önler değişmez, diğerleri onlara benzetilir).
+- Hedef (0.5.8'den beri `best`): ölçülen en düz / en geniş bantlı hoparlörün eğrisi (`flatnessScore`: hizalanmış eğrinin
+  200 Hz–12 kHz RMS'i, −20 dB'de kırpılmış; düşük SNR'li ölçümler aday olmaz). Ona EQ uygulanmaz, diğerleri ona çekilir.
+  Önceden hedef referans (ön sol) hoparlördü; ön hoparlörler bir monitörün küçük dahili hoparlörleriyse iyi bir hoparlör
+  (ör. Bluetooth hoparlör) onlara benzetilip boğuluyordu (gerçek ölçümde orta hoparlörün 6–11 kHz'i −7…−9,5 dB kesilmişti).
+  Gecikme/seviye referansı ayrıdır, değişmedi.
 - Eşleme bandı: 150 Hz (bas yönetimi varsa kesimin 1,3 katı) ile 12 kHz arası, ayrıca hoparlörün kendi düşüş
   noktaları (500 Hz altında −6 dB, 4 kHz üstünde −10 dB) dışarıda. Subwoofer eşlenmez.
 - Açgözlü tepe yerleştirme: en büyük kalan hatanın yerine bir tepe bandı, genişliği yarı yükseklikten; frekans/kazanç/Q
   küçük ızgarada iyileştirilir; en çok 8 bant, 1 dB altı hata için bant eklenmez; sonra kazançlar birlikte ayarlanır.
   Yükseltme toplamda en çok +3 dB (0.5.0'dan önce +6; çukur doldurmak hoparlörü zorlar, duyulur fayda getirmez),
-  kısma en çok −12 dB.
+  kısma en çok −12 dB; 4 kHz üstünde toplam kısma en çok −3 dB (tizi boğmamak için; telefon mikrofonunda en az güvenilir
+  bölge), Q en çok 4 (dar bantlar tek konumdaki yansıma taraklarına oturur).
 - Sınırlar `matchSpeakers(…, { limits })` ile değişir (`RoomEqLimits`; varsayılan `DEFAULT_ROOM_EQ_LIMITS` yukarıdaki değerler).
   `GENTLE_ROOM_EQ_LIMITS` (yalnızca kısma, en çok −6 dB, 4 bant) 0.4.0'daki Kolay kurulumdan kalmadır, şu an kullanılmaz.
 

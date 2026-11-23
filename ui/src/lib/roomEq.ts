@@ -62,7 +62,22 @@ export const GENTLE_ROOM_EQ_LIMITS: RoomEqLimits = {
   capTotalCut: true,
 }
 
-export type MatchTarget = 'reference' | 'average'
+/**
+ * `reference`: verilen referans hoparlör hedef; `average`: hepsinin ortalaması; `best`: ölçülen en düz/en geniş bantlı
+ * hoparlör hedef (ona EQ uygulanmaz). `best`, donuk küçük ön hoparlörlerin (ör. monitör) iyi bir hoparlörü kendilerine
+ * benzetip boğmasını önler.
+ */
+export type MatchTarget = 'reference' | 'average' | 'best'
+
+/**
+ * Düzlük puanı (küçük = iyi): hizalanmış eğrinin 200 Hz–12 kHz'teki RMS'i (bas yönetimiyle kesilen bölge hariç; −20 dB'de
+ * kırpılır ki tek bir derin çentik puanı ele geçirmesin). Tizi erken düşen ya da sivri tepeli hoparlör yüksek puan alır.
+ */
+export function flatnessScore(hz: readonly number[], aligned: readonly number[], loHz = 0): number {
+  const lo = Math.max(200, loHz)
+  const v = hz.map((f, i) => (f >= lo && f <= MATCH_HI_HZ ? Math.max(aligned[i], -20) : null)).filter((x): x is number => x !== null)
+  return v.length ? Math.sqrt(v.reduce((a, x) => a + x * x, 0) / v.length) : Infinity
+}
 
 export interface MatchInput {
   speakerId: string
@@ -267,19 +282,28 @@ export function rollOff(hz: readonly number[], db: readonly number[]): { lo: num
 export function matchSpeakers(
   hz: readonly number[],
   inputs: MatchInput[],
-  opts: { target: MatchTarget; referenceId?: string; maxBands?: number; limits?: RoomEqLimits },
+  opts: { target: MatchTarget; referenceId?: string; maxBands?: number; limits?: RoomEqLimits; avoid?: ReadonlySet<string> },
 ): MatchResult[] {
   const limits = opts.limits ?? DEFAULT_ROOM_EQ_LIMITS
   const maxBands = opts.maxBands ?? limits.maxBands
   const usable = inputs.filter((x) => x.responses.length > 0 && x.responses.every((r) => r.length === hz.length))
   if (usable.length === 0) return []
   const curves = new Map(usable.map((x) => [x.speakerId, alignLevel(hz, spatialAverage(x.responses))]))
-  const refIn = usable.find((x) => x.speakerId === opts.referenceId) ?? usable[0]
   const loOf = (x: MatchInput) => Math.max(MATCH_LO_HZ, (x.highPassHz ?? 0) > 0 ? x.highPassHz! * 1.3 : 0)
+  let refIn = usable.find((x) => x.speakerId === opts.referenceId) ?? usable[0]
+  if (opts.target === 'best') {
+    // Güvenilmeyen (ör. düşük SNR) ölçümler hedef seçilmez; hepsi güvenilmezse yine de en düzü.
+    const pool = usable.filter((x) => !opts.avoid?.has(x.speakerId))
+    const cands = pool.length ? pool : usable
+    refIn = cands.reduce((a, x) =>
+      flatnessScore(hz, curves.get(x.speakerId)!, loOf(x)) < flatnessScore(hz, curves.get(a.speakerId)!, loOf(a)) ? x : a,
+    )
+  }
+  const fixedTarget = opts.target === 'reference' || opts.target === 'best'
 
   let target: number[]
   let targetLo = MATCH_LO_HZ
-  if (opts.target === 'reference') {
+  if (fixedTarget) {
     target = curves.get(refIn.speakerId)!
     targetLo = loOf(refIn)
   } else {
@@ -296,7 +320,7 @@ export function matchSpeakers(
     const loHz = Math.max(loOf(x), targetLo, edge.lo)
     const hiHz = Math.min(MATCH_HI_HZ, edge.hi)
     const use = hz.map((f) => f >= loHz && f <= hiHz)
-    const isTarget = opts.target === 'reference' && x.speakerId === refIn.speakerId
+    const isTarget = fixedTarget && x.speakerId === refIn.speakerId
     const want = hz.map((f, i) => clamp(target[i] - measured[i], -cutAt(f, limits.maxCutDb), limits.maxBoostDb))
     const bands = isTarget ? [] : fitPeaks(hz, want, use, maxBands, limits)
     const eq = bandsDb(hz, bands)

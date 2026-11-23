@@ -80,8 +80,9 @@ export function CalibrationScreen() {
   const [askConfirm, setAskConfirm] = useState(false)
   // Tını eşleme: frekans yanıtları, birkaç konumda ölçülüp ortalanır.
   const [taken, setTaken] = useState<CalibrationResult[]>([])
-  // Tını hedefi referans (ön) hoparlör: içeriğin çoğunu çalan önler değişmez, diğerleri onlara benzetilir.
-  const eqTarget: MatchTarget = 'reference'
+  // Tını hedefi ölçülen en düz/en geniş bantlı hoparlör: iyi bir hoparlör, donuk küçük önlere (ör. monitör) benzetilip
+  // boğulmaz; diğerleri ona çekilir. Gecikme/seviye referansı ayrı (ön sol) kalır.
+  const eqTarget: MatchTarget = 'best'
 
   const matchEq = true
   const phoneMode = micId === PHONE_MIC
@@ -184,9 +185,9 @@ export function CalibrationScreen() {
   const hz = result?.responseHz
   const matches = useMemo(() => {
     if (!hz || !result) return []
-    return matchSpeakers(hz, matchInputs(list, taken), { target: eqTarget, referenceId: result.referenceSpeakerId })
+    return matchSpeakers(hz, matchInputs(list, taken), { target: eqTarget, referenceId: result.referenceSpeakerId, avoid: excluded })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hz, result, taken, eqTarget, speakers])
+  }, [hz, result, taken, eqTarget, speakers, excluded])
 
   if (speakers.length === 0) {
     return (
