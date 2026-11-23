@@ -29,7 +29,7 @@ import {
 import { clamp, clampToRoom, computeAuto, round } from '../lib/geometry'
 import { assignExisting, layoutSlots, type LayoutSpec } from '../lib/layout'
 import { ROLE_CUSTOM_MANUAL, ROLE_CUSTOM_MAP, computeMapSource, roleDef, rolePatch } from '../lib/roles'
-import { idealListenerPoint, idealSpeakerPoint } from '../lib/snap'
+import { idealSpeakerPoint } from '../lib/snap'
 import { plannedName, standardPosition, type BuildResult } from '../lib/setup'
 import { findCable, type FixId } from '../lib/health'
 import { explainError } from '../lib/errors'
@@ -234,7 +234,7 @@ interface State {
   setRoomSize: (widthM: number, depthM: number) => void
   moveListener: (x: number, y: number) => void
   moveSpeaker: (id: string, x: number, y: number) => void
-  /** Hoparlörü rolünün standart açısına kaydırır (uzaklık korunur); dinleyiciyi hoparlörlere göre ideal noktaya. */
+  /** Hoparlörü rolünün standart açısına kaydırır (uzaklık korunur); dinleyiciyi odanın tam ortasına. */
   snapSpeaker: (id: string) => void
   snapListener: () => void
   nudgeSelected: (dx: number, dy: number) => void
@@ -1030,10 +1030,9 @@ export const useStore = create<State>()((set, get) => {
     },
 
     snapListener() {
-      const { room, speakers } = get()
-      const p = idealListenerPoint(speakers, room)
-      if (!p) return
-      const q = { x: round(p.x, 2), y: round(p.y, 2) }
+      const { room } = get()
+      // Enes'in isteği: dinleyici odanın tam ortasına.
+      const q = { x: round(room.widthM / 2, 2), y: round(room.depthM / 2, 2) }
       if (q.x === room.listener.x && q.y === room.listener.y) return
       commit({ room: { ...room, listener: q } }, 400, 'Dinleyiciyi yerine oturt')
     },
