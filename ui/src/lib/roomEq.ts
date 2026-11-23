@@ -7,7 +7,8 @@ import { REF_FS, magnitude, peaking } from './eqCurve'
  *
  * İlke: hepsi AYNI mikrofonla ölçüldüğü için mikrofonun kendi rengi farkta birbirini götürür; mutlak doğru eğri değil,
  * hoparlörler arası fark düzeltilir. Seviye farkı kazançla ayrıca eşitlendiği için eğriler 500 Hz–4 kHz ortalamasına
- * göre hizalanır. Güvenlik: yükseltme en çok +3 dB (çukurları doldurmak hoparlörü zorlar, duyulur fayda getirmez), kısma en çok −12 dB;
+ * göre hizalanır. Güvenlik: yükseltme en çok +3 dB (çukurları doldurmak hoparlörü zorlar, duyulur fayda getirmez), kısma en çok −12 dB
+ * (4 kHz üstünde −3 dB: tizi boğmamak için), Q en çok 4;
  * bas yönetimiyle kesilen bölge ve 12 kHz üstü (telefon mikrofonu, ışınlama) dışarıda bırakılır.
  */
 
@@ -16,6 +17,16 @@ export const MAX_BOOST_DB = 3
 export const MAX_CUT_DB = 12
 export const MATCH_LO_HZ = 150
 export const MATCH_HI_HZ = 12000
+/**
+ * Tizde (bu frekanstan yukarı) kısma en çok HF_MAX_CUT_DB: donuk bir referansa (ör. monitörün küçük hoparlörü) eşlerken
+ * iyi bir hoparlörün tizini −7…−10 dB kesmek "eşlenmiş ama boğuk" ses verir; tizdeki ölçüm de telefon mikrofonunda ve
+ * konuma en duyarlı bölge. Gerçek kullanıcı ölçümünde orta hoparlörün 6–11 kHz'i −7…−9,5 dB kesilmişti.
+ */
+export const HF_LIMIT_HZ = 4000
+export const HF_MAX_CUT_DB = 3
+/** Dar bantlar tek konumda ölçülen yansıma taraklarına oturur (konuma özgü, başka yerde zarar): Q en çok 4. */
+export const MAX_Q = 4
+const cutAt = (f: number, maxCutDb: number) => (f >= HF_LIMIT_HZ ? Math.min(maxCutDb, HF_MAX_CUT_DB) : maxCutDb)
 /** Bu kadar yakınsa bant eklemeye gerek yok. */
 export const MATCH_TOLERANCE_DB = 1
 
@@ -149,16 +160,16 @@ export function fitPeaks(
     while (lo - 1 >= 0 && use[lo - 1] && Math.sign(res[lo - 1]) === Math.sign(g0) && Math.abs(res[lo - 1]) > Math.abs(g0) / 2) lo--
     while (hi + 1 < hz.length && use[hi + 1] && Math.sign(res[hi + 1]) === Math.sign(g0) && Math.abs(res[hi + 1]) > Math.abs(g0) / 2) hi++
     const bw = Math.max(1 / 6, Math.log2(hz[hi] / hz[lo]))
-    const q0 = clamp(Math.sqrt(Math.pow(2, bw)) / (Math.pow(2, bw) - 1), 0.5, 6)
+    const q0 = clamp(Math.sqrt(Math.pow(2, bw)) / (Math.pow(2, bw) - 1), 0.5, MAX_Q)
 
     const before = err(eq)
-    let best = { f: hz[at], q: q0, g: clamp(g0, -maxCutDb, maxBoostDb), e: Infinity }
+    let best = { f: hz[at], q: q0, g: clamp(g0, -cutAt(hz[at], maxCutDb), maxBoostDb), e: Infinity }
     for (const fm of [-1 / 24, 0, 1 / 24])
       for (const gm of [0.7, 0.85, 1, 1.15])
         for (const qm of [0.6, 0.8, 1, 1.25, 1.6]) {
           const f = hz[at] * Math.pow(2, fm)
-          const g = clamp(g0 * gm, -maxCutDb, maxBoostDb)
-          const q = clamp(q0 * qm, 0.5, 6)
+          const g = clamp(g0 * gm, -cutAt(f, maxCutDb), maxBoostDb)
+          const q = clamp(q0 * qm, 0.5, MAX_Q)
           const e = pts.reduce((a, i) => a + (res[i] - peakDb(hz[i], f, q, g)) ** 2, 0)
           if (e < best.e) best = { f, q, g, e }
         }
@@ -172,7 +183,7 @@ export function fitPeaks(
       const others = curve(k)
       let bestG = b.g
       let bestE = Infinity
-      for (let g = -maxCutDb; g <= maxBoostDb + 1e-9; g += 0.25) {
+      for (let g = -cutAt(b.f, maxCutDb); g <= maxBoostDb + 1e-9; g += 0.25) {
         const e = pts.reduce((a, i) => a + (want[i] - others[i] - peakDb(hz[i], b.f, b.q, g)) ** 2, 0)
         if (e < bestE) {
           bestE = e
@@ -189,6 +200,17 @@ export function fitPeaks(
     const f = Math.max(0, maxBoostDb) / top
     bands.forEach((b) => {
       if (b.g > 0) b.g *= f
+    })
+  }
+  // Tizde toplam kısma da sınırlı: üst üste binen bantların eteği 4 kHz üstünde HF_MAX_CUT_DB'yi aşmasın.
+  const hfIdx = hz.map((f, i) => (f >= HF_LIMIT_HZ ? i : -1)).filter((i) => i >= 0)
+  for (let k = 0; k < 20 && hfIdx.length > 0; k++) {
+    const c = curve()
+    const bottom = Math.min(...hfIdx.map((i) => c[i]))
+    if (bottom >= -HF_MAX_CUT_DB - 0.05) break
+    const f = HF_MAX_CUT_DB / -bottom
+    bands.forEach((b) => {
+      if (b.g < 0 && b.f >= HF_LIMIT_HZ / 2) b.g *= f
     })
   }
   // İsteğe bağlı: toplam kısma da sınırlı (kısan bantlar orantılı küçültülür).
@@ -275,7 +297,7 @@ export function matchSpeakers(
     const hiHz = Math.min(MATCH_HI_HZ, edge.hi)
     const use = hz.map((f) => f >= loHz && f <= hiHz)
     const isTarget = opts.target === 'reference' && x.speakerId === refIn.speakerId
-    const want = hz.map((_, i) => clamp(target[i] - measured[i], -limits.maxCutDb, limits.maxBoostDb))
+    const want = hz.map((f, i) => clamp(target[i] - measured[i], -cutAt(f, limits.maxCutDb), limits.maxBoostDb))
     const bands = isTarget ? [] : fitPeaks(hz, want, use, maxBands, limits)
     const eq = bandsDb(hz, bands)
     const corrected = measured.map((v, i) => v + eq[i])

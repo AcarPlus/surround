@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { REF_FS, magnitude, peaking } from './eqCurve'
-import { GENTLE_ROOM_EQ_LIMITS, MAX_BOOST_DB, alignLevel, bandsDb, matchSpeakers, spatialAverage } from './roomEq'
+import { GENTLE_ROOM_EQ_LIMITS, HF_MAX_CUT_DB, MAX_BOOST_DB, MAX_Q, alignLevel, bandsDb, matchSpeakers, spatialAverage } from './roomEq'
 
 /** C# ResponseGrid ile aynı: 100 Hz'den 1/12 oktav, 89 nokta. */
 const HZ = Array.from({ length: 89 }, (_, i) => 100 * Math.pow(2, i / 12))
@@ -35,6 +35,20 @@ describe('roomEq', () => {
     const at2500 = eq[HZ.findIndex((f) => f >= 2500)]
     expect(at2500).toBeLessThan(-5)
     expect(r1.bands.length).toBeLessThanOrEqual(8)
+  })
+
+  it('donuk referansa eşlerken parlak hoparlörün tizini en çok 3 dB kısar (boğmaz)', () => {
+    // Referans (küçük monitör hoparlörü) 5 kHz üstünde −8 dB düşük; parlak hoparlör düz.
+    const dull = add(flat, HZ.map((f) => (f >= 5000 ? -8 : 0)))
+    const [, r] = matchSpeakers(HZ, [
+      { speakerId: 'ref', responses: [dull] },
+      { speakerId: 'bright', responses: [flat] },
+    ], { target: 'reference', referenceId: 'ref' })
+    const eq = bandsDb(HZ, r.bands)
+    HZ.forEach((f, i) => {
+      if (f >= 4000) expect(eq[i]).toBeGreaterThanOrEqual(-HF_MAX_CUT_DB - 0.3)
+    })
+    for (const b of r.bands) expect(b.q).toBeLessThanOrEqual(MAX_Q)
   })
 
   it('derin çukuru doldurmaz: yükseltme +3 dB ile sınırlı', () => {
