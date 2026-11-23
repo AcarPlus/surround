@@ -382,9 +382,21 @@ export function CalibrationScreen() {
           <p className="mt-1 text-[13px] text-muted">
             Aynı yükseklikte ve aynı yöne bakacak şekilde tut. Hazır olunca devam et{phoneMode ? ' (telefondaki düğme de olur)' : ''}.
           </p>
+          <p className="mt-1 text-xs text-faint">
+            İstersen burada bitirebilirsin: gecikme ve seviye ilk konumdan zaten ölçüldü; tını eşleme {taken.length} konumun
+            ortalamasıyla yapılır (daha az konum, odaya daha az dayanıklı).
+          </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button variant="primary" disabled={!canStart} onClick={() => void start('next')}>
               <IconMic /> Devam: konum {taken.length + 1}
+            </Button>
+            <Button
+              onClick={() => {
+                setPhase('result')
+                if (phoneMode) void api.phoneLinkPrompt(null).catch(() => {})
+              }}
+            >
+              <IconCheck /> Buraya kadarıyla bitir
             </Button>
             <Button variant="ghost" onClick={() => setPhase('setup')}>
               Vazgeç

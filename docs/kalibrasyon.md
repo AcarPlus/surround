@@ -109,6 +109,8 @@ yansımaları (koltuktaki tınıyı belirleyen kısım) tutar, odanın geç kuyr
 Arayüz (`ui/src/lib/roomEq.ts`) bunlardan `speaker.roomEq` önerir:
 - Her zaman 5 konumda ölçülür (ilki dinleme noktası; gecikme/seviye oradan; sonra ~30 cm sol, ~30 cm sağ, ~20 cm ön,
   ~20 cm arka), yanıtlar konumlar arasında güçte ortalanır. Arayüzde seçenek yoktur (bkz. "Ölçüm ekranı" aşağıda).
+  Konumlar arasında "Buraya kadarıyla bitir" ile erken bitirilebilir: gecikme/seviye ilk konumdan gelir, tını eşleme o ana
+  kadar ölçülen konumların ortalamasıyla yapılır.
 - Eğriler 500 Hz–4 kHz ortalamasına hizalanır (seviye kazançla ayrıca eşitlenir). Aynı mikrofonla ölçüldüğü için
   mikrofonun rengi farkta düşer: mutlak düz eğri değil hoparlörler arası eşleşme hedeflenir.
 - Hedef: referans hoparlörün eğrisi (ona EQ yok; içeriğin çoğunu çalan önler değişmez, diğerleri onlara benzetilir).
@@ -123,7 +125,7 @@ Arayüz (`ui/src/lib/roomEq.ts`) bunlardan `speaker.roomEq` önerir:
 
 ## Ölçüm ekranı (0.5.0)
 Kullanıcıya ayar bırakılmaz; her şey en iyi değerinde sabittir:
-- Tını eşleme her zaman açık, 5 konum, tekrar 3 (medyan). Loopback test modu yalnızca komut satırında.
+- Tını eşleme her zaman açık, 5 konum (arada erken bitirilebilir), tekrar 3 (medyan). Loopback test modu yalnızca komut satırında.
 - **Tarama seviyesi otomatik:** −12 dBFS ("Yüksek") ile başlar. Bir konumda ölçülemeyen ya da SNR < 15 dB (`MIN_SNR_DB`,
   `lib/calibration.ts`) hoparlör varsa aynı konum bir kez −6 dBFS ("Çok yüksek") ile tekrarlanır; mikrofon kırpıldıysa
   8 dB kısılıp (en az −20 dBFS) tekrarlanır. Yükseltilen seviye sonraki konumlarda da kullanılır.
