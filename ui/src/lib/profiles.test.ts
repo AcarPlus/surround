@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { EQ_BANDS, defaultProcessing, defaultUpmixOptions, normalizeUpmixOptions } from '../api/types'
-import { SOUND_PRESETS } from './presets'
 import {
   builtinProfile,
   builtinProfiles,
@@ -25,27 +24,30 @@ describe('yerleşik profiller', () => {
     }
   })
 
-  it('Film: film modu, diyalog +2 dB, Film ses ön ayarı', () => {
+  it('Film: film modu, diyalog +1 dB, hafif bas/netlik/dinamik, genişletme yok', () => {
     const p = builtinProfile('builtin-film')!
-    expect(p.upmixOptions.mode).toBe('film')
-    expect(p.upmixOptions.centerDb).toBe(2)
-    const film = SOUND_PRESETS.find((s) => s.id === 'film')!
-    expect(p.processing.preset).toBe('film')
-    expect(p.processing.eq).toEqual(film.values.eq)
-    expect(p.processing.bassBoostDb).toBe(film.values.bassBoostDb)
+    expect(p.upmixOptions).toMatchObject({ mode: 'film', centerDb: 1, diffusion: 0.6 })
+    expect(p.processing).toMatchObject({ enabled: true, bassBoostDb: 2, clarityDb: 1.5, dynamicBoost: 0.15, ambience: 0, limiter: true, autoPreamp: true })
+    expect(p.processing.eq.every((v) => v === 0)).toBe(true)
   })
 
-  it('Oyun: oyun modu, orta dinamik güçlendirme', () => {
+  it('Oyun: oyun modu (düşük gecikme), netlik, hafif dinamik', () => {
     const p = builtinProfile('builtin-game')!
     expect(p.upmixOptions.mode).toBe('game')
-    expect(p.processing.dynamicBoost).toBe(0.5)
-    expect(p.processing.clarityDb).toBe(2)
+    expect(p.processing).toMatchObject({ clarityDb: 2, dynamicBoost: 0.2, ambience: 0 })
   })
 
-  it('Müzik: film modu, surround -4, üst -6, Müzik ön ayarı', () => {
+  it('Müzik: doğrudan dağıtım (Flat yönlendirmesi) + biraz sıcaklık ve parlaklık', () => {
     const p = builtinProfile('builtin-music')!
-    expect(p.upmixOptions).toMatchObject({ mode: 'film', surroundDb: -4, heightDb: -6 })
-    expect(p.processing.preset).toBe('music')
+    expect(p.upmixOptions.mode).toBe('direct')
+    expect(p.processing).toMatchObject({ enabled: true, bassBoostDb: 1.5, clarityDb: 1, dynamicBoost: 0, ambience: 0 })
+  })
+
+  it('eski sürüm kayıtlı yerleşik kopya yeni tanımla değişir; güncel sürüm korunur', () => {
+    const old = { ...builtinProfile('builtin-game')!, rev: undefined, processing: { ...builtinProfile('builtin-game')!.processing, clarityDb: 4 } }
+    expect(normalizeProfiles([old]).find((p) => p.id === 'builtin-game')!.processing.clarityDb).toBe(2)
+    const mine = { ...builtinProfile('builtin-game')!, processing: { ...builtinProfile('builtin-game')!.processing, clarityDb: 3 } }
+    expect(normalizeProfiles([mine]).find((p) => p.id === 'builtin-game')!.processing.clarityDb).toBe(3)
   })
 
   it('her çağrıda bağımsız kopya döner', () => {
@@ -85,7 +87,7 @@ describe('değişiklik algılama', () => {
     patch.processing.eq[0] = 12
     patch.upmixOptions.centerDb = -5
     expect(p.processing.eq[0]).not.toBe(12)
-    expect(p.upmixOptions.centerDb).toBe(2)
+    expect(p.upmixOptions.centerDb).toBe(1)
     const snap = snapshotState({ processing: defaultProcessing(), upmix: false, upmixOptions: defaultUpmixOptions() })
     expect(snap.upmix).toBe(false)
   })

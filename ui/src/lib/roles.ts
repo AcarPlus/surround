@@ -187,8 +187,10 @@ interface RoleZone {
 
 const FLOOR_ZONES: readonly RoleZone[] = [
   { id: 'center', centre: 0, lo: -15, hi: 15 },
-  { id: 'left', centre: -30, lo: -50, hi: -10 },
-  { id: 'right', centre: 30, lo: 10, hi: 50 },
+  // Ön çift geniş tutulur (±75°): sahnede çizilen konum kabaca olur; monitör/masa hoparlörü ±60°'de çizildi diye
+  // "Yan" önerilmesin (yan rolü ön kanalı çalmaz, sol/sağ içerik başka hoparlöre katlanır).
+  { id: 'left', centre: -30, lo: -75, hi: -10 },
+  { id: 'right', centre: 30, lo: 10, hi: 75 },
   { id: 'wide-left', centre: -60, lo: -75, hi: -45, noSuggest: true },
   { id: 'wide-right', centre: 60, lo: 45, hi: 75, noSuggest: true },
   { id: 'side-left', centre: -90, lo: -120, hi: -60 },

@@ -3,7 +3,7 @@ import type { LevelFrame } from '../api/types'
 import { isHighLatencyKind, type Speaker } from '../api/types'
 import { useStore, LISTENER_ID } from '../store/useStore'
 import { primaryChannel } from '../lib/geometry'
-import { FLOOR_NOMINAL, HEIGHT_NOMINAL, ROLES, effectiveRole } from '../lib/roles'
+import { ROLES, angleFromListener, effectiveRole } from '../lib/roles'
 import { standardPosition } from '../lib/setup'
 import { deviceColorAlpha, deviceColorVar } from '../lib/colors'
 import { frameEnergy, levelToUnit, speakerLevel, useLevels } from '../lib/useLevels'
@@ -330,7 +330,7 @@ export function RoomStage({
         </button>
       ))}
 
-      {running && <ListenerCompass x={lx} y={ly} levels={levels} />}
+      {running && <ListenerCompass x={lx} y={ly} levels={levels} speakers={speakers} listener={room.listener} />}
 
       {/* Dinleyici */}
       <button
@@ -452,16 +452,28 @@ const COMPASS_BARS = 72
 const COMPASS_SIGMA = 24
 
 /**
- * Ses pusulası: dinleyicinin çevresinde, sesin hangi yönden geldiğini gösteren dairesel gösterge. Her kanalın canlı
- * seviyesi kendi nominal açısına (0° = ön, + = sağ) yumuşak bir tepe olarak yayılır; üst kanallar daha zayıf, LFE her
- * yöne eşit katkı verir.
+ * Ses pusulası: dinleyicinin çevresinde, sesin hangi yönden geldiğini gösteren dairesel gösterge. Her hoparlörün canlı
+ * seviyesi, sahnedeki GERÇEK yönüne (dinleyiciden açı; 0° = ön, + = sağ) yumuşak bir tepe olarak yayılır; üst
+ * hoparlörler daha zayıf, subwoofer/LFE her yöne eşit katkı verir. (Önceden kanalların nominal açıları kullanılıyordu:
+ * hoparlör nerede durursa dursun tepeler ±30°/±90°'de çıkıyordu.)
  */
-function ListenerCompass({ x, y, levels }: { x: number; y: number; levels: LevelFrame | null }) {
+function ListenerCompass({
+  x,
+  y,
+  levels,
+  speakers,
+  listener,
+}: {
+  x: number
+  y: number
+  levels: LevelFrame | null
+  speakers: readonly Speaker[]
+  listener: { x: number; y: number }
+}) {
   if (!levels) return null
-  const sources = [
-    ...FLOOR_NOMINAL.map((n) => ({ deg: n.deg, v: levelToUnit(levels[n.ch]) })),
-    ...HEIGHT_NOMINAL.map((n) => ({ deg: n.deg, v: levelToUnit(levels[n.ch]) * 0.6 })),
-  ]
+  const sources = speakers
+    .filter((s) => !s.mute && primaryChannel(s.source) !== 'LFE')
+    .map((s) => ({ deg: angleFromListener(s, listener), v: speakerLevel(s, levels) * (s.elevated ? 0.6 : 1) }))
   const base = levelToUnit(levels.LFE) * 0.25
   const bars = Array.from({ length: COMPASS_BARS }, (_, i) => {
     const a = (i * 360) / COMPASS_BARS - 180

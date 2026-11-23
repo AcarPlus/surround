@@ -5,7 +5,7 @@ import {
   type Profile,
   type UpmixOptions,
 } from '../api/types'
-import { matchSoundPreset, samePeq, soundPresetPatch } from './presets'
+import { matchSoundPreset, samePeq } from './presets'
 
 /** Profilin kapsadığı ayarlar: ses işleme, upmix anahtarı ve upmix ayrıntıları. */
 export interface ProfileState {
@@ -16,8 +16,16 @@ export interface ProfileState {
 
 export const MAX_PROFILE_NAME = 24
 
-const soundProcessing = (presetId: string, extra: Partial<Processing> = {}): Processing => {
-  const p = normalizeProcessing({ ...soundPresetPatch(presetId), ...extra })
+/**
+ * Yerleşik profil tanımlarının sürümü. Artınca kullanıcının config'te kayıtlı (ya da "Profili güncelle" ile değiştirdiği)
+ * eski Film/Oyun/Müzik kopyaları yeni tanımlarla değişir.
+ * 2 (0.5.9): Flat'in temiz zinciri taban, üstüne küçük dokunuşlar. Eski tanımlar (gülümseme EQ'su + bas + netlik +
+ * dinamik makeup + %30 genişlik) yüksek masterlarda tepeleri +1,4…+4,9 dBFS'e çıkarıp limiter'ı sürekli çalıştırıyordu.
+ */
+export const BUILTIN_PROFILES_REV = 2
+
+const gentle = (v: Partial<Processing>): Processing => {
+  const p = normalizeProcessing({ enabled: true, autoPreamp: true, limiter: true, ...v })
   p.preset = matchSoundPreset(p)
   return p
 }
@@ -26,28 +34,35 @@ const soundProcessing = (presetId: string, extra: Partial<Processing> = {}): Pro
 export function builtinProfiles(): Profile[] {
   return [
     {
+      // Diyalog önde: film modu orta kanalı ayıklar (+1 dB), hafif bas ve netlik, sessiz konuşmayı biraz toparlayan
+      // hafif dinamik; ortam genişletme yok, arka dağınıklık azaltılmış (daha az "fazlı").
       id: 'builtin-film',
       name: 'Film',
       builtin: true,
-      processing: soundProcessing('film'),
+      rev: BUILTIN_PROFILES_REV,
+      processing: gentle({ bassBoostDb: 2, clarityDb: 1.5, dynamicBoost: 0.15 }),
       upmix: true,
-      upmixOptions: normalizeUpmixOptions({ mode: 'film', centerDb: 2 }),
+      upmixOptions: normalizeUpmixOptions({ mode: 'film', centerDb: 1, diffusion: 0.6 }),
     },
     {
+      // Düşük gecikme (oyun modu matris çözücü) ve ayrıntı: ayak sesi/konum için netlik, ölçülü bas.
       id: 'builtin-game',
       name: 'Oyun',
       builtin: true,
-      processing: soundProcessing('game'),
+      rev: BUILTIN_PROFILES_REV,
+      processing: gentle({ bassBoostDb: 1, clarityDb: 2, dynamicBoost: 0.2 }),
       upmix: true,
-      upmixOptions: normalizeUpmixOptions({ mode: 'game' }),
+      upmixOptions: normalizeUpmixOptions({ mode: 'game', diffusion: 0.6 }),
     },
     {
+      // Müzik stereo karışımı için yapılır: Flat'in doğrudan dağıtımı (çözümleme yok) + biraz sıcaklık ve parlaklık.
       id: 'builtin-music',
       name: 'Müzik',
       builtin: true,
-      processing: soundProcessing('music'),
+      rev: BUILTIN_PROFILES_REV,
+      processing: gentle({ bassBoostDb: 1.5, clarityDb: 1 }),
       upmix: true,
-      upmixOptions: normalizeUpmixOptions({ mode: 'film', surroundDb: -4, heightDb: -6 }),
+      upmixOptions: normalizeUpmixOptions({ mode: 'direct' }),
     },
     {
       // Hiçbir şey değiştirmez: ses işleme (EQ, bas, netlik, dinamik) baştan sona atlanır; upmix "doğrudan" modda:
@@ -57,6 +72,7 @@ export function builtinProfiles(): Profile[] {
       id: 'builtin-flat',
       name: 'Flat',
       builtin: true,
+      rev: BUILTIN_PROFILES_REV,
       // Güvenlik limiter'ı açık: yalnız −1 dBFS'i aşan tepelerde çalışır (ör. oda EQ'su artışları), yoksa ses kırpılır.
       processing: { ...normalizeProcessing({ enabled: false, limiter: true }), preset: 'flat' },
       upmix: true,
@@ -143,11 +159,16 @@ export function normalizeProfiles(raw: unknown): Profile[] {
         processing: normalizeProcessing(o.processing),
         upmix: typeof o.upmix === 'boolean' ? o.upmix : true,
         upmixOptions: normalizeUpmixOptions(o.upmixOptions),
+        ...(typeof o.rev === 'number' ? { rev: o.rev } : {}),
       })
     }
   }
-  // Flat sabittir (tanımı "hiçbir şeyi değiştirme"); kayıtlı eski bir kopyası yeni tanımı gölgelemesin.
-  const builtins = builtinProfiles().map((b) => (b.id === 'builtin-flat' ? b : (stored.find((s) => s.id === b.id) ?? b)))
+  // Flat sabittir (tanımı "hiçbir şeyi değiştirme"); diğerlerinin kayıtlı kopyası yalnız güncel sürümdeyse geçerli.
+  const builtins = builtinProfiles().map((b) => {
+    if (b.id === 'builtin-flat') return b
+    const s = stored.find((v) => v.id === b.id)
+    return s && (s.rev ?? 1) >= BUILTIN_PROFILES_REV ? s : b
+  })
   return [...builtins, ...stored.filter((s) => !s.builtin)]
 }
 

@@ -39,7 +39,8 @@ describe('suggestRole', () => {
 
   it('geniş rol önerilmez', () => {
     expect(suggestRole(at('side-left', -55), L)).toBe('left')
-    expect(suggestRole(at('left', -62), L)).toBe('side-left')
+    expect(suggestRole(at('left', -62), L)).toBeNull()
+    expect(suggestRole(at('left', -88), L)).toBe('side-left')
   })
 
   it('üst hoparlörler kendi grubunda kalır', () => {

@@ -31,7 +31,7 @@ describe('profil mağazası', () => {
     expect(st().activeProfileId).toBe('builtin-game')
     expect(st().upmix).toBe(true)
     expect(st().upmixOptions.mode).toBe('game')
-    expect(st().processing.dynamicBoost).toBe(0.5)
+    expect(st().processing.dynamicBoost).toBe(0.2)
     expect(selectProfileModified(st())).toBe(false)
   })
 
@@ -51,7 +51,7 @@ describe('profil mağazası', () => {
     st().setUpmixOptions({ centerDb: -4 })
     st().updateActiveProfile()
     st().resetBuiltinProfile('builtin-film')
-    expect(st().upmixOptions.centerDb).toBe(2)
+    expect(st().upmixOptions.centerDb).toBe(1)
     expect(selectProfileModified(st())).toBe(false)
   })
 
@@ -86,7 +86,7 @@ describe('profil mağazası', () => {
     const cfg = spy.mock.calls.at(-1)![0]
     expect(cfg.activeProfileId).toBe('builtin-music')
     expect(cfg.profiles).toHaveLength(4)
-    expect(cfg.upmixOptions).toMatchObject({ mode: 'film', surroundDb: -4, heightDb: -6 })
+    expect(cfg.upmixOptions).toMatchObject({ mode: 'direct' })
     spy.mockRestore()
     vi.useRealTimers()
   })

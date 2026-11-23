@@ -365,6 +365,8 @@ export interface Profile {
   processing: Processing
   upmix: boolean
   upmixOptions: UpmixOptions
+  /** Yerleşik profil tanımının sürümü; kayıtlı kopya eskiyse yeni tanım geçerli olur (bkz. BUILTIN_PROFILES_REV). */
+  rev?: number
 }
 
 /** Kullanıcının kaydettiği genel ses ön ayarı (config kökünde `userSoundPresets`). */
