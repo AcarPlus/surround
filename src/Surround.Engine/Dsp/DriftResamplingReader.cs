@@ -61,7 +61,7 @@ public sealed class DriftResamplingReader
     private readonly LatencyGroup _group;
     private double _targetMs;
     private readonly DriftController _ctl;
-    private readonly HermiteResampler _res;
+    private readonly SincResampler _res;
     private float[] _in = new float[4096];
     private bool _primed;
     private long _underruns, _overruns;
@@ -77,7 +77,7 @@ public sealed class DriftResamplingReader
         // VB-Cable vs. a sound card occasionally drain a tight ring), capped so latency stays bounded.
         _maxTargetMs = Math.Max(3 * targetMs, 150);
         _ctl = controller ?? new DriftController(targetMs);
-        _res = new HermiteResampler(channels);
+        _res = new SincResampler(channels, srcRate / devRate);
     }
 
     public double FillMs => Volatile.Read(ref _fillMs);

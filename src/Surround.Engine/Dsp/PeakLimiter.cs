@@ -21,7 +21,11 @@ public sealed class PeakLimiter
     private double _sum;
     private float _rel = 1f;
 
-    public PeakLimiter(int channels, int sampleRate, double lookaheadMs = 1.0, double releaseMs = 80, float? ceiling = null)
+    /// <remarks>
+    /// Defaults 5 ms look-ahead / 200 ms release: a 60 Hz tone pushed 1–6 dB over the ceiling stays at about −77 dB THD
+    /// (1 ms / 80 ms gave −39…−51 dB, i.e. audibly distorted bass whenever EQ boosts or dynamics hit the ceiling).
+    /// </remarks>
+    public PeakLimiter(int channels, int sampleRate, double lookaheadMs = 5.0, double releaseMs = 200, float? ceiling = null)
     {
         _ch = channels;
         _win = Math.Max(1, (int)Math.Round(lookaheadMs * sampleRate / 1000.0));

@@ -248,3 +248,125 @@ public class HermiteResamplerTests
         for (int i = 0; i < Math.Min(split.Count, 900); i++) Assert.Equal(whole[i], split[i], 5);
     }
 }
+
+public class SincResamplerTests
+{
+    private static float[] Sine(int n, double f, double fs = 48000, float amp = 0.5f)
+    {
+        var x = new float[n];
+        for (int i = 0; i < n; i++) x[i] = amp * (float)Math.Sin(2 * Math.PI * f * i / fs);
+        return x;
+    }
+
+    [Fact]
+    public void RatioOneIsExactPassThroughWithHalfLengthLatency()
+    {
+        const int n = 2000;
+        var input = Sine(n, 1000);
+        var res = new SincResampler(1);
+        var output = new float[n];
+        int produced = res.Process(input, n, output, n, 1.0, out _);
+        Assert.True(produced >= n - 1);
+        int lat = SincResampler.Taps / 2;
+        for (int i = lat; i < produced; i++) Assert.Equal(input[i - lat], output[i]);
+    }
+
+    [Theory]
+    [InlineData(1000)]
+    [InlineData(10000)]
+    [InlineData(16000)]
+    [InlineData(18000)]
+    [InlineData(20000)]
+    public void TrebleStaysFlatWhileThePhaseDrifts(double f)
+    {
+        // 300 ppm: the fractional phase sweeps 0..1 every ~70 ms, as under the drift controller.
+        const int n = 48000;
+        var input = Sine(n, f);
+        var res = new SincResampler(1);
+        var output = new float[n];
+        int produced = res.Process(input, n, output, n, 1 + 300e-6, out _);
+        // Amplitude per 10 ms block by projecting onto the (resampled) frequency; over a full phase sweep it must stay
+        // within ±0.05 dB of the input (Hermite: down to -5 dB at 18 kHz).
+        double w = 2 * Math.PI * f * (1 + 300e-6) / 48000;
+        const int block = 480;
+        for (int b = 1000; b + block < produced - 100; b += block)
+        {
+            double re = 0, im = 0;
+            for (int i = b; i < b + block; i++) { re += output[i] * Math.Cos(w * i); im += output[i] * Math.Sin(w * i); }
+            double amp = 2 * Math.Sqrt(re * re + im * im) / block;
+            double db = 20 * Math.Log10(amp / 0.5);
+            Assert.InRange(db, -0.05, 0.05);
+        }
+    }
+
+    [Fact]
+    public void ResampleKeepsSineFrequency()
+    {
+        const double fsIn = 44100, fsOut = 48000, f = 1000;
+        int nIn = (int)fsIn * 2;
+        var input = Sine(nIn, f, fsIn);
+        var res = new SincResampler(1, fsIn / fsOut);
+        var output = new float[(int)(fsOut * 2)];
+        int produced = res.Process(input, nIn, output, output.Length, fsIn / fsOut, out _);
+        Assert.True(produced > fsOut * 1.9);
+        int crossings = 0;
+        for (int i = 1; i < produced; i++) if (output[i - 1] < 0 && output[i] >= 0) crossings++;
+        Assert.InRange(crossings / (produced / fsOut), f * 0.99, f * 1.01);
+    }
+
+    [Fact]
+    public void DownsamplingRejectsContentAboveTheOutputNyquist()
+    {
+        // 48 kHz -> 32 kHz: a 20 kHz tone cannot exist at the output and must not fold back to 12 kHz.
+        const int n = 48000;
+        var input = Sine(n, 20000);
+        var res = new SincResampler(1, 1.5);
+        var output = new float[n];
+        int produced = res.Process(input, n, output, output.Length, 1.5, out _);
+        double sum = 0;
+        for (int i = 200; i < produced; i++) sum += output[i] * output[i];
+        double rmsDb = 10 * Math.Log10(sum / (produced - 200) / 0.125);
+        Assert.True(rmsDb < -40, $"alias {rmsDb:0.0} dB");
+    }
+
+    [Fact]
+    public void KeepsStateAcrossCalls()
+    {
+        const int n = 1000;
+        var input = new float[n];
+        for (int i = 0; i < n; i++) input[i] = (float)Math.Sin(0.05 * i);
+        var a = new SincResampler(1);
+        var whole = new float[n];
+        a.Process(input, n, whole, n, 0.9, out _);
+
+        var b = new SincResampler(1);
+        var split = new List<float>();
+        int pos = 0;
+        var tmp = new float[100];
+        while (pos < n)
+        {
+            int chunk = Math.Min(37, n - pos);
+            int p = b.Process(input.AsSpan(pos), chunk, tmp, tmp.Length, 0.9, out int c);
+            split.AddRange(tmp.Take(p));
+            pos += c;
+            if (c == 0 && p == 0) break;
+        }
+        for (int i = 0; i < Math.Min(split.Count, 900); i++) Assert.Equal(whole[i], split[i], 5);
+    }
+
+    [Fact]
+    public void MultichannelKeepsChannelsApart()
+    {
+        const int n = 1000;
+        var input = new float[n * 2];
+        for (int i = 0; i < n; i++) { input[2 * i] = 0.3f; input[2 * i + 1] = -0.7f; }
+        var res = new SincResampler(2);
+        var output = new float[n * 2];
+        int produced = res.Process(input, n, output, n, 1.0002, out _);
+        for (int i = 100; i < produced; i++)
+        {
+            Assert.Equal(0.3f, output[2 * i], 4);
+            Assert.Equal(-0.7f, output[2 * i + 1], 4);
+        }
+    }
+}

@@ -140,7 +140,8 @@ public class LimiterTests
         var y = (float[])x.Clone();
         lim.Process(y, y.Length);
         int d = lim.LatencyFrames;
-        Assert.True(d > 0 && d <= Sig.Fs / 500); // <= 2 ms
+        // 5 ms look-ahead keeps bass clean while limiting (see PeakLimiter); same on every output, so alignment holds.
+        Assert.True(d > 0 && d <= Sig.Fs * 6 / 1000); // <= 6 ms
         for (int i = d; i < y.Length; i++) Assert.Equal(x[i - d], y[i], 6);
     }
 

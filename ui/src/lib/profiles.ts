@@ -50,14 +50,15 @@ export function builtinProfiles(): Profile[] {
       upmixOptions: normalizeUpmixOptions({ mode: 'film', surroundDb: -4, heightDb: -6 }),
     },
     {
-      // Hiçbir şey değiştirmez: ses işleme (EQ, bas, netlik, sınırlayıcı) baştan sona atlanır; upmix "doğrudan" modda:
+      // Hiçbir şey değiştirmez: ses işleme (EQ, bas, netlik, dinamik) baştan sona atlanır; upmix "doğrudan" modda:
       // çözümleme yok, stereo içerik her hoparlöre olduğu gibi kopyalanır (orta = (L+R)/2) ki hiçbir hoparlör susmasın;
       // gerçek çok kanallı içerik dokunulmadan geçer. 32-bit kayan nokta. Hoparlör başı düzeltmeler (gecikme, seviye,
       // tını eşleme, bas yönetimi) kalır: onlar sesi değil hoparlörleri eşitler.
       id: 'builtin-flat',
       name: 'Flat',
       builtin: true,
-      processing: { ...normalizeProcessing({ enabled: false, limiter: false }), preset: 'flat' },
+      // Güvenlik limiter'ı açık: yalnız −1 dBFS'i aşan tepelerde çalışır (ör. oda EQ'su artışları), yoksa ses kırpılır.
+      processing: { ...normalizeProcessing({ enabled: false, limiter: true }), preset: 'flat' },
       upmix: true,
       upmixOptions: normalizeUpmixOptions({ mode: 'direct' }),
     },

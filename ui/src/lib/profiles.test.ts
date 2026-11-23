@@ -142,10 +142,10 @@ describe('normalizeProfiles', () => {
     expect(old.upmixOptions.surroundDelayMs).toBe(10)
   })
 
-  it('Flat: ses işleme ve sınırlayıcı kapalı, upmix doğrudan (işlemsiz kopya)', () => {
+  it('Flat: ses işleme kapalı, güvenlik limiter açık, upmix doğrudan (işlemsiz kopya)', () => {
     const p = builtinProfile('builtin-flat')!
     expect(p.processing.enabled).toBe(false)
-    expect(p.processing.limiter).toBe(false)
+    expect(p.processing.limiter).toBe(true)
     expect(p.processing.eq.every((v) => v === 0)).toBe(true)
     expect(p.upmixOptions.mode).toBe('direct')
   })
