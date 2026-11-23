@@ -15,6 +15,7 @@ import {
 } from '../lib/presets'
 import { LISTENER_ID, selectSpeaker, useStore } from '../store/useStore'
 import { computeAuto } from '../lib/geometry'
+import { positionalRows } from '../lib/positional'
 import {
   CUSTOM_MANUAL_LABEL,
   CUSTOM_MAP_LABEL,
@@ -101,6 +102,7 @@ function SpeakerPanel() {
   const speakers = useStore((s) => s.speakers)
   const auto = useStore((s) => s.auto)
   const lowLatency = useStore((s) => s.lowLatency)
+  const positional = useStore((s) => s.positionalMix)
   const updateSpeaker = useStore((s) => s.updateSpeaker)
   const setMix = useStore((s) => s.setMix)
   const setRole = useStore((s) => s.setRole)
@@ -119,6 +121,10 @@ function SpeakerPanel() {
   const d = byId[sp.id]?.distance ?? 0
   const disabled = lowLatency && isHighLatencyKind(dev?.kind)
   const fromMap = sp.role === ROLE_CUSTOM_MAP
+  // "Konuma göre dağıt" açıkken motora giden gerçek satır (rol satırı yerine) gösterilir ve elle değiştirilemez.
+  const posRow = positional ? positionalRows(speakers, room.listener).get(sp.id) : undefined
+  const shownRow = posRow && Object.keys(posRow).length > 0 ? posRow : null
+  const mixLocked = fromMap || !!shownRow
   const clash = speakers.some(
     (o) => o.id !== sp.id && o.outputDeviceId === sp.outputDeviceId && o.deviceChannel === sp.deviceChannel,
   )
@@ -218,7 +224,14 @@ function SpeakerPanel() {
       {tab === 'advanced' && (
         <section>
           <SectionTitle>Kanal karışımı</SectionTitle>
-          {fromMap && (
+          {shownRow && (
+            <p className="mb-2 text-xs text-accent">
+              Konuma göre dağıtılıyor: her kanal yönünden duyulsun diye bu hoparlör dinleyiciye göre{' '}
+              <span className="num">{fmt(angleFromListener(sp, room.listener), 0)}°</span> yönündeki payını çalıyor. Elle
+              değiştirmek için üstteki “Konuma göre dağıt”ı kapat.
+            </p>
+          )}
+          {fromMap && !shownRow && (
             <p className="mb-2 text-xs text-faint">
               Konumdan hesaplanıyor: dinleyiciye göre{' '}
               <span className="num">{fmt(angleFromListener(sp, room.listener), 0)}°</span>
@@ -227,7 +240,7 @@ function SpeakerPanel() {
           )}
           <div className="space-y-1">
             {LOGICAL_CHANNELS.map((ch) => {
-              const v = sp.source[ch] ?? 0
+              const v = (shownRow ?? sp.source)[ch] ?? 0
               const first = ch === HEIGHT_CHANNELS[0]
               return (
                 <div key={ch} className={cx('flex items-center gap-2', first && 'mt-2 border-t border-line pt-2')}>
@@ -240,7 +253,7 @@ function SpeakerPanel() {
                     max={1}
                     step={0.05}
                     value={v}
-                    disabled={fromMap}
+                    disabled={mixLocked}
                     aria-label={`${ch} kazancı`}
                     style={{ ['--fill' as string]: `${v * 100}%` }}
                     onChange={(e) => setMix(sp.id, ch, Number(e.target.value))}
@@ -252,7 +265,8 @@ function SpeakerPanel() {
                     min={0}
                     max={1}
                     step={0.05}
-                    disabled={fromMap}
+                    decimals={2}
+                    disabled={mixLocked}
                     onChange={(n) => setMix(sp.id, ch, n)}
                   />
                 </div>

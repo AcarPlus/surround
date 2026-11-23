@@ -78,6 +78,8 @@ public sealed partial class SurroundBackend : IDisposable
             case "getEngineState": return EngineState;
             case "playTone": return await Task.Run(() => PlayTone(Arg(args, 0).GetString() ?? "", Arg(args, 1).GetInt32()));
             case "openSoundPanel": OpenSoundPanel(); return null;
+            case "demoStart": return await _host.StartDemoAsync(DemoSceneOf(Arg(args, 0).GetString()));
+            case "demoStop": await _host.StopDemoAsync(); return null;
             case "cableSetup": return await CableSetupAsync();
             case "calibrate": return await CalibrateAsync(Arg(args, 0));
             case "cancelCalibration": Volatile.Read(ref _calCts)?.Cancel(); return null;
@@ -92,6 +94,15 @@ public sealed partial class SurroundBackend : IDisposable
             default: throw new BridgeException($"Bilinmeyen yöntem: {method}");
         }
     }
+
+    private static Surround.Engine.Dsp.DemoScene DemoSceneOf(string? id) => id switch
+    {
+        "orbit" => Surround.Engine.Dsp.DemoScene.Orbit,
+        "pingpong" => Surround.Engine.Dsp.DemoScene.PingPong,
+        "flyby" => Surround.Engine.Dsp.DemoScene.Flyby,
+        "speakers" => Surround.Engine.Dsp.DemoScene.Speakers,
+        _ => throw new BridgeException($"Bilinmeyen ses turu sahnesi: {id}"),
+    };
 
     private static void OpenLogFolder()
     {

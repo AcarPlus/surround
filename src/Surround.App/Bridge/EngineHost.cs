@@ -71,6 +71,20 @@ public sealed class EngineHost : IDisposable
         _config = cfg;
     });
 
+    /// <summary>Ses turu demosunu başlatır; sahne süresini (sn) döner. Motor çalışmıyorsa hata.</summary>
+    public async Task<double> StartDemoAsync(Surround.Engine.Dsp.DemoScene scene)
+    {
+        double duration = 0;
+        await Enqueue(() =>
+        {
+            if (_engine is null) throw new InvalidOperationException("Ses turu için motor çalışıyor olmalı.");
+            duration = _engine.StartDemo(scene);
+        });
+        return duration;
+    }
+
+    public Task StopDemoAsync() => Enqueue(() => _engine?.StopDemo());
+
     private Task Enqueue(Action action)
     {
         var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

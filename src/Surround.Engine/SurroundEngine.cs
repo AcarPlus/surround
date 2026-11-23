@@ -40,6 +40,7 @@ public sealed class SurroundEngine : IDisposable
     private readonly PeakMeter _meter = new();
     private readonly VolumeRamp _volume = new();
     private SourceVolume? _sourceVolume;
+    private volatile DemoPlayer? _demo;
     private const int CaptureBufferMs = 20;
 
     /// <summary>Raised (from audio/driver threads) when a capture or playback stream fails at runtime.</summary>
@@ -202,6 +203,19 @@ public sealed class SurroundEngine : IDisposable
         return new SpeakerRoute(s.Name, s.DeviceChannel - 1, row, s.GainDb, s.Mute, delay, s.HighPassHz, share, s.Eq, s.Peq, s.RoomEq);
     }
 
+    /// <summary>Starts (replaces) the demo scene; returns its duration in seconds. Throws when the engine is not running.</summary>
+    public double StartDemo(DemoScene scene)
+    {
+        if (!_started || _srcFormat is null) throw new InvalidOperationException("Motor çalışmıyor.");
+        var d = new DemoPlayer(scene, _srcFormat.SampleRate);
+        _demo = d;
+        return d.DurationSeconds;
+    }
+
+    public void StopDemo() => _demo = null;
+
+    public bool DemoActive => _demo is not null;
+
     /// <summary>
     /// Applies the live-updatable part of <paramref name="cfg"/> (processing, per-speaker EQ, limiter switch, upmix and
     /// height levels) without a
@@ -258,6 +272,12 @@ public sealed class SurroundEngine : IDisposable
         var span = new Span<float>(_logical, 0, frames * Channels.Count);
         _upmix?.Process(span, frames);
         _heights?.Process(span, frames);
+        // Ses turu demosu: kaynağın yerine hareketli sentez kaynak; sonrası gerçek içerik gibi işlenir.
+        if (_demo is { } demo)
+        {
+            demo.Process(span, frames);
+            if (demo.Finished) _demo = null;
+        }
         _proc?.Process(span, frames);
         // After the dynamics (whose makeup gain would undo a lower volume), before the bass bus and the sinks.
         _volume.Process(span, frames, Channels.Count);

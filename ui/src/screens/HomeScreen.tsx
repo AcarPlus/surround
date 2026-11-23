@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { RoomStage } from '../components/RoomStage'
+import { DemoOverlay } from '../components/DemoOverlay'
 import { SpeakerPopover } from '../components/SpeakerPopover'
 import { LayoutPicker } from '../components/LayoutPicker'
 import { Inspector } from '../components/Inspector'
@@ -26,6 +27,7 @@ export function HomeScreen() {
   const setPositional = useStore((s) => s.setPositionalMix)
   const [editing, setEditing] = useState(false)
   const [details, setDetails] = useState(false)
+  const [demo, setDemo] = useState(false)
 
   // Bu ekrandan başlatılan "sırayla çal" ekrandan çıkınca dursun.
   useEffect(() => () => useStore.getState().stopTour(), [])
@@ -42,6 +44,14 @@ export function HomeScreen() {
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-6 pb-1 pt-4">
         <LayoutPicker />
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <ToolButton
+            active={demo}
+            onClick={() => setDemo((v) => !v)}
+            disabled={speakers.length === 0}
+            title="Ses turu: sentez bir ses odada döner, sağa sola gider; çevresel sesin sende çalışıp çalışmadığını duy."
+          >
+            Ses turu
+          </ToolButton>
           <ToolButton
             active={positional}
             onClick={() => setPositional(!positional)}
@@ -68,6 +78,7 @@ export function HomeScreen() {
             details ? null : <SpeakerPopover speaker={sp} anchor={anchor} onDetails={() => setDetails(true)} />
           }
         />
+        {demo && <DemoOverlay onClose={() => setDemo(false)} />}
         {editing && (
           <p className="pointer-events-none absolute inset-x-0 top-2 text-center text-xs text-accent">
             Eklemek istediğin yere dokun · kaldırmak için hoparlöre dokun

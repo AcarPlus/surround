@@ -41,6 +41,9 @@ export interface SurroundApi {
   getStatus(): Promise<SinkStatus[]>
   /** deviceChannel 1 tabanlıdır. */
   playTone(deviceId: string, channel: number): Promise<void>
+  /** Ses turu: motorda hareketli sentez kaynağı başlatır (kaynak sesi susar); süreyi (sn) döner. Motor çalışmalı. */
+  demoStart(scene: 'orbit' | 'pingpong' | 'flyby' | 'speakers'): Promise<number>
+  demoStop(): Promise<void>
   /** Windows ses denetim masasını açar (mmsys.cpl); VB-Cable'ı 7.1 yapmak için. */
   openSoundPanel(): Promise<void>
   /**

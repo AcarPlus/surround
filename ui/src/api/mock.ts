@@ -364,6 +364,13 @@ export function createMockApi(): SurroundApi {
     async getStatus() {
       return running ? snapshot() : []
     },
+    async demoStart(scene) {
+      console.info('[mock] demoStart', scene)
+      return { orbit: 20, pingpong: 16, flyby: 16, speakers: 8.4 }[scene]
+    },
+    async demoStop() {
+      console.info('[mock] demoStop')
+    },
     async playTone(deviceId, channel) {
       console.info('[mock] playTone', deviceId, channel)
       await wait(900)
