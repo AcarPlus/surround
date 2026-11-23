@@ -22,6 +22,8 @@ export function HomeScreen() {
   const playTour = useStore((s) => s.playTour)
   const stopTour = useStore((s) => s.stopTour)
   const openWizard = useStore((s) => s.openWizard)
+  const positional = useStore((s) => s.positionalMix)
+  const setPositional = useStore((s) => s.setPositionalMix)
   const [editing, setEditing] = useState(false)
   const [details, setDetails] = useState(false)
 
@@ -40,6 +42,14 @@ export function HomeScreen() {
       <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-6 pb-1 pt-4">
         <LayoutPicker />
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <ToolButton
+            active={positional}
+            onClick={() => setPositional(!positional)}
+            disabled={speakers.length === 0}
+            title="Açıkken her kanal standart yönünden duyulur: o yöne en yakın iki hoparlör arasında paylaştırılır (ör. orta 0°, sağ 60° ise ön sağ ikisinden eşit çalar). Rol yerine sahnedeki yönler kullanılır; yönleri doğru yerleştir."
+          >
+            Konuma göre dağıt
+          </ToolButton>
           <ToolButton onClick={() => (playing ? stopTour() : void playTour())} disabled={speakers.length === 0}>
             <IconVolume width={15} height={15} /> {playing ? 'Durdur' : 'Sırayla çal'}
           </ToolButton>
@@ -100,17 +110,20 @@ function ToolButton({
   onClick,
   disabled,
   active,
+  title,
 }: {
   children: React.ReactNode
   onClick: () => void
   disabled?: boolean
   active?: boolean
+  title?: string
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      title={title}
       aria-pressed={active}
       className={cx(
         'flex h-9 items-center gap-2 rounded-xl border px-3.5 text-[13px] font-medium transition-colors disabled:opacity-40',

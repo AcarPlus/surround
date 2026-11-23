@@ -103,6 +103,11 @@ export interface Speaker {
   elevated?: boolean
   /** Yalnızca arayüz: gecikme/kazanç mikrofon ölçümünden geldiyse ölçüm zamanı (ISO). Motor yok sayar. */
   calibratedAt?: string
+  /**
+   * Yalnız config'te, "Konuma göre dağıt" açıkken: rolden gelen asıl satır (motora giden `source` o an konumdan
+   * hesaplanmış satırdır). Açılışta `source` buradan geri alınır. Motor yok sayar.
+   */
+  roleSource?: Partial<Record<LogicalChannel, number>>
 }
 
 export type DeviceKind = 'local' | 'network' | 'multichannel' | 'bluetooth'
@@ -436,6 +441,8 @@ export interface Config {
   uiMode?: 'simple' | 'advanced'
   /** Yalnızca arayüz: son kalibrasyon özeti. */
   lastCalibration?: { at: string; micDeviceId: string; speakers: number }
+  /** "Konuma göre dağıt": kanallar hoparlörlerin gerçek yönüne göre paylaştırılır (bkz. lib/positional.ts). */
+  positionalMix?: boolean
 }
 
 /* ---------- Mikrofonla kalibrasyon (docs/kalibrasyon.md) ---------- */

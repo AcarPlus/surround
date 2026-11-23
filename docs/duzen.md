@@ -34,6 +34,26 @@ Hoparlör konumu (x, y) ve dinleyiciden açı θ (0° = ön, + = sağ). Zemin ho
 FC 0°, FR +30°, SR +90°, BR +150°, BL −150°, SL −90°, FL −30°.
 θ'yı çevreleyen iki komşu nominal kanal arasında sabit güçlü 2B VBAP (sin/cos pan). `elevated: true` (üst hoparlör) ise aynı yöntem üst şeritlerle: TFL −45°, TFR +45°, TBR +135°, TBL −135°. Hoparlör taşındıkça satır yeniden hesaplanır.
 
+## Konuma göre dağıt (0.5.11) — kanaldan hoparlöre
+
+Oda ekranındaki "Konuma göre dağıt" anahtarı (`positionalMix`, config kökünde) açıkken roller karışımı belirlemez:
+her içerik kanalı kendi nominal açısında (yukarıdaki açılar) çalınır ve o açıya en yakın iki gerçek hoparlör arasında
+sabit güçle (sin/cos) paylaştırılır (`lib/positional.ts`). Örnek: orta 0°, sağ 60° → FR (30°) ikisinden 0,707 + 0,707;
+SR/BR 60°'nin ötesinde hoparlör olmadığından tamamen 60°'dekine. Her kanalın güç toplamı 1.
+
+- "Özel (haritadan)"dan farkı: o rol hoparlörden kanala bakar (hoparlör kendi açısındaki kanalları örnekler); bir kanal
+  iki hoparlörden fazla, başka biri hiç çıkmayabilir ve seviye korunmaz.
+- İki komşu hoparlör arası 120°'den genişse (`MAX_PAIR_SPAN`) aradan hayali ses kurulmaz, kanal yakın olana gider
+  (yalnız önde hoparlör varken arka kanal iki ön hoparlör arasında "önden" gelmesin).
+- Aynı yöndeki (±1°) hoparlörler kanalı güçte eşit paylaşır. Sub (rol `sub`), sessize alınmış ve dinleyicinin
+  üstündeki hoparlörler katılmaz; üst hoparlörler kendi halkasında aynı yöntemle.
+- Motor değişmez: arayüz motora giden config'te katılan hoparlörlerin `source`'unu konumdan hesaplar, rol satırını
+  `roleSource`'ta saklar; açılışta `source` oradan geri alınır. Mağazada (geri alma, rol) hep rol satırı durur.
+- Hoparlör kartında gerçek karışım (ör. "FL %50 · SL %35", güç yüzdesi) ve sayıyla yön girişi (uzaklık korunur)
+  vardır; yön mikrofonla ölçülemez, doğruluğu sahnedeki yerleşime bağlıdır.
+- Tam kanal açısındaki hoparlör o kanalı tek başına çalar: standart yerleşimde ön/orta satırları rollerle aynıdır;
+  araya düşen kanallar (ör. 5.1 düzende SL) iki komşu arasında yönünden duyulur.
+
 ## Düzen girişi
 
 Oda ekranında "Düzen" kutusu: `X.Y` veya `X.Y.Z` (ör. `3.1`, `4.2`, `5.1.4`, `3.1.3`). X zemin, Y sub, Z üst hoparlör sayısı (her biri 0..16). Uygulama bu kadar hoparlör yuvası oluşturur, oda haritasına makul konumlara dizer ve varsayılan rol önerir; kullanıcı her birinin rolünü açılır listeden değiştirir. Mevcut hoparlörlerin cihaz/kanal/EQ ayarları rol sırasına göre korunur.

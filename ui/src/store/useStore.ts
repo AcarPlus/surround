@@ -30,6 +30,7 @@ import { clamp, clampToRoom, computeAuto, round } from '../lib/geometry'
 import { assignExisting, layoutSlots, type LayoutSpec } from '../lib/layout'
 import { ROLE_CUSTOM_MANUAL, ROLE_CUSTOM_MAP, computeMapSource, roleDef, rolePatch } from '../lib/roles'
 import { idealSpeakerPoint } from '../lib/snap'
+import { positionalRows } from '../lib/positional'
 import { plannedName, standardPosition, type BuildResult } from '../lib/setup'
 import { findCable, type FixId } from '../lib/health'
 import { explainError } from '../lib/errors'
@@ -104,6 +105,7 @@ const HISTORY_KEYS = [
   'auto',
   'setupDone',
   'lastCalibration',
+  'positionalMix',
 ] as const
 type HistoryKey = (typeof HISTORY_KEYS)[number]
 type Snapshot = Pick<State, HistoryKey>
@@ -159,6 +161,8 @@ interface State {
   /** Kurulum sihirbazı en az bir kez tamamlandı (config'te saklanır). */
   setupDone: boolean
   lastCalibration: NonNullable<Config['lastCalibration']> | null
+  /** Kanalları hoparlörlerin sahnedeki yönüne göre dağıt (config'te `positionalMix`). */
+  positionalMix: boolean
 
   wizardOpen: boolean
   /** Test sesi çalan hoparlör (haritada vurgulanır). */
@@ -231,6 +235,7 @@ interface State {
   /** Rol seçer: karışım satırını (ve Subwoofer için bassReceiver'ı) yazar. */
   setRole: (id: string, role: string) => void
   setLowLatency: (v: boolean) => void
+  setPositionalMix: (on: boolean) => void
   setRoomSize: (widthM: number, depthM: number) => void
   moveListener: (x: number, y: number) => void
   moveSpeaker: (id: string, x: number, y: number) => void
@@ -326,6 +331,20 @@ function recalc(speakers: Speaker[], listener: Point, auto: Record<string, AutoF
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 
+/**
+ * Motora gidecek hoparlörler: "Konuma göre dağıt" açıksa katılan hoparlörlerin `source`'u konumdan hesaplanır, rol satırı
+ * `roleSource`'ta saklanır (açılışta geri alınır). Kapalıysa olduğu gibi.
+ */
+export function withPositionalRows(s: Pick<State, 'speakers' | 'room' | 'positionalMix'>): Speaker[] {
+  if (!s.positionalMix) return s.speakers
+  const rows = positionalRows(s.speakers, s.room.listener)
+  return s.speakers.map((sp) => {
+    const row = rows.get(sp.id)
+    // Hiç kanal düşmeyen hoparlör (sıkışık dizilimde ikisinin arasında kalan) rol satırını korur: motor boş satırı reddeder.
+    return row && Object.keys(row).length > 0 ? { ...sp, source: row, roleSource: sp.source } : sp
+  })
+}
+
 /** Hata mesajını kullanıcıya gösterilecek tek satıra çevirir (köprü hataları satır listesi taşıyabilir). */
 export function describeError(e: unknown): string {
   return explainError(e).message
@@ -406,7 +425,7 @@ export const useStore = create<State>()((set, get) => {
     upmix: s.upmix,
     upmixOptions: s.upmixOptions,
     outputs: s.outputs.filter((o) => s.speakers.some((sp) => sp.outputDeviceId === o.deviceId)),
-    speakers: s.speakers.map((sp) => ({ ...sp, auto: s.auto[sp.id] ?? { delay: true, gain: true } })),
+    speakers: withPositionalRows(s).map((sp) => ({ ...sp, auto: s.auto[sp.id] ?? { delay: true, gain: true } })),
     room: s.room,
     processing: s.abBypass ? { ...s.processing, enabled: false } : s.processing,
     profiles: s.profiles,
@@ -416,6 +435,7 @@ export const useStore = create<State>()((set, get) => {
     ...(s.activeProfileId ? { activeProfileId: s.activeProfileId } : {}),
     ...(s.setupDone ? { setupDone: true } : {}),
     ...(s.lastCalibration ? { lastCalibration: s.lastCalibration } : {}),
+    ...(s.positionalMix ? { positionalMix: true } : {}),
   })
 
   const scheduleSave = (delayMs: number) => {
@@ -531,6 +551,7 @@ export const useStore = create<State>()((set, get) => {
     auto: {},
     setupDone: false,
     lastCalibration: null,
+    positionalMix: false,
 
     wizardOpen: false,
     playing: null,
@@ -600,7 +621,8 @@ export const useStore = create<State>()((set, get) => {
     async loadAll() {
       const [devices, cfg] = await Promise.all([api.listDevices(), api.getConfig()])
       const auto = Object.fromEntries(cfg.speakers.map((s) => [s.id, s.auto ?? { delay: true, gain: true }]))
-      const speakers = cfg.speakers.map(({ auto: _auto, ...rest }) => withPeq(rest))
+      // Konuma göre dağıt açıkken kaydedilen `source` hesaplanmış satırdır; asıl (rol) satırı `roleSource`'tadır.
+      const speakers = cfg.speakers.map(({ auto: _auto, roleSource, ...rest }) => withPeq(roleSource ? { ...rest, source: roleSource } : rest))
       const profiles = normalizeProfiles(cfg.profiles)
       // A/B açıkken uygulama kapandıysa config'te işleme kapalı kalmıştır; işaretten geri açılır.
       const abLeftover = cfg.abBypass === true
@@ -623,6 +645,7 @@ export const useStore = create<State>()((set, get) => {
         auto,
         setupDone: !!cfg.setupDone || speakers.length > 0,
         lastCalibration: cfg.lastCalibration ?? null,
+        positionalMix: cfg.positionalMix === true,
         // Yeni kullanıcıda (hoparlör yok, kurulum yapılmamış) sihirbaz kendiliğinden açılır.
         wizardOpen: speakers.length === 0 && !cfg.setupDone,
         past: [],
@@ -1000,6 +1023,11 @@ export const useStore = create<State>()((set, get) => {
     },
 
     setLowLatency: (lowLatency) => set({ lowLatency }),
+
+    setPositionalMix(on) {
+      if (get().positionalMix === on) return
+      commit({ positionalMix: on }, 150, on ? 'Konuma göre dağıt' : 'Rollere göre dağıt')
+    },
 
     setRoomSize(widthM, depthM) {
       const w = clamp(widthM, 2, 20)

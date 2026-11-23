@@ -1,18 +1,19 @@
 import { useMemo, useState } from 'react'
 import type { Speaker } from '../api/types'
 import { useStore } from '../store/useStore'
-import { computeAuto, primaryChannel } from '../lib/geometry'
-import { effectiveRole, roleLabel, suggestRole } from '../lib/roles'
+import { computeAuto, polarToPoint, primaryChannel } from '../lib/geometry'
+import { angleFromListener, effectiveRole, roleLabel, suggestRole } from '../lib/roles'
+import { positionalRows } from '../lib/positional'
 import { defaultRoleName } from '../lib/layout'
 import { plannedName } from '../lib/setup'
 import { deviceColorVar } from '../lib/colors'
 import { fmt } from '../lib/format'
 import type { Anchor } from './RoomStage'
 import { IconCheck, IconTrash, IconVolume, IconX } from './icons'
-import { cx } from './ui'
+import { NumberField, cx } from './ui'
 
 const W = 296
-const H = 410
+const H = 446
 const SUGGEST_H = 64
 
 /** Seçili hoparlörün yanında açılan kısa ayar paneli; ayrıntılı ayarlar `onDetails` ile açılır. */
@@ -29,6 +30,8 @@ export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Spe
   const removeSpeaker = useStore((st) => st.removeSpeaker)
   const playTone = useStore((st) => st.playTone)
   const setRole = useStore((st) => st.setRole)
+  const moveSpeaker = useStore((st) => st.moveSpeaker)
+  const positional = useStore((st) => st.positionalMix)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const dist = useMemo(() => computeAuto(speakers, room.listener).byId[s.id]?.distance ?? 0, [speakers, room.listener, s.id])
@@ -41,7 +44,25 @@ export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Spe
   const ch = primaryChannel(s.source)
   // Sahnede rolünün yönünden çıkarılmışsa konuma uyan rol önerilir (motor konumu değil rolü çalar).
   const role = effectiveRole(s)
-  const suggested = suggestRole(s, room.listener)
+  // Konuma göre dağıtımda rol çalınanı belirlemez: öneri yok, onun yerine gerçek karışım gösterilir.
+  const suggested = positional ? null : suggestRole(s, room.listener)
+  const angle = Math.round(angleFromListener(s, room.listener))
+  const mix = useMemo(
+    () => (positional ? (positionalRows(speakers, room.listener).get(s.id) ?? null) : null),
+    [positional, speakers, room.listener, s.id],
+  )
+  const mixText = mix
+    ? Object.entries(mix)
+        .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+        .map(([c, g]) => `${c} %${Math.round((g ?? 0) ** 2 * 100)}`)
+        .join(' · ')
+    : null
+  // Yön sayıyla girilir: hoparlör dinleyiciye uzaklığı korunarak o açıya taşınır.
+  const setAngle = (deg: number) => {
+    const r = dist >= 0.05 ? dist : 1
+    const p = polarToPoint(room.listener, deg, r)
+    moveSpeaker(s.id, p.x, p.y)
+  }
   const applySuggestion = () => {
     if (!suggested) return
     const renamed = s.name === defaultRoleName(role) || s.name === plannedName(role)
@@ -69,7 +90,8 @@ export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Spe
       role="dialog"
       aria-label={`${s.name} ayarları`}
       className="screen-in absolute z-20 flex flex-col gap-3.5 rounded-2xl border border-line-strong bg-surface/95 p-4 shadow-[0_30px_70px_rgb(0_0_0/0.55)] backdrop-blur-md"
-      style={{ left, top, width: W }}
+      // Alçak pencerede sahneye sığmazsa kart kendi içinde kayar (üst çubuğun altına taşmaz).
+      style={{ left, top, width: W, maxHeight: Math.max(200, anchor.h - 16), overflowY: 'auto' }}
     >
       <div className="flex items-center gap-2.5">
         <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: color }} />
@@ -83,9 +105,9 @@ export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Spe
           <IconX width={13} height={13} />
         </button>
       </div>
-      <p className="-mt-2.5 truncate text-xs text-muted">
-        {roleLabel(role)}
-        {ch ? ` (${ch})` : ''}
+      <p className="-mt-2.5 truncate text-xs text-muted" title={mixText ?? undefined}>
+        {positional ? (mixText ? `Konuma göre: ${mixText}` : 'Konuma göre dağıtılmıyor') : roleLabel(role)}
+        {!positional && ch ? ` (${ch})` : ''}
         {!dev && ' · cihaz bağlı değil'}
       </p>
       {suggested && (
@@ -172,6 +194,22 @@ export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Spe
         <Stat k="Gecikme" v={`${fmt(s.delayMs, 1)} ms`} />
         <Stat k="Mesafe" v={`${fmt(dist, 2)} m`} />
       </div>
+      <label className="-mt-1.5 flex items-center justify-between gap-2 text-xs text-muted">
+        <span>
+          Yön <span className="text-faint">(0° önün, + sağ)</span>
+        </span>
+        <NumberField
+          ariaLabel={`${s.name} yönü`}
+          className="w-[96px]"
+          value={angle}
+          min={-180}
+          max={180}
+          step={5}
+          decimals={0}
+          unit="°"
+          onChange={setAngle}
+        />
+      </label>
 
       <p className={cx('flex items-center gap-1.5 text-xs', s.calibratedAt ? 'text-ok' : 'text-muted')}>
         {s.calibratedAt && <IconCheck width={13} height={13} />}

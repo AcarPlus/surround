@@ -171,7 +171,9 @@ export function RoomStage({
   return (
     <div
       ref={wrapRef}
-      className="relative h-full min-h-0 w-full touch-none select-none overflow-hidden"
+      // overflow-clip (hidden değil): taşan ışık efektleri yüzünden kart içindeki bir alana odaklanınca tarayıcı sahneyi
+      // kaydırıp üst çubuğun altına itiyordu; clip kaydırılamaz.
+      className="relative h-full min-h-0 w-full touch-none select-none overflow-clip"
       onPointerMove={onMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
