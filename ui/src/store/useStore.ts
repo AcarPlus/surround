@@ -29,6 +29,7 @@ import {
 import { clamp, clampToRoom, computeAuto, round } from '../lib/geometry'
 import { assignExisting, layoutSlots, type LayoutSpec } from '../lib/layout'
 import { ROLE_CUSTOM_MANUAL, ROLE_CUSTOM_MAP, computeMapSource, roleDef, rolePatch } from '../lib/roles'
+import { idealListenerPoint, idealSpeakerPoint } from '../lib/snap'
 import { plannedName, standardPosition, type BuildResult } from '../lib/setup'
 import { findCable, type FixId } from '../lib/health'
 import { explainError } from '../lib/errors'
@@ -233,6 +234,9 @@ interface State {
   setRoomSize: (widthM: number, depthM: number) => void
   moveListener: (x: number, y: number) => void
   moveSpeaker: (id: string, x: number, y: number) => void
+  /** Hoparlörü rolünün standart açısına kaydırır (uzaklık korunur); dinleyiciyi hoparlörlere göre ideal noktaya. */
+  snapSpeaker: (id: string) => void
+  snapListener: () => void
   nudgeSelected: (dx: number, dy: number) => void
   updateSpeaker: (id: string, patch: Partial<Speaker>) => void
   setMix: (id: string, ch: LogicalChannel, gain: number) => void
@@ -1013,6 +1017,25 @@ export const useStore = create<State>()((set, get) => {
       const { room } = get()
       const p = clampToRoom({ x: round(x, 2), y: round(y, 2) }, room)
       commit({ room: { ...room, listener: p } }, 400, 'Dinleyiciyi taşı')
+    },
+
+    snapSpeaker(id) {
+      const { room, speakers } = get()
+      const sp = speakers.find((s) => s.id === id)
+      const p = sp && idealSpeakerPoint(sp, speakers, room.listener, room)
+      if (!p) return
+      const q = { x: round(p.x, 2), y: round(p.y, 2) }
+      if (q.x === sp.x && q.y === sp.y) return
+      commit({ speakers: speakers.map((s) => (s.id === id ? { ...s, ...q } : s)) }, 400, `Yerine oturt:${id}`)
+    },
+
+    snapListener() {
+      const { room, speakers } = get()
+      const p = idealListenerPoint(speakers, room)
+      if (!p) return
+      const q = { x: round(p.x, 2), y: round(p.y, 2) }
+      if (q.x === room.listener.x && q.y === room.listener.y) return
+      commit({ room: { ...room, listener: q } }, 400, 'Dinleyiciyi yerine oturt')
     },
 
     moveSpeaker(id, x, y) {

@@ -56,6 +56,9 @@ const NAMES: Record<string, string> = {
   [ROLE_SUB]: 'Sub',
 }
 
+/** Rolün varsayılan hoparlör adı (düzen seçicinin verdiği). */
+export const defaultRoleName = (role: string): string => NAMES[role] ?? roleLabel(role)
+
 const spread = (n: number, start: number, step: number) => Array.from({ length: n }, (_, i) => start + i * step)
 
 /** n zemin hoparlörü için standart açılar ve roller; 10+ eşit aralıklı "Özel (haritadan)". */

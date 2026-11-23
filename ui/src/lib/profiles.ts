@@ -49,6 +49,18 @@ export function builtinProfiles(): Profile[] {
       upmix: true,
       upmixOptions: normalizeUpmixOptions({ mode: 'film', surroundDb: -4, heightDb: -6 }),
     },
+    {
+      // Hiçbir şey değiştirmez: ses işleme (EQ, bas, netlik, sınırlayıcı) baştan sona atlanır; upmix "doğrudan" modda:
+      // çözümleme yok, stereo içerik her hoparlöre olduğu gibi kopyalanır (orta = (L+R)/2) ki hiçbir hoparlör susmasın;
+      // gerçek çok kanallı içerik dokunulmadan geçer. 32-bit kayan nokta. Hoparlör başı düzeltmeler (gecikme, seviye,
+      // tını eşleme, bas yönetimi) kalır: onlar sesi değil hoparlörleri eşitler.
+      id: 'builtin-flat',
+      name: 'Flat',
+      builtin: true,
+      processing: { ...normalizeProcessing({ enabled: false, limiter: false }), preset: 'flat' },
+      upmix: true,
+      upmixOptions: normalizeUpmixOptions({ mode: 'direct' }),
+    },
   ]
 }
 
@@ -133,7 +145,8 @@ export function normalizeProfiles(raw: unknown): Profile[] {
       })
     }
   }
-  const builtins = builtinProfiles().map((b) => stored.find((s) => s.id === b.id) ?? b)
+  // Flat sabittir (tanımı "hiçbir şeyi değiştirme"); kayıtlı eski bir kopyası yeni tanımı gölgelemesin.
+  const builtins = builtinProfiles().map((b) => (b.id === 'builtin-flat' ? b : (stored.find((s) => s.id === b.id) ?? b)))
   return [...builtins, ...stored.filter((s) => !s.builtin)]
 }
 

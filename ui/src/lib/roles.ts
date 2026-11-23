@@ -172,3 +172,64 @@ export function rolePatch(
   if (def.elevated) patch.elevated = true
   return patch
 }
+
+/* ---------- Konumdan rol önerisi ---------- */
+
+/** Rolün kabul aralığı (dinleyiciden açı, derece; `lo` > `hi` ise ±180'i sarar) ve önerirken kullanılan merkez açısı. */
+interface RoleZone {
+  id: string
+  centre: number
+  lo: number
+  hi: number
+  /** Yalnızca zaten bu roldeyse geçerli; başka role önerilmez (ör. geniş). */
+  noSuggest?: boolean
+}
+
+const FLOOR_ZONES: readonly RoleZone[] = [
+  { id: 'center', centre: 0, lo: -15, hi: 15 },
+  { id: 'left', centre: -30, lo: -50, hi: -10 },
+  { id: 'right', centre: 30, lo: 10, hi: 50 },
+  { id: 'wide-left', centre: -60, lo: -75, hi: -45, noSuggest: true },
+  { id: 'wide-right', centre: 60, lo: 45, hi: 75, noSuggest: true },
+  { id: 'side-left', centre: -90, lo: -120, hi: -60 },
+  { id: 'side-right', centre: 90, lo: 60, hi: 120 },
+  { id: 'back-left', centre: -135, lo: -170, hi: -95 },
+  { id: 'back-right', centre: 135, lo: 95, hi: 170 },
+  { id: 'back-center', centre: 180, lo: 160, hi: -160 },
+]
+
+const HEIGHT_ZONES: readonly RoleZone[] = [
+  { id: 'top-front-left', centre: -45, lo: -100, hi: -5 },
+  { id: 'top-front-right', centre: 45, lo: 5, hi: 100 },
+  { id: 'top-back-left', centre: -135, lo: -175, hi: -80 },
+  { id: 'top-back-right', centre: 135, lo: 80, hi: 175 },
+]
+
+const inZone = (z: RoleZone, a: number) => (z.lo <= z.hi ? a >= z.lo && a <= z.hi : a >= z.lo || a <= z.hi)
+const angGap = (a: number, b: number) => Math.abs(normalizeAngle(a - b))
+
+/** Dinleyiciye bundan yakın hoparlörün yönü güvenilmez: öneri yapılmaz. */
+const MIN_SUGGEST_DISTANCE_M = 0.3
+
+/**
+ * Hoparlör sahnede rolünün yönünden çıkmışsa (ör. "Arka sol" sağ yana sürüklendi) konuma uyan standart rolü önerir;
+ * uymuyorsa ya da rol açıdan bağımsızsa (subwoofer, özel, üst orta) null. Aralıklar geniş tutulur: düzen seçicinin
+ * koyduğu her yerleşim kendi rolünün içinde kalır, öneri yalnızca belirgin bir taşımada çıkar. Önerilen rol aralık
+ * merkezine en yakın olandır; mevcut rol en yakınsa öneri yok (sınırda gidip gelmez).
+ */
+export function suggestRole(sp: Pick<Speaker, 'x' | 'y' | 'role' | 'source'>, listener: Point): string | null {
+  const current = effectiveRole(sp)
+  const zones = FLOOR_ZONES.some((z) => z.id === current)
+    ? FLOOR_ZONES
+    : HEIGHT_ZONES.some((z) => z.id === current)
+      ? HEIGHT_ZONES
+      : null
+  if (!zones) return null
+  if (Math.hypot(sp.x - listener.x, sp.y - listener.y) < MIN_SUGGEST_DISTANCE_M) return null
+  const a = angleFromListener(sp, listener)
+  const cur = zones.find((z) => z.id === current)!
+  if (inZone(cur, a)) return null
+  let best = cur
+  for (const z of zones) if (!z.noSuggest && angGap(z.centre, a) < angGap(best.centre, a)) best = z
+  return best.id === current ? null : best.id
+}

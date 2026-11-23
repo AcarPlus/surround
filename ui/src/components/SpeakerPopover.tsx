@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react'
 import type { Speaker } from '../api/types'
 import { useStore } from '../store/useStore'
 import { computeAuto, primaryChannel } from '../lib/geometry'
-import { effectiveRole, roleLabel } from '../lib/roles'
+import { effectiveRole, roleLabel, suggestRole } from '../lib/roles'
+import { defaultRoleName } from '../lib/layout'
+import { plannedName } from '../lib/setup'
 import { deviceColorVar } from '../lib/colors'
 import { fmt } from '../lib/format'
 import type { Anchor } from './RoomStage'
@@ -11,6 +13,7 @@ import { cx } from './ui'
 
 const W = 296
 const H = 410
+const SUGGEST_H = 64
 
 /** Seçili hoparlörün yanında açılan kısa ayar paneli; ayrıntılı ayarlar `onDetails` ile açılır. */
 export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Speaker; anchor: Anchor; onDetails: () => void }) {
@@ -25,6 +28,7 @@ export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Spe
   const setAuto = useStore((st) => st.setAuto)
   const removeSpeaker = useStore((st) => st.removeSpeaker)
   const playTone = useStore((st) => st.playTone)
+  const setRole = useStore((st) => st.setRole)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   const dist = useMemo(() => computeAuto(speakers, room.listener).byId[s.id]?.distance ?? 0, [speakers, room.listener, s.id])
@@ -35,11 +39,21 @@ export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Spe
   const clash = speakers.some((o) => o.id !== s.id && o.outputDeviceId === s.outputDeviceId && o.deviceChannel === s.deviceChannel)
   const color = deviceColorVar(s.outputDeviceId, devices)
   const ch = primaryChannel(s.source)
+  // Sahnede rolünün yönünden çıkarılmışsa konuma uyan rol önerilir (motor konumu değil rolü çalar).
+  const role = effectiveRole(s)
+  const suggested = suggestRole(s, room.listener)
+  const applySuggestion = () => {
+    if (!suggested) return
+    const renamed = s.name === defaultRoleName(role) || s.name === plannedName(role)
+    setRole(s.id, suggested)
+    if (renamed) updateSpeaker(s.id, { name: defaultRoleName(suggested) })
+  }
 
   // Sağda yer yoksa sola aç; dikeyde sahnenin içinde kal.
   const right = anchor.x + 44 + W < anchor.w - 8
   const left = right ? anchor.x + 44 : Math.max(8, anchor.x - 44 - W)
-  const top = Math.max(8, Math.min(anchor.h - H - 8, anchor.y - 72))
+  const h = H + (suggested ? SUGGEST_H : 0)
+  const top = Math.max(8, Math.min(anchor.h - h - 8, anchor.y - 72))
 
   const gainPct = ((s.gainDb + 24) / 36) * 100
   const status = s.calibratedAt
@@ -70,10 +84,25 @@ export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Spe
         </button>
       </div>
       <p className="-mt-2.5 truncate text-xs text-muted">
-        {roleLabel(effectiveRole(s))}
+        {roleLabel(role)}
         {ch ? ` (${ch})` : ''}
         {!dev && ' · cihaz bağlı değil'}
       </p>
+      {suggested && (
+        <div className="-mt-1 flex items-center gap-2 rounded-xl border border-accent/40 bg-accent/10 px-3 py-2">
+          <span className="min-w-0 flex-1 text-xs leading-snug">
+            Bu konuma uyan rol: <b className="font-semibold">{roleLabel(suggested)}</b>
+            <span className="block text-[11px] text-muted">Şu an {roleLabel(role)} kanalını çalıyor.</span>
+          </span>
+          <button
+            type="button"
+            onClick={applySuggestion}
+            className="h-8 shrink-0 rounded-lg bg-accent px-3 text-[12px] font-semibold text-accent-fg hover:brightness-110"
+          >
+            Rolü değiştir
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-2">
         <label className="flex min-w-0 flex-col gap-1">

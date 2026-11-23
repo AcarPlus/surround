@@ -28,8 +28,8 @@ export function ProfileMenu() {
     }
   }, [open])
 
-  // İlk üç profil (Film/Oyun/Müzik) tek dokunuşla; seçili profil başka biriyse o da görünür.
-  const quick = profiles.slice(0, 3)
+  // Yerleşik dört profil (Film/Oyun/Müzik/Flat) tek dokunuşla; seçili profil başka biriyse o da görünür.
+  const quick = profiles.slice(0, 4)
   if (active && !quick.some((p) => p.id === active.id)) quick.push(active)
 
   return (

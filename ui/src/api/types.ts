@@ -256,8 +256,11 @@ export function normalizeProcessing(p?: Partial<Processing> | null): Processing 
   return { ...d, ...p, eq, peq: normalizePeq(p.peq) ?? [], autoPreamp: p.autoPreamp === true }
 }
 
-/** Upmix modu: oyun = düşük gecikmeli matris çözücü, film = STFT tabanlı yüksek kalite. Bkz. docs/upmix.md. */
-export type UpmixMode = 'game' | 'film'
+/**
+ * Upmix modu: oyun = düşük gecikmeli matris çözücü, film = STFT tabanlı yüksek kalite, direct = işlemsiz kopya (Flat:
+ * L/R olduğu gibi, orta = (L+R)/2, sol yan/arka = L, sağ = R). Bkz. docs/upmix.md.
+ */
+export type UpmixMode = 'game' | 'film' | 'direct'
 
 /** Upmix ayrıntıları; `upmix` açık/kapalı anahtarı ayrı kalır (geriye uyum). */
 export interface UpmixOptions {
@@ -309,7 +312,7 @@ export function normalizeUpmixOptions(u?: Partial<UpmixOptions> | null): UpmixOp
   const d = defaultUpmixOptions()
   if (!u) return d
   return {
-    mode: u.mode === 'game' || u.mode === 'film' ? u.mode : d.mode,
+    mode: u.mode === 'game' || u.mode === 'film' || u.mode === 'direct' ? u.mode : d.mode,
     centerDb: clampDb(u.centerDb, d.centerDb),
     surroundDb: clampDb(u.surroundDb, d.surroundDb),
     lfeEnabled: typeof u.lfeEnabled === 'boolean' ? u.lfeEnabled : d.lfeEnabled,

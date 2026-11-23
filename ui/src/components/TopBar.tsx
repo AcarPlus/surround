@@ -71,7 +71,7 @@ function StatusButton() {
   const dot = { ok: 'bg-ok', warn: 'bg-warn', err: 'bg-err', idle: 'bg-faint' }[tone]
 
   return (
-    <div ref={root} className="relative">
+    <div ref={root} className="relative min-w-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -79,7 +79,7 @@ function StatusButton() {
         aria-haspopup="dialog"
         title={text}
         className={cx(
-          'flex h-9 max-w-[300px] items-center gap-2 whitespace-nowrap rounded-full border px-3.5 text-xs font-medium transition-colors',
+          'flex h-9 max-w-[min(300px,100%)] items-center gap-2 whitespace-nowrap rounded-full border px-3.5 text-xs font-medium transition-colors',
           tone === 'err'
             ? 'border-err/50 bg-err/10 text-err'
             : tone === 'warn'
@@ -135,7 +135,7 @@ function EngineReadout() {
   const engine = useStore((s) => s.engine)
   const running = runState === 'running'
   return (
-    <div className="hidden min-w-0 flex-col gap-0.5 lg:flex">
+    <div className="hidden min-w-0 flex-col gap-0.5 xl:flex">
       <span className={cx('flex items-center gap-1.5 text-xs font-medium', running ? 'text-accent' : 'text-muted')}>
         <span className={cx('h-1.5 w-1.5 rounded-full', running ? 'breath bg-accent shadow-[0_0_8px_rgb(var(--accent))]' : 'bg-faint')} />
         {running ? 'Ses odaya yayılıyor' : runState === 'starting' ? 'Başlatılıyor…' : 'Durdu'}
@@ -284,7 +284,7 @@ export function TopBar() {
         </IconButton>
       </div>
 
-      <div className="ml-auto flex items-center gap-3">
+      <div className="ml-auto flex min-w-0 items-center gap-3">
         <VolumeControl />
         <StatusButton />
         <IconButton label={theme === 'dark' ? 'Açık temaya geç' : 'Koyu temaya geç'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>

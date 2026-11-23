@@ -63,6 +63,8 @@ export function RoomStage({
   const select = useStore((s) => s.select)
   const moveSpeaker = useStore((s) => s.moveSpeaker)
   const moveListener = useStore((s) => s.moveListener)
+  const snapSpeaker = useStore((s) => s.snapSpeaker)
+  const snapListener = useStore((s) => s.snapListener)
   const addSpeaker = useStore((s) => s.addSpeaker)
 
   const running = runState === 'running'
@@ -90,6 +92,8 @@ export function RoomStage({
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const drag = useRef<Drag | null>(null)
+  // Çift tıklama elle algılanır: sürükleme işaretçiyi yakaladığı için dblclick hoparlöre ulaşmaz.
+  const lastTap = useRef<{ id: string; t: number }>({ id: '', t: 0 })
   const [dragging, setDragging] = useState(false)
   const [size, setSize] = useState({ w: 900, h: 560 })
 
@@ -120,6 +124,15 @@ export function RoomStage({
   const startDrag = (e: React.PointerEvent, id: string, at: { x: number; y: number }) => {
     e.stopPropagation()
     e.preventDefault()
+    const now = performance.now()
+    if (lastTap.current.id === id && now - lastTap.current.t < 400) {
+      // Çift tıklama: olması gereken yere oturt (sürükleme başlatma).
+      lastTap.current = { id: '', t: 0 }
+      if (id === LISTENER_ID) snapListener()
+      else snapSpeaker(id)
+      return
+    }
+    lastTap.current = { id, t: now }
     select(id)
     const p = toRoom(e.clientX, e.clientY)
     drag.current = { id, dx: at.x - p.x, dy: at.y - p.y, moved: false }
@@ -130,6 +143,7 @@ export function RoomStage({
     if (!d) return
     if (!d.moved) {
       d.moved = true
+      lastTap.current = { id: '', t: 0 }
       setDragging(true)
     }
     const p = toRoom(e.clientX, e.clientY)
@@ -427,7 +441,7 @@ export function RoomStage({
 
       {speakers.length > 0 && !editing && (
         <span className="pointer-events-none absolute bottom-3 right-5 text-xs text-faint">
-          Sürükleyerek yerleştir · dokununca ayarları açılır
+          Sürükleyerek yerleştir · çift tıkla: yerine oturt · dokununca ayarları açılır
         </span>
       )}
     </div>

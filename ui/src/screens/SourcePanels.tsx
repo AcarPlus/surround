@@ -261,11 +261,16 @@ export function UpmixControls() {
           <Chip active={o.mode === 'film'} onClick={() => set({ mode: 'film' })}>
             Film (yüksek kalite)
           </Chip>
+          <Chip active={o.mode === 'direct'} onClick={() => set({ mode: 'direct' })}>
+            Doğrudan (işlemsiz)
+          </Chip>
         </div>
         <p className="mt-1.5 text-xs text-faint">
           {o.mode === 'game'
             ? 'Anlık yön çözümleme; ön hoparlörlere gecikme eklemez.'
-            : 'Frekans bandı başına ayrıştırma; diyalog daha temiz ortalanır, ~21 ms gecikme ekler.'}
+            : o.mode === 'direct'
+              ? 'Çözümleme yok: sol/sağ olduğu gibi, orta ikisinin toplamı, yan/arka sol-sağın kopyası. Aşağıdaki seviyeler etkilemez.'
+              : 'Frekans bandı başına ayrıştırma; diyalog daha temiz ortalanır, ~21 ms gecikme ekler.'}
         </p>
       </div>
       <BigSlider

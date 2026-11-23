@@ -135,11 +135,14 @@ public sealed class ProcessingConfig
 /// </summary>
 public sealed class UpmixOptions
 {
-    public const string Game = "game", Film = "film";
+    public const string Game = "game", Film = "film", Direct = "direct";
     public const double MinDb = -12, MaxDb = 6;
     public const double MinHeightDb = -24, MaxHeightDb = 6, DefaultHeightDb = -3;
 
-    /// <summary>"game" (time-domain matrix decoder, no added front latency) or "film" (STFT, ~21 ms at 48 kHz).</summary>
+    /// <summary>
+    /// "game" (time-domain matrix decoder, no added front latency), "film" (STFT, ~21 ms at 48 kHz) or "direct" (flat: plain
+    /// copies of L/R and their mono sum, no processing; see <see cref="Dsp.DirectUpmixer"/>).
+    /// </summary>
     public string Mode { get; set; } = Film;
     /// <summary>Level of the extracted center (dialog), dB.</summary>
     public double CenterDb { get; set; }
@@ -164,6 +167,7 @@ public sealed class UpmixOptions
     public double Diffusion { get; set; } = DefaultDiffusion;
 
     public bool IsGame => string.Equals(Mode?.Trim(), Game, StringComparison.OrdinalIgnoreCase);
+    public bool IsDirect => string.Equals(Mode?.Trim(), Direct, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Unknown JSON members preserved across load/save; the engine ignores them.</summary>
     [JsonExtensionData]
@@ -247,7 +251,7 @@ public sealed class SurroundConfig
         var copy = Parse(ToJson());
         copy.Extra = null;
         copy.Processing = new();
-        copy.UpmixOptions = new() { Mode = copy.UpmixOptions.IsGame ? UpmixOptions.Game : UpmixOptions.Film };
+        copy.UpmixOptions = new() { Mode = copy.UpmixOptions.IsGame ? UpmixOptions.Game : copy.UpmixOptions.IsDirect ? UpmixOptions.Direct : UpmixOptions.Film };
         copy.Source.Extra = null;
         copy.Source.DeviceName = null;
         foreach (var o in copy.Outputs) { o.Extra = null; o.DeviceName = null; }

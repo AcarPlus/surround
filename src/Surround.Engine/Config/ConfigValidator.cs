@@ -73,8 +73,8 @@ public static class ConfigValidator
 
         var u = cfg.UpmixOptions;
         var um = u.Mode?.Trim().ToLowerInvariant();
-        if (um != UpmixOptions.Game && um != UpmixOptions.Film)
-            e.Add($"upmixOptions.mode 'game' veya 'film' olmalı (bulunan: '{u.Mode}').");
+        if (um != UpmixOptions.Game && um != UpmixOptions.Film && um != UpmixOptions.Direct)
+            e.Add($"upmixOptions.mode 'game', 'film' veya 'direct' olmalı (bulunan: '{u.Mode}').");
         CheckRange(e, "upmixOptions.centerDb", u.CenterDb, UpmixOptions.MinDb, UpmixOptions.MaxDb);
         CheckRange(e, "upmixOptions.surroundDb", u.SurroundDb, UpmixOptions.MinDb, UpmixOptions.MaxDb);
         CheckRange(e, "upmixOptions.heightDb", u.HeightDb, UpmixOptions.MinHeightDb, UpmixOptions.MaxHeightDb);

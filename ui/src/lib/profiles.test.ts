@@ -14,9 +14,9 @@ import {
 const stateOf = (id: string) => profilePatch(builtinProfile(id)!)
 
 describe('yerleşik profiller', () => {
-  it('Film, Oyun, Müzik; geçerli aralıklarda ve silinemez işaretli', () => {
+  it('Film, Oyun, Müzik, Flat; geçerli aralıklarda ve silinemez işaretli', () => {
     const ps = builtinProfiles()
-    expect(ps.map((p) => p.name)).toEqual(['Film', 'Oyun', 'Müzik'])
+    expect(ps.map((p) => p.name)).toEqual(['Film', 'Oyun', 'Müzik', 'Flat'])
     for (const p of ps) {
       expect(p.builtin).toBe(true)
       expect(p.processing.eq).toHaveLength(EQ_BANDS)
@@ -93,14 +93,14 @@ describe('değişiklik algılama', () => {
 
 describe('normalizeProfiles', () => {
   it('config yoksa yerleşikler gelir', () => {
-    expect(normalizeProfiles(undefined).map((p) => p.id)).toEqual(['builtin-film', 'builtin-game', 'builtin-music'])
+    expect(normalizeProfiles(undefined).map((p) => p.id)).toEqual(['builtin-film', 'builtin-game', 'builtin-music', 'builtin-flat'])
   })
 
   it('kullanıcı profili korunur, bozuklar atılır, yerleşik başta kalır ve kilitlenir', () => {
     const user = { id: 'u1', name: '  Gece   modu ', builtin: true, upmix: false, processing: { bassBoostDb: 5 } }
     const ps = normalizeProfiles([user, user, { id: '', name: 'x' }, { id: 'u2', name: '   ' }, null, 3])
-    expect(ps.map((p) => p.id)).toEqual(['builtin-film', 'builtin-game', 'builtin-music', 'u1'])
-    const u = ps[3]
+    expect(ps.map((p) => p.id)).toEqual(['builtin-film', 'builtin-game', 'builtin-music', 'builtin-flat', 'u1'])
+    const u = ps[4]
     expect(u.builtin).toBe(false)
     expect(u.name).toBe('Gece modu')
     expect(u.upmix).toBe(false)
@@ -140,5 +140,19 @@ describe('normalizeProfiles', () => {
     expect(old.processing.autoPreamp).toBe(false)
     expect(old.processing.peq).toEqual([])
     expect(old.upmixOptions.surroundDelayMs).toBe(10)
+  })
+
+  it('Flat: ses işleme ve sınırlayıcı kapalı, upmix doğrudan (işlemsiz kopya)', () => {
+    const p = builtinProfile('builtin-flat')!
+    expect(p.processing.enabled).toBe(false)
+    expect(p.processing.limiter).toBe(false)
+    expect(p.processing.eq.every((v) => v === 0)).toBe(true)
+    expect(p.upmixOptions.mode).toBe('direct')
+  })
+
+  it('kayıtlı eski Flat kopyası yerleşik tanımı gölgelemez', () => {
+    const old = { ...builtinProfile('builtin-flat')!, upmix: false }
+    const ps = normalizeProfiles([old])
+    expect(ps.find((p) => p.id === 'builtin-flat')!.upmix).toBe(true)
   })
 })

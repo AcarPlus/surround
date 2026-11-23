@@ -22,7 +22,7 @@ beforeEach(() => {
 
 describe('profil mağazası', () => {
   it('yerleşik profiller yüklenir', () => {
-    expect(st().profiles.map((p) => p.name)).toEqual(['Film', 'Oyun', 'Müzik'])
+    expect(st().profiles.map((p) => p.name)).toEqual(['Film', 'Oyun', 'Müzik', 'Flat'])
     expect(st().activeProfileId).toBeNull()
   })
 
@@ -85,7 +85,7 @@ describe('profil mağazası', () => {
     await vi.advanceTimersByTimeAsync(500)
     const cfg = spy.mock.calls.at(-1)![0]
     expect(cfg.activeProfileId).toBe('builtin-music')
-    expect(cfg.profiles).toHaveLength(3)
+    expect(cfg.profiles).toHaveLength(4)
     expect(cfg.upmixOptions).toMatchObject({ mode: 'film', surroundDb: -4, heightDb: -6 })
     spy.mockRestore()
     vi.useRealTimers()

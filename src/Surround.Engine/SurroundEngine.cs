@@ -86,10 +86,11 @@ public sealed class SurroundEngine : IDisposable
             {
                 if (n >= 2)
                 {
-                    IStereoUpmixer up = _cfg.UpmixOptions.IsGame ? new GameUpmixer(fs, layout) : new FilmUpmixer(fs, layout);
+                    IStereoUpmixer up = _cfg.UpmixOptions.IsDirect ? new DirectUpmixer(layout)
+                        : _cfg.UpmixOptions.IsGame ? new GameUpmixer(fs, layout) : new FilmUpmixer(fs, layout);
                     up.Update(upSettings);
                     _upmix = new AdaptiveUpmix(fs, up, adaptive: n > 2, n > 2 ? nativeHeights : null);
-                    _log?.Invoke($"Upmix: {(_cfg.UpmixOptions.IsGame ? "oyun" : "film")} modu, {up.LatencyFrames * 1000.0 / fs:0.#} ms gecikme"
+                    _log?.Invoke($"Upmix: {(_cfg.UpmixOptions.IsDirect ? "doğrudan (flat)" : _cfg.UpmixOptions.IsGame ? "oyun" : "film")} modu, {up.LatencyFrames * 1000.0 / fs:0.#} ms gecikme"
                         + (n > 2 ? ", stereo içerik otomatik algılanır" : ""));
                 }
                 else _log?.Invoke($"Uyarı: upmix en az 2 kanallı kaynak gerektirir (kaynak {n} kanal); atlandı.");
