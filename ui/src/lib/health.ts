@@ -134,9 +134,9 @@ export function checkHealth(h: HealthInput): HealthItem[] {
     if (!d) {
       items.push({
         id: `dev-missing-${s.id}`,
-        level: 'error',
+        level: 'warn',
         title: `${s.name}: cihaz bağlı değil`,
-        detail: 'Hoparlörün çıkış cihazı bulunamadı (çıkarılmış veya devre dışı). Başlat bu durumda hata verir.',
+        detail: 'Hoparlörün çıkış cihazı bulunamadı (kapalı, çıkarılmış veya devre dışı). Diğer hoparlörler çalar; cihaz gelince bu hoparlör kendiliğinden katılır.',
         fix: { id: 'select-speaker', label: 'Hoparlörü aç', arg: s.id },
       })
     } else if (s.deviceChannel > d.channels) {

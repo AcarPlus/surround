@@ -288,6 +288,14 @@ public sealed partial class SurroundBackend : IDisposable
             if (decision == StartDecision.Fail) throw new BridgeException(errors);
             if (decision == StartDecision.Wait)
             {
+                // Some speakers' devices are absent (e.g. a Bluetooth speaker that is off): play on the ones that are there
+                // right away (the page warns about the missing one); they join again when their device comes back.
+                var reduced = DeviceRecovery.WithoutMissing(cfg, probes, out var dropped);
+                if (reduced is not null && (await Task.Run(() => Validate(reduced))).Count == 0)
+                {
+                    await StartReducedAsync(reduced, probes, dropped);
+                    return;
+                }
                 // A required device (e.g. a USB / Bluetooth speaker) is not there yet: behave as if it vanished while running.
                 _recovery.WaitForDevices(probes, Now);
                 PublishState();
@@ -323,17 +331,23 @@ public sealed partial class SurroundBackend : IDisposable
                 ?? throw new BridgeException("Eksik cihaz olmadan başlatılamıyor: kaynak cihaz yok ya da çalacak hoparlör kalmıyor.");
             var errors = await Task.Run(() => Validate(reduced));
             if (errors.Count > 0) throw new BridgeException(errors);
-            try { await _host.StartAsync(reduced); }
-            catch (ConfigException ex) { throw new BridgeException(ex.Errors); }
-            catch (Exception ex) { throw new BridgeException($"Motor başlatılamadı: {ex.Message}"); }
-            _degraded = true;
-            _runningFingerprint = reduced.EngineFingerprint();
-            await MarkStartedAsync(reduced, probes.Where(p => !p.Present).ToList());
-            RunningChanged?.Invoke(true);
-            await SyncDefaultDeviceAsync(reduced);
-            AppLog.Info($"Eksik cihaz olmadan başlatıldı; sessiz hoparlörler: {string.Join(", ", dropped)}");
+            await StartReducedAsync(reduced, probes, dropped);
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>Starts the engine on a config without the absent devices (caller holds the gate and validated it).</summary>
+    private async Task StartReducedAsync(SurroundConfig reduced, IReadOnlyList<DeviceProbe> probes, List<string> dropped)
+    {
+        try { await _host.StartAsync(reduced); }
+        catch (ConfigException ex) { throw new BridgeException(ex.Errors); }
+        catch (Exception ex) { throw new BridgeException($"Motor başlatılamadı: {ex.Message}"); }
+        _degraded = true;
+        _runningFingerprint = reduced.EngineFingerprint();
+        await MarkStartedAsync(reduced, probes.Where(p => !p.Present).ToList());
+        RunningChanged?.Invoke(true);
+        await SyncDefaultDeviceAsync(reduced);
+        AppLog.Info($"Eksik cihaz olmadan başlatıldı; sessiz hoparlörler: {string.Join(", ", dropped)}");
     }
 
     /// <summary>Remembers each device's friendly name in the config (from Windows, else the previous file) so it can be shown while absent.</summary>

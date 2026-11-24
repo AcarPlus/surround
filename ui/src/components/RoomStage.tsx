@@ -82,11 +82,13 @@ export function RoomStage({
     const now = performance.now()
     const spike = bass - b.avg
     b.avg = b.avg * 0.85 + bass * 0.15
-    if (bass > 0.5 && spike > 0.12 && now - b.last > 380) {
+    if (bass > 0.35 && spike > 0.08 && now - b.last > 280) {
       b.last = now
+      // Dalga her vuruşta dinleyicinin ("Sen") çevresinden yayılır; sub varsa onun yerinden de.
       const sub = speakers.find((s) => !s.mute && primaryChannel(s.source) === 'LFE')
-      const at = sub ? { x: px(sub.x), y: py(sub.y) } : { x: lx, y: ly }
-      setWaves((ws) => [...ws.slice(-3), { id: ++b.seq, ...at }])
+      const add = [{ id: ++b.seq, x: lx, y: ly }]
+      if (sub) add.push({ id: ++b.seq, x: px(sub.x), y: py(sub.y) })
+      setWaves((ws) => [...ws.slice(-5), ...add])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [levels])

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { RoomStage } from '../components/RoomStage'
 import { DemoOverlay } from '../components/DemoOverlay'
@@ -41,9 +41,12 @@ export function HomeScreen() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 px-6 pb-1 pt-4">
-        <LayoutPicker />
-        <div className="ml-auto flex flex-wrap items-center gap-2">
+      {/* Tek sıra: düzen çipleri solda (sığmazsa yatay kayar), araçlar sağda; hiçbir şey alt satıra düşmez. */}
+      <div className="flex shrink-0 items-center gap-4 px-6 pb-1 pt-4">
+        <ChipScroller>
+          <LayoutPicker />
+        </ChipScroller>
+        <div className="flex shrink-0 items-center gap-1.5">
           <ToolButton
             active={demo}
             onClick={() => setDemo((v) => !v)}
@@ -137,12 +140,49 @@ function ToolButton({
       title={title}
       aria-pressed={active}
       className={cx(
-        'flex h-9 items-center gap-2 rounded-xl border px-3.5 text-[13px] font-medium transition-all duration-300 active:scale-[0.96] disabled:opacity-40 disabled:active:scale-100',
+        'flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 text-xs font-semibold transition-all duration-300 active:scale-[0.96] disabled:opacity-40 disabled:active:scale-100',
         active ? 'chip-aurora' : 'border-line bg-surface/60 backdrop-blur-sm hover:border-accent/40 hover:shadow-[0_0_16px_-6px_rgb(var(--accent)/0.6)]',
       )}
     >
       {children}
     </button>
+  )
+}
+
+/**
+ * Düzen çiplerinin kabı: sığmazsa yatay kayar (fare tekerleği de kaydırır), taşan kenar keskin kesilmek yerine yumuşakça
+ * solar; hangi kenarda devamı varsa orada.
+ */
+function ChipScroller({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [edge, setEdge] = useState({ l: false, r: false })
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const upd = () => setEdge({ l: el.scrollLeft > 1, r: el.scrollLeft + el.clientWidth < el.scrollWidth - 1 })
+    const wheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
+      el.scrollLeft += e.deltaY
+      e.preventDefault()
+    }
+    upd()
+    const ro = new ResizeObserver(upd)
+    ro.observe(el)
+    if (el.firstElementChild) ro.observe(el.firstElementChild)
+    el.addEventListener('scroll', upd, { passive: true })
+    el.addEventListener('wheel', wheel, { passive: false })
+    return () => {
+      ro.disconnect()
+      el.removeEventListener('scroll', upd)
+      el.removeEventListener('wheel', wheel)
+    }
+  }, [])
+  const f = 36
+  const mask = `linear-gradient(90deg, ${edge.l ? 'transparent' : '#000'} 0, #000 ${edge.l ? f : 0}px, #000 calc(100% - ${edge.r ? f : 0}px), ${edge.r ? 'transparent' : '#000'} 100%)`
+  return (
+    <div ref={ref} className="min-w-0 flex-1 overflow-x-auto py-1" style={{ scrollbarWidth: 'none', maskImage: mask, WebkitMaskImage: mask }}>
+      {children}
+    </div>
   )
 }
 
@@ -188,7 +228,7 @@ function RoomMenu() {
         </span>
       </ToolButton>
       {open && (
-        <div className="glass-card screen-in absolute right-0 top-11 z-40 w-[280px] space-y-3 p-4 shadow-[var(--shadow)]">
+        <div className="glass-card screen-in absolute right-0 top-10 z-40 w-[280px] space-y-3 p-4 shadow-[var(--shadow)]">
           <div>
             <p className="mb-2 text-xs text-muted">Oda boyutu</p>
             <div className="flex items-center gap-2">

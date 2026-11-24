@@ -36,7 +36,7 @@ export function LayoutPicker() {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Hoparlör düzeni">
+    <div className="flex w-max flex-nowrap items-center gap-1.5" role="group" aria-label="Hoparlör düzeni">
       <span className="mr-1.5 text-[11px] font-medium tracking-[0.08em] text-muted">DÜZEN</span>
       {LAYOUT_TEMPLATES.map((t) => {
         const on = speakers.length > 0 && current === t
@@ -47,7 +47,7 @@ export function LayoutPicker() {
             aria-pressed={on}
             onClick={() => !on && choose(t)}
             className={cx(
-              'num relative h-8 rounded-lg border px-3 text-xs font-semibold transition-colors duration-300',
+              'num relative h-8 shrink-0 rounded-lg border px-3 text-xs font-semibold transition-colors duration-300',
               on ? 'border-transparent text-fg' : 'border-line bg-surface/60 text-fg/80 backdrop-blur-sm hover:border-accent/40 hover:text-fg',
             )}
           >
@@ -64,14 +64,14 @@ export function LayoutPicker() {
         )
       })}
       {speakers.length > 0 && !isTemplate && (
-        <span className="num chip-aurora flex h-8 items-center rounded-lg border px-3 text-xs font-semibold">
+        <span className="num chip-aurora flex h-8 shrink-0 items-center whitespace-nowrap rounded-lg border px-3 text-xs font-semibold">
           Özel · {current}
         </span>
       )}
       <button
         type="button"
         onClick={() => setCustom('')}
-        className="h-8 rounded-lg px-2.5 text-xs font-medium text-muted hover:bg-surface hover:text-fg"
+        className="h-8 shrink-0 whitespace-nowrap rounded-lg px-2.5 text-xs font-medium text-muted hover:bg-surface hover:text-fg"
       >
         Başka…
       </button>
