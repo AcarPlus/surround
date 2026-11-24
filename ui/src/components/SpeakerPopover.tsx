@@ -4,8 +4,6 @@ import { useStore } from '../store/useStore'
 import { computeAuto, polarToPoint, primaryChannel } from '../lib/geometry'
 import { angleFromListener, effectiveRole, roleLabel, suggestRole } from '../lib/roles'
 import { positionalRows } from '../lib/positional'
-import { defaultRoleName } from '../lib/layout'
-import { plannedName } from '../lib/setup'
 import { deviceColorVar } from '../lib/colors'
 import { fmt } from '../lib/format'
 import type { Anchor } from './RoomStage'
@@ -65,9 +63,8 @@ export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Spe
   }
   const applySuggestion = () => {
     if (!suggested) return
-    const renamed = s.name === defaultRoleName(role) || s.name === plannedName(role)
+    // Otomatik ad konumu zaten izler (lib/naming.ts); elle verilen ad korunur.
     setRole(s.id, suggested)
-    if (renamed) updateSpeaker(s.id, { name: defaultRoleName(suggested) })
   }
 
   // Sağda yer yoksa sola aç; dikeyde sahnenin içinde kal.

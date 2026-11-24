@@ -142,7 +142,7 @@ function SpeakerPanel() {
           <input
             aria-label="Hoparlör adı"
             value={sp.name}
-            onChange={(e) => updateSpeaker(sp.id, { name: e.target.value })}
+            onChange={(e) => updateSpeaker(sp.id, { name: e.target.value, customName: true })}
             className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold outline-none hover:border-line focus:border-accent"
           />
           <p className="px-1 text-xs text-muted">

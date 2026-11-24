@@ -101,6 +101,8 @@ export interface Speaker {
   role?: string
   /** Üst (tavan/yükseklik) hoparlörü; "Özel (haritadan)" rolünde üst şeritleri seçtirir. Motor yok sayar. */
   elevated?: boolean
+  /** Yalnızca arayüz: adı kullanıcı yazdı; konuma göre otomatik adlandırma ellemez (bkz. lib/naming.ts). Motor yok sayar. */
+  customName?: boolean
   /** Yalnızca arayüz: gecikme/kazanç mikrofon ölçümünden geldiyse ölçüm zamanı (ISO). Motor yok sayar. */
   calibratedAt?: string
   /**

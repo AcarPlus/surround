@@ -30,6 +30,7 @@ import { clamp, clampToRoom, computeAuto, round } from '../lib/geometry'
 import { assignExisting, layoutSlots, type LayoutSpec } from '../lib/layout'
 import { ROLE_CUSTOM_MANUAL, ROLE_CUSTOM_MAP, computeMapSource, roleDef, rolePatch } from '../lib/roles'
 import { idealSpeakerPoint } from '../lib/snap'
+import { applyAutoNames } from '../lib/naming'
 import { positionalRows } from '../lib/positional'
 import { plannedName, standardPosition, type BuildResult } from '../lib/setup'
 import { findCable, type FixId } from '../lib/health'
@@ -312,7 +313,9 @@ const sameRowStrict = (a: Speaker['source'], b: Speaker['source']): boolean => {
  * Otomatik işaretli hoparlörlerin gecikme/kazanç değerlerini geometriden yeniden hesaplar;
  * "Özel (haritadan)" rolündekilerin karışım satırını dinleyiciye göre açıdan yeniden üretir.
  */
-function recalc(speakers: Speaker[], listener: Point, auto: Record<string, AutoFlags>): Speaker[] {
+function recalc(speakers0: Speaker[], listener: Point, auto: Record<string, AutoFlags>): Speaker[] {
+  // Otomatik adlar konumu izler (taşıma, ekleme, düzen, dinleyiciyi taşıma); elle verilen adlar korunur.
+  const speakers = applyAutoNames(speakers0, listener)
   const { byId } = computeAuto(speakers, listener)
   return speakers.map((s0) => {
     let s = s0
@@ -806,7 +809,7 @@ export const useStore = create<State>()((set, get) => {
         const elevated = slot.category === 'height' ? true : undefined
         const def = roleDef(slot.role)
         const base: Speaker = prev
-          ? { ...prev, name: byRole[i] ? prev.name : slot.name }
+          ? { ...prev, name: byRole[i] || prev.customName ? prev.name : slot.name }
           : (() => {
               // Havuz bitti: diğer cihazlarda boş kanal ara; yoksa çakışmayı kabul et ve uyar.
               let f = free.shift() ?? firstFree(renders, taken)

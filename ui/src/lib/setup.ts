@@ -356,7 +356,7 @@ export function buildSpeakers(
       if (def?.elevated) sp.elevated = true
       else delete sp.elevated
       if (roleChanged) {
-        sp.name = p.name
+        if (!prev.customName) sp.name = p.name
         sp.delayMs = 0
         sp.gainDb = 0
         delete sp.calibratedAt
