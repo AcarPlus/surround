@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 import { useStore, LISTENER_ID } from './store/useStore'
 import { TopBar } from './components/TopBar'
 import { CableGate, cableMissing } from './components/CableGate'
@@ -10,6 +10,7 @@ import { SoundScreen } from './screens/SoundScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { SetupWizard } from './screens/SetupWizard'
 import { IconX } from './components/icons'
+import { AuroraSky } from './components/aurora'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { InitErrorScreen } from './components/InitErrorScreen'
 import { cx } from './components/ui'
@@ -22,12 +23,6 @@ function isTyping(t: EventTarget | null) {
   const tag = el.tagName
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
 }
-
-/** Arka planda süzülen ışık tozları: sabit (tekrarlanabilir) konum, boy ve hız. */
-const DUST = Array.from({ length: 26 }, (_, i) => {
-  const r = (n: number) => ((Math.sin(i * 12.9898 + n * 78.233) * 43758.5453) % 1 + 1) % 1
-  return { x: r(1) * 100, y: r(2) * 100, s: 1.5 + r(3) * 2.5, t: 22 + r(4) * 30, dl: r(5) * 40 }
-})
 
 /** Sihirbaz ya da bir Dialog açık mı (ikisi de role="dialog" aria-modal="true" taşır). */
 const modalOpen = () => !!document.querySelector('[role="dialog"][aria-modal="true"]')
@@ -122,23 +117,10 @@ export function App() {
   }
 
   return (
+    <MotionConfig reducedMotion="user">
     <div className="relative isolate flex h-full min-w-[1000px] flex-col bg-bg" style={{ ['--energy' as string]: energy.toFixed(3) }}>
-      {/* Ortam ışığı: yavaşça dolaşan renk bulutları; motor çalışırken canlanır. Cam paneller bunun üstünde durur. */}
-      <div
-        aria-hidden
-        className={cx('ambient', runState === 'running' && 'ambient-live')}
-      >
-        <span className="ambient-blob ambient-a" />
-        <span className="ambient-blob ambient-b" />
-        <span className="ambient-blob ambient-c" />
-        {DUST.map((d, i) => (
-          <span
-            key={i}
-            className="dust"
-            style={{ left: `${d.x}%`, top: `${d.y}%`, animationDuration: `${d.t}s`, animationDelay: `-${d.dl}s`, width: d.s, height: d.s }}
-          />
-        ))}
-      </div>
+      {/* Aurora göğü: akan renk perdeleri ve yıldızlar; motor çalışırken sesle parlar. Cam paneller bunun üstünde durur. */}
+      <AuroraSky live={runState === 'running'} />
       <ErrorBoundary compact>
         <TopBar />
       </ErrorBoundary>
@@ -168,12 +150,13 @@ export function App() {
         {toast && (
           <motion.div
             key={toast.id}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 8 }}
-            transition={{ duration: 0.15 }}
+            initial={{ opacity: 0, y: 18, scale: 0.94, filter: 'blur(8px)' }}
+            animate={{ opacity: 1, y: 0, scale: 1, filter: 'blur(0px)' }}
+            exit={{ opacity: 0, y: 10, scale: 0.97, filter: 'blur(6px)' }}
+            transition={{ type: 'spring', stiffness: 420, damping: 28 }}
+            style={{ x: '-50%' }}
             className={cx(
-              'fixed bottom-5 left-1/2 z-[60] flex max-w-[min(680px,90vw)] -translate-x-1/2 items-center gap-3 rounded-md border bg-raised py-2 pl-3.5 pr-2 text-[13px] shadow-[var(--shadow)]',
+              'glass-card fixed bottom-5 left-1/2 z-[60] flex max-w-[min(680px,90vw)] items-center gap-3 rounded-2xl py-2.5 pl-4 pr-2 text-[13px] shadow-[var(--shadow)]',
               toast.tone === 'error' ? 'border-err/60' : 'border-line-strong',
             )}
             role={toast.tone === 'error' ? 'alert' : 'status'}
@@ -210,5 +193,6 @@ export function App() {
         )}
       </AnimatePresence>
     </div>
+    </MotionConfig>
   )
 }

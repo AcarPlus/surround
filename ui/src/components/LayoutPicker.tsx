@@ -1,3 +1,4 @@
+import { motion } from 'framer-motion'
 import { useState } from 'react'
 import { useStore, type LayoutPreview } from '../store/useStore'
 import { countLayout, formatLayout, parseLayout, type LayoutSpec } from '../lib/layout'
@@ -46,16 +47,24 @@ export function LayoutPicker() {
             aria-pressed={on}
             onClick={() => !on && choose(t)}
             className={cx(
-              'num h-8 rounded-lg border px-3 text-xs font-semibold transition-colors',
-              on ? 'border-accent bg-accent text-accent-fg' : 'border-line bg-surface text-fg/80 hover:border-line-strong hover:text-fg',
+              'num relative h-8 rounded-lg border px-3 text-xs font-semibold transition-colors duration-300',
+              on ? 'border-transparent text-fg' : 'border-line bg-surface/60 text-fg/80 backdrop-blur-sm hover:border-accent/40 hover:text-fg',
             )}
           >
-            {t}
+            {on && (
+              <motion.span
+                layoutId="layout-pill"
+                transition={{ type: 'spring', stiffness: 520, damping: 34 }}
+                aria-hidden
+                className="chip-aurora absolute -inset-px rounded-lg border"
+              />
+            )}
+            <span className="relative">{t}</span>
           </button>
         )
       })}
       {speakers.length > 0 && !isTemplate && (
-        <span className="num flex h-8 items-center rounded-lg border border-accent bg-accent px-3 text-xs font-semibold text-accent-fg">
+        <span className="num chip-aurora flex h-8 items-center rounded-lg border px-3 text-xs font-semibold">
           Özel · {current}
         </span>
       )}

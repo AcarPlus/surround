@@ -86,7 +86,7 @@ export function HomeScreen() {
         )}
         {speakers.length === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-center">
-            <p className="text-[22px] font-semibold tracking-tight">Odanı kuralım</p>
+            <p className="aurora-text text-[26px] font-semibold tracking-tight">Odanı kuralım</p>
             <p className="max-w-[420px] text-[14px] text-muted">
               Hangi hoparlörlerin bağlı olduğunu birkaç soruyla öğrenip odaya yerleştiririz. Sonra istediğin gibi sürükleyip
               düzenlersin.
@@ -137,8 +137,8 @@ function ToolButton({
       title={title}
       aria-pressed={active}
       className={cx(
-        'flex h-9 items-center gap-2 rounded-xl border px-3.5 text-[13px] font-medium transition-colors disabled:opacity-40',
-        active ? 'border-accent bg-accent text-accent-fg' : 'border-line bg-surface hover:border-line-strong',
+        'flex h-9 items-center gap-2 rounded-xl border px-3.5 text-[13px] font-medium transition-all duration-300 active:scale-[0.96] disabled:opacity-40 disabled:active:scale-100',
+        active ? 'chip-aurora' : 'border-line bg-surface/60 backdrop-blur-sm hover:border-accent/40 hover:shadow-[0_0_16px_-6px_rgb(var(--accent)/0.6)]',
       )}
     >
       {children}
@@ -188,7 +188,7 @@ function RoomMenu() {
         </span>
       </ToolButton>
       {open && (
-        <div className="screen-in absolute right-0 top-11 z-40 w-[280px] space-y-3 rounded-2xl border border-line-strong bg-surface p-4 shadow-[var(--shadow)]">
+        <div className="glass-card screen-in absolute right-0 top-11 z-40 w-[280px] space-y-3 p-4 shadow-[var(--shadow)]">
           <div>
             <p className="mb-2 text-xs text-muted">Oda boyutu</p>
             <div className="flex items-center gap-2">

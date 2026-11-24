@@ -1,3 +1,4 @@
+import { motion } from 'framer-motion'
 import { useEffect, useRef, useState } from 'react'
 import { selectActiveProfile, selectProfileModified, useStore } from '../store/useStore'
 import { IconCheck, IconChevron } from './icons'
@@ -34,7 +35,7 @@ export function ProfileMenu() {
 
   return (
     <div ref={root} className="flex items-center">
-      <div role="group" aria-label="Ses profili" className="flex gap-0.5 rounded-xl border border-line bg-bg/60 p-1">
+      <div role="group" aria-label="Ses profili" className="flex gap-0.5 rounded-xl border border-line bg-bg/40 p-1 backdrop-blur-sm">
         {quick.map((p) => {
           const on = p.id === active?.id
           return (
@@ -45,13 +46,21 @@ export function ProfileMenu() {
               onClick={() => !on && selectProfile(p.id)}
               title={on && modified ? 'Profil değiştirildi (kaydedilmedi)' : p.name}
               className={cx(
-                'flex h-8 max-w-[120px] items-center gap-1 rounded-lg px-3.5 text-[13px] font-semibold transition-colors',
-                on ? 'bg-raised text-accent shadow-[inset_0_0_0_1px_rgb(var(--accent)/0.45),0_0_18px_rgb(var(--accent)/0.12)]' : 'text-muted hover:text-fg',
+                'relative flex h-8 max-w-[120px] items-center gap-1 rounded-lg px-3.5 text-[13px] font-semibold transition-colors duration-300',
+                on ? 'text-fg' : 'text-muted hover:text-fg',
               )}
             >
-              <span className="truncate">{p.name}</span>
+              {on && (
+                <motion.span
+                  layoutId="profile-pill"
+                  transition={{ type: 'spring', stiffness: 520, damping: 34 }}
+                  aria-hidden
+                  className="chip-aurora absolute inset-0 rounded-lg border"
+                />
+              )}
+              <span className="relative truncate">{p.name}</span>
               {on && modified && (
-                <span aria-label="değiştirildi" className="text-warn">
+                <span aria-label="değiştirildi" className="relative text-warn">
                   •
                 </span>
               )}
@@ -79,7 +88,7 @@ export function ProfileMenu() {
         <div
           role="menu"
           aria-label="Profiller"
-          className="absolute right-0 top-full z-50 mt-1.5 w-[220px] rounded-lg border border-line-strong bg-raised p-1 shadow-[var(--shadow)]"
+          className="glass-card screen-in absolute right-0 top-full z-50 mt-1.5 w-[220px] p-1 shadow-[var(--shadow)]"
         >
           {profiles.map((p) => {
             const isActive = p.id === active?.id

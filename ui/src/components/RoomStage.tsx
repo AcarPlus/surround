@@ -8,6 +8,7 @@ import { standardPosition } from '../lib/setup'
 import { deviceColorAlpha, deviceColorVar } from '../lib/colors'
 import { frameEnergy, levelToUnit, speakerLevel, useLevels } from '../lib/useLevels'
 import { cx } from './ui'
+import { staggerDelay } from '../lib/aurora'
 
 /** Hoparlör ekleme kipinde boş yuva olarak gösterilen roller (sık kullanılanlar). */
 export const GHOST_ROLES = [
@@ -212,6 +213,50 @@ export function RoomStage({
         <span className="absolute inset-x-0 top-3 text-center text-[11px] tracking-[0.2em] text-faint">EKRAN</span>
       </div>
 
+      {/* Odanın aurora kenarı (açılışta çizilerek gelir) ve dinleyicinin çevresinde 1 m / 2 m mesafe halkaları. */}
+      <svg aria-hidden className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+        <defs>
+          <linearGradient id="room-edge" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="rgb(var(--aurora-1))" />
+            <stop offset="0.5" stopColor="rgb(var(--aurora-2))" />
+            <stop offset="1" stopColor="rgb(var(--aurora-3))" />
+          </linearGradient>
+        </defs>
+        <rect
+          className="draw-in"
+          pathLength={1}
+          x={ox + 0.5}
+          y={oy + 0.5}
+          width={Math.max(0, rw - 1)}
+          height={Math.max(0, rh - 1)}
+          rx={22}
+          fill="none"
+          stroke="url(#room-edge)"
+          strokeWidth={1.5}
+          strokeOpacity={running ? 0.55 + energy * 0.45 : 0.42}
+          style={{ filter: running ? `drop-shadow(0 0 ${(4 + energy * 10).toFixed(1)}px rgb(var(--aurora-1) / 0.7))` : undefined }}
+        />
+        {[1, 2].map((m, i) => (
+          <g key={m}>
+            <circle
+              className="draw-in"
+              pathLength={1}
+              cx={lx}
+              cy={ly}
+              r={m * scale}
+              fill="none"
+              stroke="rgb(var(--aurora-1))"
+              strokeOpacity={0.16 - i * 0.04}
+              strokeDasharray="1"
+              style={{ animationDelay: `${0.5 + i * 0.25}s` }}
+            />
+            <text x={lx + m * scale * 0.707 + 4} y={ly - m * scale * 0.707 - 4} fontSize="10" fill="rgb(var(--faint))" opacity={0.7}>
+              {m} m
+            </text>
+          </g>
+        ))}
+      </svg>
+
       {/* Her hoparlörün zemine düşen ışığı: canlı seviyeyle parlar, renkler üst üste binince karışır. */}
       {speakers.map((s) => {
         if (s.mute) return null
@@ -255,7 +300,7 @@ export function RoomStage({
               transform: `rotate(${(Math.atan2(dy, dx) * 180) / Math.PI}deg)`,
               background: lit
                 ? `repeating-linear-gradient(90deg, ${deviceColorVar(s.outputDeviceId, devices)} 0 8px, transparent 8px 18px)`
-                : `linear-gradient(90deg, ${deviceColorVar(s.outputDeviceId, devices)} 0%, transparent 100%)`,
+                : `linear-gradient(90deg, ${deviceColorVar(s.outputDeviceId, devices)} 0%, rgb(var(--aurora-1) / 0.6) 100%)`,
               WebkitMaskImage: 'linear-gradient(90deg, #000 0%, rgb(0 0 0 / 0.15) 100%)',
               maskImage: 'linear-gradient(90deg, #000 0%, rgb(0 0 0 / 0.15) 100%)',
               opacity: lit ? 0.35 + lv * 0.65 : 0.16,
@@ -340,26 +385,28 @@ export function RoomStage({
         aria-label="Dinleyici (sürükleyerek taşı)"
         onPointerDown={(e) => startDrag(e, LISTENER_ID, room.listener)}
         className={cx(
-          'absolute z-[3] flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 cursor-grab items-center justify-center rounded-full border-2 border-accent bg-surface text-accent transition-shadow',
+          'absolute z-[3] flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 cursor-grab items-center justify-center rounded-full border-2 border-transparent text-accent transition-shadow',
           selection === LISTENER_ID && 'ring-4 ring-accent/30',
         )}
         style={{
           left: lx,
           top: ly,
+          background:
+            'radial-gradient(circle at 50% 30%, rgb(var(--raised)), rgb(var(--surface))) padding-box, conic-gradient(from 200deg, rgb(var(--aurora-1)), rgb(var(--aurora-2)), rgb(var(--aurora-3)), rgb(var(--aurora-1))) border-box',
           boxShadow: `0 0 0 ${Math.round(8 + energy * 10)}px rgb(var(--accent) / ${(0.07 + energy * 0.08).toFixed(3)}), 0 0 ${Math.round(50 + energy * 60)}px rgb(var(--accent) / ${running ? (0.3 + energy * 0.4).toFixed(3) : 0.12})`,
           transform: `translate(-50%, -50%) scale(${(1 + energy * 0.08).toFixed(3)})`,
           transition: 'box-shadow .1s linear, transform .1s linear',
         }}
       >
-        {running && <span className="listener-orbit" aria-hidden />}
+        <span className="listener-orbit" aria-hidden style={{ opacity: running ? 1 : 0.35 }} />
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
           <circle cx="12" cy="8" r="4" />
           <path d="M4 21a8 8 0 0 1 16 0" />
         </svg>
-        <span className="absolute top-[62px] rounded-md bg-bg/80 px-1.5 text-xs font-medium text-accent backdrop-blur-sm">Sen</span>
+        <span className="absolute top-[64px] rounded-full border border-accent/30 bg-bg/70 px-2 text-xs font-medium text-accent backdrop-blur-sm">Sen</span>
       </button>
 
-      {speakers.map((s) => {
+      {speakers.map((s, idx) => {
         const color = deviceColorVar(s.outputDeviceId, devices)
         const dev = devices.find((d) => d.id === s.outputDeviceId)
         const unavailable = !dev || (lowLatency && isHighLatencyKind(dev.kind))
@@ -382,6 +429,8 @@ export function RoomStage({
               ['--lv' as string]: lv.toFixed(3),
             }}
           >
+            {/* Yaylanarak, sırayla gelir (Aurora hareket dili). */}
+            <div className="spring-pop relative flex h-full w-full items-center justify-center" style={{ animationDelay: `${staggerDelay(idx, 70)}ms` }}>
             <span className="stage-ring" aria-hidden />
             <span className="stage-ring stage-ring-2" aria-hidden />
             <span className="stage-ring stage-ring-3" aria-hidden />
@@ -392,7 +441,7 @@ export function RoomStage({
               onPointerDown={(e) => startDrag(e, s.id, s)}
               onFocus={() => select(s.id)}
               className={cx(
-                'stage-node relative flex cursor-grab items-center justify-center border-2 text-fg',
+                'stage-node speaker-orb relative flex cursor-grab items-center justify-center border-2 text-fg',
                 sub ? 'rounded-2xl' : 'rounded-full',
                 s.elevated && 'border-dashed',
               )}
@@ -403,7 +452,6 @@ export function RoomStage({
                 transform: live ? `scale(${(1 + lv * 0.13).toFixed(3)})` : undefined,
                 transition: 'transform 70ms linear',
                 borderColor: lv > 0.9 && live ? 'rgb(255 255 255)' : color,
-                background: 'radial-gradient(circle at 50% 35%, rgb(var(--raised)), rgb(var(--surface)))',
                 boxShadow: [
                   sel ? '0 0 0 3px rgb(var(--accent))' : '0 0 0 0 transparent',
                   `0 0 ${10 + glow * 1.7}px ${deviceColorAlpha(s.outputDeviceId, devices, live ? 0.5 : 0)}`,
@@ -431,6 +479,7 @@ export function RoomStage({
             >
               {s.name}
             </span>
+            </div>
           </div>
         )
       })}

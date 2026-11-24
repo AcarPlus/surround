@@ -84,7 +84,7 @@ function StatusButton() {
             ? 'border-err/50 bg-err/10 text-err'
             : tone === 'warn'
               ? 'border-warn/50 bg-warn/10 text-warn'
-              : 'border-line bg-surface text-fg/80 hover:border-line-strong',
+              : 'border-line bg-surface/60 text-fg/80 backdrop-blur-sm hover:border-accent/40',
         )}
       >
         <span className={cx('h-2 w-2 shrink-0 rounded-full', dot, (tone === 'ok' || s.runState === 'waiting') && 'breath')} />
@@ -94,7 +94,7 @@ function StatusButton() {
         <div
           role="dialog"
           aria-label="Durum"
-          className="screen-in absolute right-0 top-11 z-50 w-[340px] rounded-2xl border border-line-strong bg-surface p-3 shadow-[var(--shadow)]"
+          className="glass-card screen-in absolute right-0 top-11 z-50 w-[340px] p-3 shadow-[var(--shadow)]"
         >
           {items.length === 0 ? (
             <p className="flex items-center gap-2 px-1 py-1.5 text-[13px] text-ok">
@@ -104,7 +104,7 @@ function StatusButton() {
           ) : (
             <ul className="space-y-2">
               {items.map((it) => (
-                <li key={it.id} className="rounded-xl border border-line p-3">
+                <li key={it.id} className="rounded-xl border border-line bg-raised/40 p-3">
                   <p className={cx('text-[13px] font-medium', it.level === 'error' ? 'text-err' : 'text-warn')}>{it.title}</p>
                   <p className="mt-0.5 text-xs text-muted">{it.detail}</p>
                   {it.fix && (
@@ -114,7 +114,7 @@ function StatusButton() {
                         s.fixHealth(it.fix!.id, it.fix!.arg)
                         setOpen(false)
                       }}
-                      className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-fg hover:brightness-110"
+                      className="btn-aurora mt-2 rounded-lg px-3 py-1.5 text-xs font-semibold"
                     >
                       {it.fix.label}
                     </button>
@@ -158,11 +158,11 @@ export function RunButton({ big }: { big?: boolean }) {
       onClick={() => void toggleRun()}
       disabled={starting}
       className={cx(
-        'inline-flex items-center justify-center gap-2.5 rounded-2xl font-semibold transition-all',
+        'inline-flex items-center justify-center gap-2.5 rounded-2xl font-semibold transition-all duration-300 active:scale-[0.96]',
         big ? 'h-12 min-w-[180px] px-7 text-[15px]' : 'h-11 min-w-[132px] px-6 text-[15px]',
         running
           ? 'run-live text-fg shadow-[0_0_30px_rgb(var(--accent)/0.25)] hover:brightness-125'
-          : 'run-idle bg-accent text-accent-fg shadow-[0_10px_34px_rgb(var(--accent)/0.35)] hover:brightness-110',
+          : 'run-idle btn-aurora',
         starting && 'opacity-60',
       )}
     >
@@ -179,7 +179,7 @@ function IconButton({ label, onClick, disabled, children }: { label: string; onC
       disabled={disabled}
       aria-label={label}
       title={label}
-      className="flex h-8 w-8 items-center justify-center rounded border border-line-strong text-muted hover:text-fg disabled:opacity-35 disabled:hover:text-muted"
+      className="flex h-8 w-8 items-center justify-center rounded-lg border border-line-strong bg-surface/40 text-muted transition-[color,border-color,box-shadow,transform] duration-300 hover:border-accent/50 hover:text-fg hover:shadow-[0_0_14px_-3px_rgb(var(--accent)/0.55)] active:scale-90 disabled:opacity-35 disabled:hover:border-line-strong disabled:hover:text-muted disabled:hover:shadow-none"
     >
       {children}
     </button>
@@ -234,7 +234,7 @@ export function UpdateStrip() {
       <button
         onClick={apply}
         disabled={busy}
-        className="rounded border border-accent bg-accent px-2.5 py-1 font-semibold text-accent-fg hover:brightness-110 disabled:opacity-60"
+        className="btn-aurora rounded-lg border px-2.5 py-1 font-semibold disabled:opacity-60"
       >
         {busy ? 'Yeniden başlatılıyor…' : 'Yeniden başlat ve güncelle'}
       </button>
@@ -262,13 +262,13 @@ export function TopBar() {
 
   return (
     <>
-    <header className="glass relative z-20 flex h-[72px] shrink-0 items-center gap-5 border-b border-line/70 px-5">
+    <header className="glass relative z-20 flex h-[72px] shrink-0 items-center gap-5 border-b border-line/60 px-5">
       {running && <span className="run-line" aria-hidden />}
       <div className="flex w-[124px] shrink-0 items-center gap-2.5">
         <span className="logo-pulse flex h-9 w-9 items-center justify-center rounded-xl">
           <SurroundMark size={36} />
         </span>
-        <span className="text-[16px] font-semibold tracking-tight">Surround</span>
+        <span className="aurora-text text-[17px] font-semibold tracking-tight">Surround</span>
       </div>
 
       <RunButton />
@@ -287,8 +287,10 @@ export function TopBar() {
       <div className="ml-auto flex min-w-0 items-center gap-3">
         <VolumeControl />
         <StatusButton />
-        <IconButton label={theme === 'dark' ? 'Açık temaya geç' : 'Koyu temaya geç'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-          {theme === 'dark' ? <IconSun /> : <IconMoon />}
+        <IconButton label={theme === 'dark' ? 'Gündüz görünümüne geç' : 'Gece görünümüne geç'} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+          <span key={theme} className="spring-pop inline-flex" title={theme === 'dark' ? 'Gece' : 'Gündüz'}>
+            {theme === 'dark' ? <IconSun /> : <IconMoon />}
+          </span>
         </IconButton>
       </div>
     </header>

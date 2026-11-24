@@ -24,6 +24,10 @@ import {
 import { useCalibrationRun } from '../lib/useCalibrationRun'
 import { fmt, fmtSigned } from '../lib/format'
 import { RoomCanvas } from '../components/RoomCanvas'
+import { MeasureRadar, ProgressRing, StepTimeline, Burst } from '../components/aurora'
+import { radarStates, stepStates } from '../lib/aurora'
+import { angleFromListener } from '../lib/roles'
+import { deviceColorVar } from '../lib/colors'
 import { Badge, Button, Card, Field, NumberField, ScreenHeader, SectionTitle, Select, cx } from '../components/ui'
 import { IconCheck, IconMic, IconVolume, IconWarn } from '../components/icons'
 
@@ -90,6 +94,7 @@ export function CalibrationScreen() {
   const repeats = REPEATS
   const cal = useCalibrationRun()
   const progress = cal.progress
+  const room = useStore((s) => s.room)
 
   useEffect(() => {
     if (!micId && mics[0]) setMicId(mics[0].id)
@@ -188,6 +193,18 @@ export function CalibrationScreen() {
     return matchSpeakers(hz, matchInputs(list, taken), { target: eqTarget, referenceId: result.referenceSpeakerId, avoid: excluded })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hz, result, taken, eqTarget, speakers, excluded])
+
+  // Aurora: ölçüm radarı (hoparlörler gerçek yönlerinde) ve konum çizelgesi.
+  const radarIds = list.map((s) => s.id)
+  const rstates = radarStates(radarIds, progress ?? null)
+  const radar = list.map((s) => ({
+    id: s.id,
+    name: s.name,
+    angle: angleFromListener(s, room.listener),
+    color: deviceColorVar(s.outputDeviceId, devices),
+    state: rstates[s.id] ?? 'pending',
+  }))
+  const posSteps = POSITIONS.slice(0, wantPositions)
 
   if (speakers.length === 0) {
     return (
@@ -344,12 +361,13 @@ export function CalibrationScreen() {
         <div className="grid grid-cols-1 gap-4 min-[1100px]:grid-cols-[minmax(0,1fr)_420px]">
           <Card className="p-5">
             <SectionTitle>Ölçülüyor</SectionTitle>
-            <p className="text-[15px] font-semibold">{progress?.message ?? 'Hazırlanıyor…'}</p>
-            <div className="mt-3 h-2 overflow-hidden rounded-full bg-raised">
-              <div
-                className="h-full rounded-full bg-accent transition-[width] duration-500"
-                style={{ width: `${calibrationPercent(progress)}%` }}
+            <div className="flex items-center gap-5">
+              <ProgressRing
+                fraction={calibrationPercent(progress) / 100}
+                label={`%${Math.round(calibrationPercent(progress))}`}
+                sub={progress?.phase === 'analyzing' ? 'Çözümleniyor' : 'Ölçüm'}
               />
+              <p className="text-[15px] font-semibold">{progress?.message ?? 'Hazırlanıyor…'}</p>
             </div>
             <p className="num mt-2 text-xs text-muted">
               {progress?.phase === 'measuring'
@@ -358,6 +376,11 @@ export function CalibrationScreen() {
                   ? `Çözümleniyor ${progress.index} / ${progress.total}`
                   : ''}
             </p>
+            {matchEq && wantPositions > 1 && (
+              <div className="mt-4">
+                <StepTimeline steps={posSteps} states={stepStates(wantPositions, taken.length)} />
+              </div>
+            )}
             {matchEq && wantPositions > 1 && (
               <p className="mt-3 text-[13px]">
                 Konum {Math.min(taken.length + 1, wantPositions)} / {wantPositions}: {POSITIONS[Math.min(taken.length, POSITIONS.length - 1)]}
@@ -368,8 +391,8 @@ export function CalibrationScreen() {
               İptal
             </Button>
           </Card>
-          <Card className="h-[320px] overflow-hidden">
-            <RoomCanvas editable={false} compact showLegend={false} />
+          <Card className="flex h-[360px] items-center justify-center overflow-hidden p-3">
+            <MeasureRadar speakers={radar} sweeping={progress?.phase !== 'analyzing'} />
           </Card>
         </div>
       )}
@@ -379,6 +402,9 @@ export function CalibrationScreen() {
           <SectionTitle>
             Konum {taken.length} / {wantPositions} tamam
           </SectionTitle>
+          <div className="mb-4 mt-1">
+            <StepTimeline steps={posSteps} states={stepStates(wantPositions, taken.length)} />
+          </div>
           <p className="text-[15px] font-semibold">Mikrofonu taşı: {POSITIONS[Math.min(taken.length, POSITIONS.length - 1)]}</p>
           <p className="mt-1 text-[13px] text-muted">
             Aynı yükseklikte ve aynı yöne bakacak şekilde tut. Hazır olunca devam et{phoneMode ? ' (telefondaki düğme de olur)' : ''}.
@@ -408,7 +434,8 @@ export function CalibrationScreen() {
 
       {phase === 'result' && result && (
         <div className="space-y-4">
-          <Card className="p-4">
+          <Card className="relative p-4">
+            <span className="absolute left-10 top-6"><Burst key={taken.length} count={18} radius={90} /></span>
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <SectionTitle>{result.verified ? 'Doğrulama (düzeltmeler açıkken)' : 'Sonuç'}</SectionTitle>
               <span className="num text-xs text-muted">Ortam gürültüsü {fmt(result.noiseFloorDb, 0)} dBFS</span>

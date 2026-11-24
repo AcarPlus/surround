@@ -12,7 +12,7 @@
     <RootNamespace>Surround.Desktop</RootNamespace>
     <ApplicationIcon>Assets\surround.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>0.5.12</Version>
+    <Version>0.6.0</Version>
     <Product>Surround</Product>
     <Company>Surround</Company>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
