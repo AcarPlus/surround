@@ -22,6 +22,21 @@ hoparlörü olmayan kanalları kullanılan komşulara katlamak. Kod: `src/Surrou
 Üç arka kanal alanı (`surroundDelayMs`, `surroundHighCutHz`, `diffusion`) yan/arka çıkışları üreten `SurroundRenderer`’a canlı gider (`Configure`, tampon başına); ilk uygulamada değerler anında alınır, sonrakiler yumuşak geçer. Canlı alanlar `EngineFingerprint`'ten dışlanır, `SurroundEngine.UpdateLive` ile uygulanır; kazançlar 30 ms'de yumuşatılır.
 Aralık dışı değerler `ConfigValidator` hatasıdır.
 
+## Önler korunur (0.7.0)
+
+Oyun ve film modu artık FL/FR'ye girişin kendisini (L/R) verir, Düz (`direct`) modundaki gibi. Ayrıştırma yalnız
+**ekler**: ortalanmış birincil sesin FC payı, ortalanmış kaynakta tam Düz'ün `(L+R)/2` değeri olacak şekilde
+ölçeklenip ortaya (`centerDb` ile), ortamın %60'ı ayrı yan/arka hoparlörlere gider. Neden: eskiden ortadaki ses önlerden
+çekilip tek hoparlöre taşınıyordu; odada L ve R'deki ortak ses genlikçe toplanırken (özellikle baslarda) tek hoparlöre
+taşınan toplanmıyor. Ölçüm (`tests/Surround.Engine.Tests/ModeLoudnessTests.cs`, program sinyali, Düz'e göre güç):
+L+R+C rolle −0,2/−0,9 dB (oda toplamı −2,0/−2,7), konuma göre dağıtımda −7,4/−8,2 dB, orta hoparlörü −16 dB
+kalibre edilmiş gerçek kurulumda −14,7/−15,3 dB (Film/Oyun). Şimdi hepsinde Düz'ün üstünde.
+
+Bir yan/arka kanalı yalnızca ön kanal da çalan hoparlörlerde çalınıyorsa (ör. "Konuma göre dağıt" ile yalnız önde
+hoparlör) `UpmixLayout.Shared`: o kanala ortam değil, Düz'deki gibi L/R'nin gecikmesiz kopyası yazılır (ayrıştırılmış ve
+10 ms gecikmeli ortam aynı hoparlörde önle toplanıp tarak filtresi yapardı). Aşağıdaki oyun 3–5 ve film 2–3
+maddelerindeki "önlerde kalan pay" anlatımı bu yüzden yalnız FC ve ayrı yan/arka hoparlörler için geçerlidir.
+
 ## Uyarlanır stereo algılama (`AdaptiveUpmix`, `StereoDetector`)
 
 - 2 kanallı kaynak: upmix her zaman çalışır.

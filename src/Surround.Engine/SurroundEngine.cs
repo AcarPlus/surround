@@ -79,7 +79,7 @@ public sealed class SurroundEngine : IDisposable
                 _log?.Invoke("Katlama: " + string.Join(", ", _fold.Ops.Select(o => $"{Channels.Names[o.Src]}→{Channels.Names[o.Dst]}{(o.Gain < 0.99f ? " (-3 dB)" : "")}")));
             // A derived LFE is only produced for speakers that map LFE themselves: the bass receivers already
             // play the fronts' bass, so folding a derived LFE into them would count it twice.
-            var layout = new UpmixLayout(used, active.Any(HasLfe));
+            var layout = UpmixLayout.ForSpeakers(active.Select(MixRow));
             var upSettings = UpmixSettings.Build(_cfg.UpmixOptions);
             // Height lanes are always derived (sources carry at most 7.1), and only those some speaker plays.
             var nativeHeights = NativeHeights.Create(fs, layout);

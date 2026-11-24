@@ -35,18 +35,59 @@ public interface IStereoUpmixer
 /// </summary>
 public sealed class UpmixLayout
 {
+    private static readonly int[] Surrounds = { Channels.SL, Channels.SR, Channels.BL, Channels.BR };
+
     private readonly bool[] _available;
+    private readonly bool[] _shared;
+    private UpmixLayout? _steerable;
 
     /// <param name="available">Per logical channel (FL..TBR; a shorter list leaves the rest unavailable); LFE is ignored.</param>
     /// <param name="lfeAllowed">Some speaker maps LFE explicitly, so a derived LFE is heard (and not only folded).</param>
-    public UpmixLayout(IReadOnlyList<bool> available, bool lfeAllowed)
+    /// <param name="shared">
+    /// Per logical channel: a side/back channel that is only played by speakers which also play a front channel (e.g.
+    /// "distribute by position" with the fronts only). The decoders give it what the flat mode gives it (a plain copy of
+    /// L or R, no delay, no decorrelation): ambience rendered into it would be summed with the front in the same speaker
+    /// and comb, and would leave that speaker quieter than in the flat mode. Null = none.
+    /// </param>
+    public UpmixLayout(IReadOnlyList<bool> available, bool lfeAllowed, IReadOnlyList<bool>? shared = null)
     {
         _available = new bool[Channels.Count];
+        _shared = new bool[Channels.Count];
         for (int c = 0; c < Channels.Count && c < available.Count; c++) _available[c] = available[c];
+        if (shared != null)
+            foreach (int c in Surrounds) _shared[c] = _available[c] && c < shared.Count && shared[c];
         LfeAllowed = lfeAllowed;
+        SharedLeft = new[] { Channels.SL, Channels.BL }.Where(c => _shared[c]).ToArray();
+        SharedRight = new[] { Channels.SR, Channels.BR }.Where(c => _shared[c]).ToArray();
     }
 
     public static UpmixLayout Full { get; } = new(Enumerable.Repeat(true, Channels.Count).ToArray(), true);
+
+    /// <summary>
+    /// The layout the upmixer works for, from the unmuted speakers' mix rows: the channels they play, whether one maps
+    /// LFE, and which side/back channels only share a speaker with a front channel (see <see cref="Shared"/>).
+    /// </summary>
+    public static UpmixLayout ForSpeakers(IEnumerable<float[]> rows)
+    {
+        var list = rows.ToList();
+        var used = ChannelFold.UsedChannels(list.Select(r => (r, false)));
+        static bool Plays(float[] r, int c) => c < r.Length && r[c] != 0f;
+        static bool Front(float[] r) => Plays(r, Channels.FL) || Plays(r, Channels.FR) || Plays(r, Channels.FC);
+        var shared = new bool[Channels.Count];
+        foreach (int c in Surrounds)
+            shared[c] = used[c] && list.Where(r => Plays(r, c)).All(Front);
+        return new UpmixLayout(used, list.Any(r => Plays(r, Channels.LFE)), shared);
+    }
+
+    /// <summary>Side/back channel played only by speakers that also play a front channel (see the constructor).</summary>
+    public bool Shared(int channel) => _shared[channel];
+    /// <summary>The <see cref="Shared"/> channels of the left (SL, BL) and the right side (SR, BR).</summary>
+    public int[] SharedLeft { get; }
+    public int[] SharedRight { get; }
+
+    /// <summary>What the decoders steer into and render ambience into: this layout without the shared channels.</summary>
+    public UpmixLayout Steerable => _steerable ??= SharedLeft.Length + SharedRight.Length == 0 ? this
+        : new UpmixLayout(_available.Select((a, c) => a && !_shared[c]).ToArray(), LfeAllowed);
 
     public bool Has(int channel) => _available[channel];
     public bool LfeAllowed { get; }

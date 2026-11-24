@@ -24,17 +24,32 @@ describe('yerleşik profiller', () => {
     }
   })
 
-  it('Film: film modu, diyalog +1 dB, hafif bas/netlik/dinamik, genişletme yok', () => {
+  it('Film: film modu, diyalog +1 dB, bas/tiz rafı, sabit −1 dB ön kazanç, hafif dinamik, genişletme yok', () => {
     const p = builtinProfile('builtin-film')!
     expect(p.upmixOptions).toMatchObject({ mode: 'film', centerDb: 1, diffusion: 0.6 })
-    expect(p.processing).toMatchObject({ enabled: true, bassBoostDb: 2, clarityDb: 1.5, dynamicBoost: 0.15, ambience: 0, limiter: true, autoPreamp: true })
+    expect(p.processing).toMatchObject({ enabled: true, autoPreamp: false, preampDb: -1, dynamicBoost: 0.15, ambience: 0, limiter: true })
+    expect(p.processing.peq.map(({ type, freqHz, gainDb }) => ({ type, freqHz, gainDb }))).toEqual([
+      { type: 'lowShelf', freqHz: 120, gainDb: 3.5 },
+      { type: 'highShelf', freqHz: 5000, gainDb: 2.5 },
+    ])
     expect(p.processing.eq.every((v) => v === 0)).toBe(true)
   })
 
-  it('Oyun: oyun modu (düşük gecikme), netlik, hafif dinamik', () => {
+  it('Oyun: oyun modu (gecikmesiz), tiz ağırlıklı raf, hafif dinamik', () => {
     const p = builtinProfile('builtin-game')!
     expect(p.upmixOptions.mode).toBe('game')
-    expect(p.processing).toMatchObject({ clarityDb: 2, dynamicBoost: 0.2, ambience: 0 })
+    expect(p.processing).toMatchObject({ autoPreamp: false, preampDb: -1, dynamicBoost: 0.15, ambience: 0 })
+    expect(p.processing.peq.map((b) => b.gainDb)).toEqual([2.5, 3])
+  })
+
+  it('Film ve Oyun Düz/Müzik ile aynı güvenlik: limiter açık, ön kazanç rafların altında', () => {
+    for (const id of ['builtin-film', 'builtin-game']) {
+      const p = builtinProfile(id)!.processing
+      expect(p.limiter).toBe(true)
+      expect(Math.max(...p.peq.map((b) => b.gainDb)) + p.preampDb).toBeLessThanOrEqual(3)
+      // Kimlikler sabit: her çağrıda aynı config yazılır.
+      expect(p.peq.map((b) => b.id)).toEqual(builtinProfile(id)!.processing.peq.map((b) => b.id))
+    }
   })
 
   it('Müzik: doğrudan dağıtım (Flat yönlendirmesi) + biraz sıcaklık ve parlaklık', () => {
@@ -44,8 +59,8 @@ describe('yerleşik profiller', () => {
   })
 
   it('eski sürüm kayıtlı yerleşik kopya yeni tanımla değişir; güncel sürüm korunur', () => {
-    const old = { ...builtinProfile('builtin-game')!, rev: undefined, processing: { ...builtinProfile('builtin-game')!.processing, clarityDb: 4 } }
-    expect(normalizeProfiles([old]).find((p) => p.id === 'builtin-game')!.processing.clarityDb).toBe(2)
+    const old = { ...builtinProfile('builtin-game')!, rev: 2, processing: { ...builtinProfile('builtin-game')!.processing, clarityDb: 4 } }
+    expect(normalizeProfiles([old]).find((p) => p.id === 'builtin-game')!.processing.clarityDb).toBe(0)
     const mine = { ...builtinProfile('builtin-game')!, processing: { ...builtinProfile('builtin-game')!.processing, clarityDb: 3 } }
     expect(normalizeProfiles([mine]).find((p) => p.id === 'builtin-game')!.processing.clarityDb).toBe(3)
   })

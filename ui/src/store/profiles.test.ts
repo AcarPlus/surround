@@ -31,7 +31,7 @@ describe('profil mağazası', () => {
     expect(st().activeProfileId).toBe('builtin-game')
     expect(st().upmix).toBe(true)
     expect(st().upmixOptions.mode).toBe('game')
-    expect(st().processing.dynamicBoost).toBe(0.2)
+    expect(st().processing.dynamicBoost).toBe(0.15)
     expect(selectProfileModified(st())).toBe(false)
   })
 

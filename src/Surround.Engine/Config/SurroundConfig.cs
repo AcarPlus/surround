@@ -259,7 +259,20 @@ public sealed class SurroundConfig
                 int c = Channels.IndexOf(k);
                 if (c >= 0 && (float)v != 0f) used.Add(c);
             }
-        copy.Extra = new() { ["usedChannels"] = JsonSerializer.SerializeToElement(used.Select(c => Channels.Names[c]).ToArray()) };
+        // Which side/back channels only share a speaker with a front decides how the decoders fill them (UpmixLayout.Shared).
+        var rows = copy.ForRouting().Speakers.Where(s => !s.Mute).Select(s =>
+        {
+            var r = new float[Channels.Count];
+            foreach (var (k, v) in s.Source) { int c = Channels.IndexOf(k); if (c >= 0) r[c] = (float)v; }
+            return r;
+        });
+        var upLayout = Dsp.UpmixLayout.ForSpeakers(rows);
+        var shared = Enumerable.Range(0, Channels.Count).Where(upLayout.Shared).Select(c => Channels.Names[c]).ToArray();
+        copy.Extra = new()
+        {
+            ["usedChannels"] = JsonSerializer.SerializeToElement(used.Select(c => Channels.Names[c]).ToArray()),
+            ["sharedChannels"] = JsonSerializer.SerializeToElement(shared),
+        };
         copy.Processing = new();
         copy.UpmixOptions = new() { Mode = copy.UpmixOptions.IsGame ? UpmixOptions.Game : copy.UpmixOptions.IsDirect ? UpmixOptions.Direct : UpmixOptions.Film };
         copy.Source.Extra = null;

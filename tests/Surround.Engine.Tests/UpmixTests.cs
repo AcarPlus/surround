@@ -101,12 +101,23 @@ public class UpmixerTests
 
     [Theory]
     [MemberData(nameof(Modes))]
-    public void CenteredMonoGoesToCenter(string mode)
+    public void CenteredMonoAddsTheFlatCenterAndKeepsTheFronts(string mode)
     {
+        // As the flat mode: FL = L, FR = R and the center gets (L+R)/2. Moving it out of the fronts instead made film
+        // and game thinner and up to 6 dB quieter than the flat mode (see ModeLoudnessTests).
         var m = Up.Noise(N, 4);
-        var lg = Up.Run(Up.Make(mode), m, m);
-        double fc = Up.Energy(lg, Channels.FC, Warm), all = Up.Energy(lg, Up.NonLfe, Warm);
-        Assert.True(fc > 0.95 * all, $"{mode}: FC share {fc / all:P1}");
+        var up = Up.Make(mode);
+        var lg = Up.Run(up, m, m);
+        int lat = up.LatencyFrames;
+        double fc = Up.Energy(lg, Channels.FC, Warm), mE = Up.Energy(m, Warm - lat);
+        Assert.InRange(10 * Math.Log10(fc / mE), -0.5, 0.5);
+        foreach (int ch in new[] { Channels.FL, Channels.FR })
+        {
+            double err = 0;
+            for (int f = Warm; f < N; f++) { double d = lg[f * Up.Ch + ch] - m[f - lat]; err += d * d; }
+            Assert.True(err < mE * 1e-6, $"{mode}: {Channels.Names[ch]} is not the input");
+        }
+        Assert.True(Up.Energy(lg, Up.Surrounds, Warm) < 0.02 * fc, $"{mode}: centered sound in the surrounds");
     }
 
     [Theory]
@@ -115,7 +126,7 @@ public class UpmixerTests
     {
         var lg = Up.Run(Up.Make(mode), Up.Noise(N, 5), Up.Noise(N, 6));
         double sur = Up.Energy(lg, Up.Surrounds, Warm), all = Up.Energy(lg, Up.NonLfe, Warm);
-        Assert.True(sur > 0.35 * all, $"{mode}: surround share {sur / all:P1}");
+        Assert.True(sur > 0.25 * all, $"{mode}: surround share {sur / all:P1}");
         foreach (var c in Up.Surrounds) Assert.True(Up.Energy(lg, c, Warm) > 0.05 * all, $"{mode}: {Channels.Names[c]} empty");
         Assert.True(Up.Energy(lg, Channels.FC, Warm) < 0.1 * all, $"{mode}: FC from uncorrelated");
     }
@@ -127,7 +138,7 @@ public class UpmixerTests
     [InlineData("film", 0.0)]
     [InlineData("film", 0.5)]
     [InlineData("film", 1.0)]
-    public void PreservesEnergy(string mode, double correlated)
+    public void NeverQuieterThanTheInput(string mode, double correlated)
     {
         // Mix of a centered (correlated) part, a left-panned part and independent ambience.
         var c = Up.Noise(N, 7); var a1 = Up.Noise(N, 8); var a2 = Up.Noise(N, 9); var p = Up.Noise(N, 10);
@@ -139,8 +150,12 @@ public class UpmixerTests
             r[i] = k * (0.7f * c[i] + 0.1f * p[i]) + q * a2[i];
         }
         var lg = Up.Run(Up.Make(mode), l, r);
+        // The fronts carry the input; the center and the surrounds add to it (at most the flat mode's center, +1.8 dB,
+        // plus the surround ambience).
         double outE = Up.Energy(lg, Up.NonLfe, Warm), inE = Up.Energy(l, Warm) + Up.Energy(r, Warm);
-        Assert.InRange(10 * Math.Log10(outE / inE), -1.0, 1.0);
+        Assert.InRange(10 * Math.Log10(outE / inE), 0.5, 3.5);
+        double fronts = Up.Energy(lg, new[] { Channels.FL, Channels.FR }, Warm);
+        Assert.InRange(10 * Math.Log10(fronts / inE), -0.1, 0.1);
     }
 
     [Theory]
@@ -151,16 +166,18 @@ public class UpmixerTests
         var up = Up.Make(mode);
         up.Update(UpmixSettings.Build(new UpmixOptions { CenterDb = -6 }));
         var lg = Up.Run(up, m, m);
-        double ratio = Up.Energy(lg, Up.NonLfe, Warm) / (2 * Up.Energy(m, Warm));
+        // The center (the flat mode's (L+R)/2 at 0 dB) follows the level; the fronts keep the input.
+        double ratio = Up.Energy(lg, Channels.FC, Warm) / Up.Energy(m, Warm);
         Assert.InRange(10 * Math.Log10(ratio), -6.5, -5.5);
+        Assert.InRange(10 * Math.Log10(Up.Energy(lg, Channels.FL, Warm) / Up.Energy(m, Warm)), -0.1, 0.1);
 
-        // Same on a layout without FC (dialog then plays from FL/FR).
+        // A layout without FC: nothing to scale, the dialog plays from FL/FR as it is.
         var up2 = Up.Make(mode, new UpmixLayout(Up.FrontsAndRears, false));
         up2.Update(UpmixSettings.Build(new UpmixOptions { CenterDb = -6 }));
         var lg2 = Up.Run(up2, m, m);
         Assert.Equal(0, Up.Energy(lg2, Channels.FC, Warm));
-        double ratio2 = Up.Energy(lg2, Up.NonLfe, Warm) / (2 * Up.Energy(m, Warm));
-        Assert.InRange(10 * Math.Log10(ratio2), -6.5, -5.5);
+        double ratio2 = Up.Energy(lg2, new[] { Channels.FL, Channels.FR }, Warm) / (2 * Up.Energy(m, Warm));
+        Assert.InRange(10 * Math.Log10(ratio2), -0.1, 0.1);
     }
 
     [Theory]
@@ -176,7 +193,7 @@ public class UpmixerTests
         foreach (var c in new[] { Channels.FC, Channels.SL, Channels.SR, Channels.LFE })
             Assert.Equal(0, Up.Energy(lg, c, Warm));
         double rear = Up.Energy(lg, new[] { Channels.BL, Channels.BR }, Warm), all = Up.Energy(lg, Up.NonLfe, Warm);
-        Assert.True(rear > 0.35 * all, $"{mode}: rear share {rear / all:P1}");
+        Assert.True(rear > 0.25 * all, $"{mode}: rear share {rear / all:P1}");
     }
 
     [Theory]
@@ -192,10 +209,43 @@ public class UpmixerTests
             Assert.Equal(0, Up.Energy(lg, c, Warm));
         double br = Up.Energy(lg, Channels.BR, Warm), fl = Up.Energy(lg, Channels.FL, Warm), fr = Up.Energy(lg, Channels.FR, Warm);
         Assert.True(br > 0.25 * (fr + br), $"{mode}: right ambience not in BR ({br / (fr + br):P1})");
-        // Left keeps its whole ambience in FL, right shares it with BR.
-        Assert.True(fl > 1.3 * fr, $"{mode}: FL {Sig.Db(Math.Sqrt(fl / fr)):0.0} dB over FR");
-        double outE = Up.Energy(lg, Up.NonLfe, Warm), inE = Up.Energy(l, Warm) + Up.Energy(r, Warm);
-        Assert.InRange(10 * Math.Log10(outE / inE), -1.0, 1.0);
+        // Both fronts keep their input; only the right side adds its ambience in BR.
+        Assert.InRange(10 * Math.Log10(fl / Up.Energy(l, Warm)), -0.2, 0.2);
+        Assert.InRange(10 * Math.Log10(fr / Up.Energy(r, Warm)), -0.2, 0.2);
+    }
+
+    [Theory]
+    [MemberData(nameof(Modes))]
+    public void SurroundsSharingAFrontSpeakerGetPlainCopies(string mode)
+    {
+        // "Distribute by position" with three fronts: the left speaker also plays SL and BL. Ambience rendered there
+        // (decorrelated, 10 ms later) would comb with the front in the same cone, and the speaker would be quieter
+        // than in the flat mode, so these channels get exactly what the flat mode gives them.
+        float[] Row(params int[] chs) { var r = new float[Up.Ch]; foreach (var c in chs) r[c] = 1; return r; }
+        var layout = UpmixLayout.ForSpeakers(new[]
+        {
+            Row(Channels.FL, Channels.SL, Channels.BL), Row(Channels.FR, Channels.SR, Channels.BR), Row(Channels.FC),
+        });
+        Assert.True(layout.Shared(Channels.SL) && layout.Shared(Channels.BR));
+        Assert.False(layout.Steerable.Has(Channels.SL));
+        var l = Up.Noise(N, 40); var r = Up.Noise(N, 41);
+        var up = Up.Make(mode, layout);
+        var lg = Up.Run(up, l, r);
+        int lat = up.LatencyFrames;
+        foreach (var (ch, src) in new[] { (Channels.SL, l), (Channels.BL, l), (Channels.SR, r), (Channels.BR, r) })
+        {
+            double err = 0;
+            for (int f = Warm; f < N; f++) { double d = lg[f * Up.Ch + ch] - src[f - lat]; err += d * d; }
+            Assert.True(err < Up.Energy(src, Warm) * 1e-6, $"{mode}: {Channels.Names[ch]} is not a copy");
+        }
+
+        // Real side/back speakers (rows without a front) are separate: they get the decorrelated ambience.
+        var five = UpmixLayout.ForSpeakers(new[]
+        {
+            Row(Channels.FL), Row(Channels.FR), Row(Channels.FC), Row(Channels.SL, Channels.BL), Row(Channels.SR, Channels.BR),
+        });
+        Assert.False(five.Shared(Channels.SL));
+        Assert.Same(five, five.Steerable);
     }
 
     [Theory]
@@ -353,7 +403,7 @@ public class AdaptiveUpmixTests
         for (int f = 0; f < n; f++) lg[f * Ch + Channels.FL] = lg[f * Ch + Channels.FR] = m[f];
         Run(a, lg);
         Assert.Equal(UpmixState.Stereo, a.State);
-        Assert.True(Up.Energy(lg, Channels.FC, n / 2) > 0.9 * Up.Energy(lg, Up.NonLfe, n / 2));
+        Assert.InRange(Up.Energy(lg, Channels.FC, n / 2) / Up.Energy(lg, Channels.FL, n / 2), 0.85, 1.15);
 
         // Real multichannel content appears on SL: native within 50 ms, SL passes through (delayed by the latency).
         var sl = Up.Noise(n, 22);

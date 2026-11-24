@@ -9,15 +9,20 @@ namespace Surround.Engine.Dsp;
 /// <item>Decomposition: rotating (L,R) onto the principal direction gives s (dominant + some ambience) and a
 /// (ambience only). With covariance eigenvalues λ1 ≥ λ2, the primary is s·√(1-λ2/λ1); the rest of s and all of a are
 /// rotated back into an ambient L/R pair. The rotation is orthonormal, so energy is preserved sample by sample.</item>
+/// <item>FL/FR keep the original L/R (the "bed", as in the flat mode): extracting the center out of them made film and
+/// game sound thinner and up to 6 dB quieter than the flat mode, because a sound shared by L and R adds up in the room
+/// (in amplitude, fully so in the bass) while one moved into a single center speaker does not.</item>
 /// <item>The primary is panned with constant power between the two neighboring available speakers of the ring
-/// FL 0°, FC 90°, FR 180°, SR 210°, BR 250°, BL 290°, SL 330°. Hard-left (φ = 0) stays in FL, centered dialog goes
-/// to FC.</item>
-/// <item>Ambient: 40 % of its power stays in FL/FR, the rest goes to the side/back channels through complementary
-/// all-pass decorrelators and a 10 ms precedence delay (<see cref="SurroundRenderer"/>).</item>
+/// FL 0°, FC 90°, FR 180°, SR 210°, BR 250°, BL 290°, SL 330°; its FC share, scaled so that a centered source gets
+/// exactly the flat mode's (L+R)/2, goes to the center; its side/back shares go to the separate surround speakers.
+/// Hard-left (φ = 0) adds nothing to FC.</item>
+/// <item>Ambient: 60 % of its power goes to the separate side/back speakers through complementary all-pass
+/// decorrelators and a 10 ms precedence delay (<see cref="SurroundRenderer"/>). Side/back channels that only share a
+/// speaker with a front (<see cref="UpmixLayout.Shared"/>) get plain copies of L/R, as in the flat mode.</item>
 /// <item>Heights (only lanes some speaker plays): the high-passed ambient pair, additively, through their own
 /// decorrelators (<see cref="HeightRenderer"/>).</item>
 /// </list>
-/// Fronts get no added latency.
+/// Nothing gets added latency.
 /// </summary>
 public sealed class GameUpmixer : IStereoUpmixer
 {
@@ -30,12 +35,16 @@ public sealed class GameUpmixer : IStereoUpmixer
         (Channels.BR, 250), (Channels.BL, 290), (Channels.SL, 330),
     };
 
-    private readonly Ring _full, _layout;
+    /// <summary>Scales the extracted center so a centered source gets the flat mode's (L+R)/2 (s = √2·x there).</summary>
+    internal const float CenterScale = 0.70710678f;
+
+    private readonly Ring _layout;
+    private readonly int[] _shL, _shR;
     private readonly SurroundRenderer _sur;
     private readonly HeightRenderer? _hgt;
     private readonly LinkwitzRiley _lfeLp;
     private readonly bool _lfeAllowed;
-    private readonly float _hpA, _covK, _gainK, _afL, _afR, _asL, _asR;
+    private readonly float _hpA, _covK, _gainK, _asL, _asR;
     private volatile UpmixSettings _settings = UpmixSettings.Default;
     private float _hl, _hr, _xl, _xr, _pLL, _pRR, _pLR;
     private float _cg = 1f, _sg = 1f, _lg = 1f, _hg = UpmixSettings.Default.HeightGain;
@@ -43,9 +52,11 @@ public sealed class GameUpmixer : IStereoUpmixer
     public GameUpmixer(int sampleRate, UpmixLayout? layout = null)
     {
         layout ??= UpmixLayout.Full;
-        _full = new Ring(RingNodes);
-        _layout = new Ring(RingNodes.Where(n => n.Ch is Channels.FL or Channels.FR || layout.Has(n.Ch)).ToArray());
-        _sur = new SurroundRenderer(sampleRate, layout);
+        var steer = layout.Steerable;
+        _layout = new Ring(RingNodes.Where(n => n.Ch is Channels.FL or Channels.FR || steer.Has(n.Ch)).ToArray());
+        _shL = layout.SharedLeft;
+        _shR = layout.SharedRight;
+        _sur = new SurroundRenderer(sampleRate, steer);
         _hgt = HeightRenderer.Create(sampleRate, layout);
         _lfeLp = LinkwitzRiley.LowPass(sampleRate, UpmixTuning.LfeHz);
         _lfeAllowed = layout.LfeAllowed;
@@ -54,8 +65,8 @@ public sealed class GameUpmixer : IStereoUpmixer
         _hpA = (float)(rc / (rc + 1.0 / sampleRate));
         _covK = (float)(1 - Math.Exp(-1 / (SteeringSeconds * sampleRate)));
         _gainK = (float)(1 - Math.Exp(-1 / (UpmixTuning.GainSmoothSeconds * sampleRate)));
-        (_afL, _asL) = UpmixTuning.AmbientSplit(layout.LeftSurround);
-        (_afR, _asR) = UpmixTuning.AmbientSplit(layout.RightSurround);
+        (_, _asL) = UpmixTuning.AmbientSplit(steer.LeftSurround);
+        (_, _asR) = UpmixTuning.AmbientSplit(steer.RightSurround);
     }
 
     public int LatencyFrames => 0;
@@ -67,7 +78,6 @@ public sealed class GameUpmixer : IStereoUpmixer
         var st = _settings;
         _sur.Configure(st);
         float lfeTarget = _lfeAllowed ? st.LfeGain : 0f;
-        Span<float> lev = stackalloc float[Ch];
 
         for (int f = 0; f < frames; f++)
         {
@@ -106,12 +116,7 @@ public sealed class GameUpmixer : IStereoUpmixer
             float deg = MathF.Atan2(sin2, cos2) * (180f / MathF.PI);
             if (deg < 0f) deg += 360f;
 
-            // Level controls follow the full 7.1 position, so they work even when FC or the sides are folded away.
-            lev[Channels.FL] = lev[Channels.FR] = lev[Channels.LFE] = 1f;
-            lev[Channels.FC] = _cg;
-            lev[Channels.SL] = lev[Channels.SR] = lev[Channels.BL] = lev[Channels.BR] = _sg;
-            _full.Pan(deg, out int f0, out float fg0, out int f1, out float fg1);
-            float pm = kp * MathF.Sqrt(fg0 * fg0 * lev[f0] * lev[f0] + fg1 * fg1 * lev[f1] * lev[f1]);
+            float ps = kp * s;
 
             // The eigenvector sign is ambiguous (e and -e); s flips where cos(φ/2) or sin(φ/2) crosses zero, i.e. at
             // hard right (180°) and hard left (0°). Right-hand nodes take R's polarity, left-hand nodes L's, so every
@@ -119,30 +124,29 @@ public sealed class GameUpmixer : IStereoUpmixer
             float polR = se < 0f ? -1f : 1f;
             var o = output.Slice(b, Ch);
             o.Clear();
-            float gfl = 0f, gfr = 0f, sl = 0f, bl = 0f, sr = 0f, br = 0f;
+            float sl = 0f, bl = 0f, sr = 0f, br = 0f;
             _layout.Pan(deg, out int c0, out float g0, out int c1, out float g1);
-            Route(o, c0, g0, pm * s, polR, ref gfl, ref gfr, ref sl, ref bl, ref sr, ref br);
-            Route(o, c1, g1, pm * s, polR, ref gfl, ref gfr, ref sl, ref bl, ref sr, ref br);
+            Route(o, c0, g0, ps, polR, ref sl, ref bl, ref sr, ref br);
+            Route(o, c1, g1, ps, polR, ref sl, ref bl, ref sr, ref br);
+            o[Channels.FC] *= _cg * CenterScale;
 
-            // FL/FR = steered primary + front ambient share. Both contain s; their coefficients are combined as a
-            // power sum so the coherent overlap does not add energy (s and a are uncorrelated by construction).
-            float afkL = _afL * ka, afkR = _afR * ka;
-            o[Channels.FL] = MathF.Sqrt(gfl * gfl * pm * pm + afkL * afkL * ce * ce) * s - _afL * se * a;
-            o[Channels.FR] = polR * MathF.Sqrt(gfr * gfr * pm * pm + afkR * afkR * se * se) * s + _afR * ce * a;
-            _sur.Render(al * _asL, ar * _asR, _sg, sl, bl, sr, br, o);
+            o[Channels.FL] = l;
+            o[Channels.FR] = r;
+            _sur.Render(al * _asL, ar * _asR, _sg, sl * _sg, bl * _sg, sr * _sg, br * _sg, o);
+            foreach (int c in _shL) o[c] = l;
+            foreach (int c in _shR) o[c] = r;
             _hgt?.Render(al, ar, _hg, o);
             o[Channels.LFE] = _lfeLp.Process(0.5f * (l + r)) * _lg;
         }
     }
 
-    /// <summary>Collects FL/FR gains, sends side/back to the delayed surround bus and writes FC directly.</summary>
+    /// <summary>Sends side/back shares to the delayed surround bus and writes FC directly; FL/FR carry the bed.</summary>
     private static void Route(Span<float> o, int ch, float g, float ps, float polR,
-        ref float gfl, ref float gfr, ref float sl, ref float bl, ref float sr, ref float br)
+        ref float sl, ref float bl, ref float sr, ref float br)
     {
         switch (ch)
         {
-            case Channels.FL: gfl += g; break;
-            case Channels.FR: gfr += g; break;
+            case Channels.FL: case Channels.FR: break;
             case Channels.SL: sl += g * ps; break;
             case Channels.BL: bl += g * ps; break;
             case Channels.SR: sr += g * ps * polR; break;

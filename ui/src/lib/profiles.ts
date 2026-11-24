@@ -21,8 +21,29 @@ export const MAX_PROFILE_NAME = 24
  * eski Film/Oyun/Müzik kopyaları yeni tanımlarla değişir.
  * 2 (0.5.9): Flat'in temiz zinciri taban, üstüne küçük dokunuşlar. Eski tanımlar (gülümseme EQ'su + bas + netlik +
  * dinamik makeup + %30 genişlik) yüksek masterlarda tepeleri +1,4…+4,9 dBFS'e çıkarıp limiter'ı sürekli çalıştırıyordu.
+ * 3 (0.7.0): Film ve Oyun, Düz/Müzik'ten zayıf ve ince geliyordu (motor ortayı ön hoparlörlerden çekiyordu; ölçümler
+ * tests/Surround.Engine.Tests/ModeLoudnessTests.cs). Motor artık önleri olduğu gibi bırakıyor; profiller üstüne bas ve
+ * tiz rafı ekler. Otomatik ön kazanç rafların tamamını ortadan keserdi (orta frekanslar Düz'ün altında kalırdı): sabit
+ * −1 dB ön kazanç + hafif dinamik; ender tepeleri cihaz limiter'ı tutar.
  */
-export const BUILTIN_PROFILES_REV = 2
+export const BUILTIN_PROFILES_REV = 3
+
+/** Film ve Oyun'un canlılığı: 120 Hz bas rafı + 5 kHz tiz rafı (C# testindeki `ModeChain.Lively` ile aynı). */
+const lively = (bassDb: number, trebleDb: number, id: string): Processing => {
+  const p = normalizeProcessing({
+    enabled: true,
+    autoPreamp: false,
+    preampDb: -1,
+    limiter: true,
+    dynamicBoost: 0.15,
+    peq: [
+      { id: `${id}-bass`, type: 'lowShelf', freqHz: 120, gainDb: bassDb, q: 0.7 },
+      { id: `${id}-treble`, type: 'highShelf', freqHz: 5000, gainDb: trebleDb, q: 0.7 },
+    ],
+  })
+  p.preset = matchSoundPreset(p)
+  return p
+}
 
 const gentle = (v: Partial<Processing>): Processing => {
   const p = normalizeProcessing({ enabled: true, autoPreamp: true, limiter: true, ...v })
@@ -34,23 +55,23 @@ const gentle = (v: Partial<Processing>): Processing => {
 export function builtinProfiles(): Profile[] {
   return [
     {
-      // Diyalog önde: film modu orta kanalı ayıklar (+1 dB), hafif bas ve netlik, sessiz konuşmayı biraz toparlayan
-      // hafif dinamik; ortam genişletme yok, arka dağınıklık azaltılmış (daha az "fazlı").
+      // Dolgun ve canlı: önler olduğu gibi, diyalog ortaya ayrıca (+1 dB); bas +3,5 / tiz +2,5 dB raf, sessiz konuşmayı
+      // biraz toparlayan hafif dinamik; arka dağınıklık azaltılmış (daha az "fazlı").
       id: 'builtin-film',
       name: 'Film',
       builtin: true,
       rev: BUILTIN_PROFILES_REV,
-      processing: gentle({ bassBoostDb: 2, clarityDb: 1.5, dynamicBoost: 0.15 }),
+      processing: lively(3.5, 2.5, 'film'),
       upmix: true,
       upmixOptions: normalizeUpmixOptions({ mode: 'film', centerDb: 1, diffusion: 0.6 }),
     },
     {
-      // Düşük gecikme (oyun modu matris çözücü) ve ayrıntı: ayak sesi/konum için netlik, ölçülü bas.
+      // Gecikmesiz (oyun modu matris çözücü) ve canlı: ayak sesi/konum için tiz +3 dB, bas +2,5 dB raf.
       id: 'builtin-game',
       name: 'Oyun',
       builtin: true,
       rev: BUILTIN_PROFILES_REV,
-      processing: gentle({ bassBoostDb: 1, clarityDb: 2, dynamicBoost: 0.2 }),
+      processing: lively(2.5, 3, 'game'),
       upmix: true,
       upmixOptions: normalizeUpmixOptions({ mode: 'game', diffusion: 0.6 }),
     },

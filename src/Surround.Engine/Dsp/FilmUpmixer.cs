@@ -8,10 +8,15 @@ namespace Surround.Engine.Dsp;
 /// <item>Primary/ambient decomposition: the principal eigenvector v = (cos θ, sin θ·e^-iΔ) of the covariance
 /// (Δ = inter-channel phase) gives s = vᴴx and a = v⊥ᴴx; the primary is s·√(1-λ2/λ1) and the rest is rotated back
 /// into an ambient L/R pair. Unitary, so energy is preserved bin by bin.</item>
-/// <item>The in-phase part of the primary (weight max(0, cos Δ)) is panned by its panning index 2θ into FL/FC/FR with
-/// constant power (center extraction); the out-of-phase part stays where it was in FL/FR. Hard-left stays in FL.</item>
-/// <item>Ambient: 40 % of the power in FL/FR, the rest back to the time domain and through the complementary all-pass
-/// decorrelators into SL/SR and BL/BR (<see cref="SurroundRenderer"/>, 10 ms precedence delay).</item>
+/// <item>FL/FR keep the original L/R (the "bed", as in the flat mode): extracting the center out of them made the film
+/// mode thinner and up to 6 dB quieter than the flat mode (a sound shared by L and R adds up in the room, fully so in
+/// the bass; moved into one center speaker it does not).</item>
+/// <item>FC: the in-phase part of the primary (weight max(0, cos Δ)) panned by its panning index 2θ over FL/FC/FR with
+/// constant power; its FC share, scaled so a centered source gets exactly the flat mode's (L+R)/2. Hard-left adds
+/// nothing to FC.</item>
+/// <item>Ambient: 60 % of its power back to the time domain and through the complementary all-pass decorrelators into
+/// the separate SL/SR and BL/BR speakers (<see cref="SurroundRenderer"/>, 10 ms precedence delay). Side/back channels
+/// that only share a speaker with a front (<see cref="UpmixLayout.Shared"/>) get plain copies of L/R.</item>
 /// <item>Heights (only lanes some speaker plays): the same time-domain ambient pair, high-passed, additively through
 /// their own decorrelators (<see cref="HeightRenderer"/>).</item>
 /// <item>LFE: LR4 low-pass (120 Hz) of the mid, delayed to line up with the STFT path.</item>
@@ -36,8 +41,9 @@ public sealed class FilmUpmixer : IStereoUpmixer
     private readonly float[][] _yr, _yi; // per output, bins 0..N/2
     private readonly float[] _ola;   // Outs × N
     private readonly float[] _out;   // Outs × H, the last completed hop
-    private readonly float _alpha, _gainK, _cgK, _afL, _afR, _asL, _asR;
+    private readonly float _alpha, _gainK, _cgK, _asL, _asR;
     private readonly bool _hasFc, _lfeAllowed;
+    private readonly int[] _shL, _shR;
     private readonly SurroundRenderer _sur;
     private readonly HeightRenderer? _hgt;
     private readonly LinkwitzRiley _lfeLp;
@@ -68,10 +74,13 @@ public sealed class FilmUpmixer : IStereoUpmixer
         _alpha = (float)Math.Exp(-_h / (CovSeconds * sampleRate));
         _gainK = (float)(1 - Math.Exp(-1 / (UpmixTuning.GainSmoothSeconds * sampleRate)));
         _cgK = (float)(1 - Math.Exp(-_h / (UpmixTuning.GainSmoothSeconds * sampleRate)));
+        var steer = layout.Steerable;
         _hasFc = layout.Has(Channels.FC);
-        (_afL, _asL) = UpmixTuning.AmbientSplit(layout.LeftSurround);
-        (_afR, _asR) = UpmixTuning.AmbientSplit(layout.RightSurround);
-        _sur = new SurroundRenderer(sampleRate, layout);
+        (_, _asL) = UpmixTuning.AmbientSplit(steer.LeftSurround);
+        (_, _asR) = UpmixTuning.AmbientSplit(steer.RightSurround);
+        _shL = layout.SharedLeft;
+        _shR = layout.SharedRight;
+        _sur = new SurroundRenderer(sampleRate, steer);
         _hgt = HeightRenderer.Create(sampleRate, layout);
         _lfeLp = LinkwitzRiley.LowPass(sampleRate, UpmixTuning.LfeHz);
         _lfeDelay = new DelayLine(_n);
@@ -113,6 +122,8 @@ public sealed class FilmUpmixer : IStereoUpmixer
             o[Channels.FC] = fc;
             o[Channels.LFE] = _lfeDelay.Process(_lfeLp.Process(0.5f * (l + r))) * _lg;
             _sur.Render(al * _asL, ar * _asR, _sg, 0, 0, 0, 0, o);
+            foreach (int c in _shL) o[c] = fl;
+            foreach (int c in _shR) o[c] = fr;
             if (_hgt != null) _hgt.Render(al, ar, _hg, o);
             else o.Slice(Channels.SourceCount).Clear();
         }
@@ -143,7 +154,6 @@ public sealed class FilmUpmixer : IStereoUpmixer
         // Center level changes once per frame; the overlap-add crossfades it.
         _cgFrame += (centerTarget - _cgFrame) * _cgK;
         if (MathF.Abs(centerTarget - _cgFrame) < 1e-4f) _cgFrame = centerTarget;
-        float cg2m1 = _cgFrame * _cgFrame - 1f;
 
         for (int k = 0; k < bins; k++)
         {
@@ -189,29 +199,14 @@ public sealed class FilmUpmixer : IStereoUpmixer
             float gL = rho * panL + (1 - rho) * pasL, gC = rho * panC, gR = rho * panR + (1 - rho) * pasR;
             float norm = MathF.Sqrt(gL * gL + gC * gC + gR * gR);
             if (norm > 0f) { gL /= norm; gC /= norm; gR /= norm; }
-            // Center level by the full-layout center share, so it also works when FC is folded into FL/FR.
-            float m = MathF.Sqrt(MathF.Max(0f, 1f + cg2m1 * gC * gC));
-            if (!_hasFc)
-            {
-                // Without FC the primary stays a plain stereo pan: FL/FR get exactly the primary parts of L/R.
-                gL = pasL; gC = 0f; gR = pasR;
-            }
-            float pm = kp * m;
-
-            // FL/FR = primary + front ambient share; both contain s, so their coefficients add as powers
-            // (s and a are uncorrelated by construction) instead of coherently.
-            float afkL = _afL * ka, afkR = _afR * ka;
-            float cL = MathF.Sqrt(gL * gL * pm * pm + afkL * afkL * ce * ce);
-            float cRr = MathF.Sqrt(gR * gR * pm * pm + afkR * afkR * se * se);
-            _yr[0][k] = cL * sr - _afL * se * ar; _yi[0][k] = cL * si - _afL * se * ai;
-            // FR in R's phase: conj(u)·(cR·s + af·ce·a).
-            float qR = cRr * sr + _afR * ce * ar, qI = cRr * si + _afR * ce * ai;
-            _yr[1][k] = ur * qR + ui * qI; _yi[1][k] = ur * qI - ui * qR;
+            // FL/FR: the bed, unchanged (the analysis/synthesis pair reconstructs it exactly, time-aligned with FC).
+            _yr[0][k] = lr; _yi[0][k] = li;
+            _yr[1][k] = rr; _yi[1][k] = ri;
             // FC half-way between the two phases: sqrt(conj u).
             float hr = MathF.Sqrt(MathF.Max(0f, 0.5f * (1 + ur)));
             float hi = MathF.Sqrt(MathF.Max(0f, 0.5f * (1 - ur)));
             if (ui > 0f) hi = -hi;
-            float gc = gC * pm;
+            float gc = gC * kp * _cgFrame * GameUpmixer.CenterScale;
             _yr[2][k] = gc * (hr * sr - hi * si); _yi[2][k] = gc * (hr * si + hi * sr);
             _yr[3][k] = alr; _yi[3][k] = ali;
             _yr[4][k] = arr; _yi[4][k] = ari;

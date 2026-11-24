@@ -290,6 +290,9 @@ public class LiveMixTests
         Assert.NotEqual(fp, With(c => c.Speakers[0].Source["TFL"] = 0.5).EngineFingerprint());
         // A channel that is no longer played by anyone.
         Assert.NotEqual(fp, With(c => c.Speakers[2].Source.Remove("SR")).EngineFingerprint());
+        // A back speaker stops (or starts) also playing a front channel: its back channels change from plain copies of
+        // the fronts to decorrelated ambience (UpmixLayout.Shared), the same set of channels stays in use.
+        Assert.NotEqual(fp, With(c => c.Speakers[2].Source.Remove("FC")).EngineFingerprint());
         // LFE in a bass receiver's row (bass management).
         Assert.NotEqual(fp, With(c => c.Speakers[3].Source = new() { ["FL"] = 0.1 }).EngineFingerprint());
         Assert.NotEqual(fp, With(c => c.Speakers[1].Mute = true).EngineFingerprint());
