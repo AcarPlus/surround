@@ -189,6 +189,23 @@ public sealed partial class SurroundBackend : IDisposable
             // Always persist: the UI edits continuously and the document is a draft until started.
             if (cfg is null) return null;
             await Task.Run(() => FillDeviceNames(cfg));
+
+            // Fast path for continuous edits (a speaker dragged on the room map, a slider): the running engine already
+            // plays this audio graph on these devices, so no device probing is needed, the change is applied in place
+            // (gliding, no restart, no dropout) and the file is written once the edits pause.
+            // Started without absent devices (e.g. the Bluetooth speaker is off): the engine plays the config minus those
+            // devices; their return is watched by the recovery loop, so the last known absent set is used, not a new probe.
+            if (_host.IsRunning && profileId is null && _recovery.State == RecoveryState.Running
+                && LiveTarget(cfg) is { } live && live.EngineFingerprint() == _runningFingerprint)
+            {
+                _store.SaveSoon(cfg);
+                ConfigSaved?.Invoke(cfg);
+                var configErrors = ConfigValidator.Validate(cfg);
+                if (configErrors.Count > 0) throw new BridgeException(configErrors);
+                await ApplyLiveAsync(live);
+                return null;
+            }
+
             _store.Save(cfg);
             ConfigSaved?.Invoke(cfg);
             // Started "without the missing devices": the engine keeps following the saved config minus what is still absent.
@@ -233,13 +250,45 @@ public sealed partial class SurroundBackend : IDisposable
                 else
                 {
                     // Same audio graph: processing and speaker EQ are swapped in place, no dropout.
-                    try { await _host.UpdateLiveAsync(cfg); }
-                    catch (Exception ex) { throw new BridgeException($"Ses ayarları uygulanamadı: {ex.Message}"); }
+                    await ApplyLiveAsync(cfg);
                 }
             }
             return null;
         }
         finally { _gate.Release(); }
+    }
+
+    /// <summary>
+    /// What the running engine would play for <paramref name="cfg"/>: the config itself, or (started without absent
+    /// devices) the config minus the devices still left out. Null when that leaves nothing to play.
+    /// </summary>
+    private SurroundConfig? LiveTarget(SurroundConfig cfg)
+    {
+        if (!_degraded) return cfg;
+        var absent = _recovery.RejoinIds;
+        if (absent.Count == 0) return cfg;
+        return DeviceRecovery.WithoutMissing(cfg, absent.Select(id => new DeviceProbe(id, null, false)).ToList(), out _);
+    }
+
+    /// <summary>
+    /// Under <c>_gate</c>: applies a same-graph change to the running engine in place. Should the engine have to restart
+    /// for it (a delay beyond the delay lines' headroom) and fail on both the new and the previous config, it is stopped:
+    /// the page and the default output follow.
+    /// </summary>
+    private async Task ApplyLiveAsync(SurroundConfig cfg)
+    {
+        try { await _host.UpdateLiveAsync(cfg); }
+        catch (Exception ex)
+        {
+            if (!_host.IsRunning)
+            {
+                _runningFingerprint = null;
+                MarkStopped();
+                RunningChanged?.Invoke(false);
+                await Task.Run(_guard.Restore);
+            }
+            throw new BridgeException($"Ses ayarları uygulanamadı: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -350,7 +399,14 @@ public sealed partial class SurroundBackend : IDisposable
         AppLog.Info($"Eksik cihaz olmadan başlatıldı; sessiz hoparlörler: {string.Join(", ", dropped)}");
     }
 
-    /// <summary>Remembers each device's friendly name in the config (from Windows, else the previous file) so it can be shown while absent.</summary>
+    private const long NameCacheMs = 5000;
+    private readonly Dictionary<string, (string? Name, long At)> _nameCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Remembers each device's friendly name in the config (from Windows, else the previous file) so it can be shown while absent.
+    /// Windows is asked at most every few seconds per device: the page saves many times a second while something is dragged.
+    /// Runs under <c>_gate</c>.
+    /// </summary>
     private void FillDeviceNames(SurroundConfig cfg)
     {
         Dictionary<string, string> known = new(StringComparer.OrdinalIgnoreCase);
@@ -364,7 +420,11 @@ public sealed partial class SurroundBackend : IDisposable
         string? NameFor(string id)
         {
             if (string.IsNullOrWhiteSpace(id)) return null;
-            string? live = DeviceEnumeration.Probe(id).Name;
+            string key = id.Trim();
+            long now = Environment.TickCount64;
+            string? live;
+            if (_nameCache.TryGetValue(key, out var c) && now - c.At < NameCacheMs) live = c.Name;
+            else _nameCache[key] = (live = DeviceEnumeration.Probe(id).Name, now);
             return !string.IsNullOrWhiteSpace(live) ? live : known.GetValueOrDefault(id.Trim());
         }
         cfg.Source.DeviceName = NameFor(cfg.Source.DeviceId) ?? cfg.Source.DeviceName;
@@ -605,6 +665,7 @@ public sealed partial class SurroundBackend : IDisposable
         DisposePhone();
         DisposeVolume();
         Updater.Dispose();
+        try { _store.Flush(); } catch (Exception ex) { AppLog.Error($"Yapılandırma kaydedilemedi: {ex.Message}"); }
         _host.Dispose(); // stops the engine
         _guard.Restore(); // app exit / session end: give the user their default output back
     }

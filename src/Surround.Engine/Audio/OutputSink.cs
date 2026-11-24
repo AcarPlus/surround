@@ -79,6 +79,17 @@ public sealed class OutputSink : IDisposable
         _mixer.LimiterEnabled = limiter;
     }
 
+    /// <summary>
+    /// Live changes including mix rows, gains and delays (aligned with the constructor's routes). False when the routes
+    /// no longer fit this sink (see <see cref="SinkMixer.SetRoutes"/>); the EQ and limiter are applied either way.
+    /// </summary>
+    public bool UpdateLive(IReadOnlyList<SpeakerRoute> routes, bool limiter)
+    {
+        bool ok = _mixer.SetRoutes(routes);
+        UpdateLive(routes.Select(r => new SinkMixer.SpeakerEq(r.Eq, r.Peq, r.RoomEq)).ToList(), limiter);
+        return ok;
+    }
+
     public SinkStatus GetStatus() =>
         new(Name, _reader.FillMs, _reader.CorrectionPpm, _reader.Underruns, _reader.Overruns, DeviceRate, DeviceChannels);
 

@@ -63,12 +63,23 @@ public sealed class EngineHost : IDisposable
 
     public Task StopAsync() => Enqueue(StopCore);
 
-    /// <summary>Applies processing / speaker EQ changes to the running engine without a restart (no-op when stopped).</summary>
+    /// <summary>
+    /// Applies processing, speaker EQ and speaker mix / gain / delay changes to the running engine without a restart
+    /// (no-op when stopped). A change the running graph cannot take (a delay beyond its headroom) restarts it instead.
+    /// </summary>
     public Task UpdateLiveAsync(SurroundConfig cfg) => Enqueue(() =>
     {
         if (_engine is null) return;
-        _engine.UpdateLive(cfg);
+        long t0 = Stopwatch.GetTimestamp();
+        if (!_engine.UpdateLive(cfg))
+        {
+            AppLog.Info("Canlı değişiklik çalışan ses grafiğine sığmadı; motor yeniden başlatılıyor.");
+            StartCore(cfg);
+            return;
+        }
         _config = cfg;
+        double ms = Stopwatch.GetElapsedTime(t0).TotalMilliseconds;
+        if (ms > 20) AppLog.Info($"Canlı güncelleme {ms:0} ms sürdü.");
     });
 
     /// <summary>Ses turu demosunu başlatır; sahne süresini (sn) döner. Motor çalışmıyorsa hata.</summary>

@@ -12,8 +12,13 @@ public sealed class ConfigStore
 {
     private ConfigLoadNotice? _notice;
 
+    /// <summary>How long <see cref="SaveSoon"/> waits for further edits before writing the file.</summary>
+    public const int DeferMs = 600;
+
     private readonly string _path;
     private readonly object _gate = new();
+    private string? _pendingJson; // written by SaveSoon, not yet on disk
+    private Timer? _flushTimer;
 
     public ConfigStore(string? path = null) => _path = path ?? AppPaths.ConfigFile;
 
@@ -23,6 +28,12 @@ public sealed class ConfigStore
         lock (_gate)
         {
             SurroundConfig? cfg = null;
+            if (_pendingJson is not null)
+            {
+                cfg = SurroundConfig.Parse(_pendingJson);
+                NormalizeForUi(cfg);
+                return cfg;
+            }
             if (File.Exists(_path))
             {
                 try { cfg = SurroundConfig.Load(_path); }
@@ -54,6 +65,7 @@ public sealed class ConfigStore
     {
         lock (_gate)
         {
+            _pendingJson = null;
             BackUpUnlocked();
             _notice = null;
             SaveUnlocked(CreateDefault());
@@ -79,14 +91,56 @@ public sealed class ConfigStore
 
     public void Save(SurroundConfig cfg)
     {
-        lock (_gate) SaveUnlocked(cfg);
+        lock (_gate)
+        {
+            _pendingJson = null;
+            SaveUnlocked(cfg);
+        }
     }
 
-    private void SaveUnlocked(SurroundConfig cfg)
+    /// <summary>
+    /// Continuous edits (dragging, sliders): <see cref="Load"/> sees <paramref name="cfg"/> at once, the file is written
+    /// <paramref name="delayMs"/> after the last such call (or by <see cref="Save"/> / <see cref="Flush"/>), not on every call.
+    /// </summary>
+    public void SaveSoon(SurroundConfig cfg, int delayMs = DeferMs)
+    {
+        string json = cfg.ToJson();
+        lock (_gate)
+        {
+            _pendingJson = json;
+            _flushTimer ??= new Timer(_ =>
+            {
+                try { Flush(); }
+                catch (Exception ex) { AppLog.Error($"Yapılandırma kaydedilemedi: {ex.Message}"); }
+            });
+            _flushTimer.Change(delayMs, Timeout.Infinite);
+        }
+    }
+
+    /// <summary>Writes a pending <see cref="SaveSoon"/> now (app exit); no-op when nothing is pending.</summary>
+    public void Flush()
+    {
+        lock (_gate)
+        {
+            if (_pendingJson is null) return;
+            WriteUnlocked(_pendingJson);
+            _pendingJson = null;
+        }
+    }
+
+    /// <summary>True while a <see cref="SaveSoon"/> has not reached the file yet.</summary>
+    public bool HasPending
+    {
+        get { lock (_gate) return _pendingJson is not null; }
+    }
+
+    private void SaveUnlocked(SurroundConfig cfg) => WriteUnlocked(cfg.ToJson());
+
+    private void WriteUnlocked(string json)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var tmp = _path + ".tmp";
-        File.WriteAllText(tmp, cfg.ToJson());
+        File.WriteAllText(tmp, json);
         File.Move(tmp, _path, overwrite: true);
     }
 

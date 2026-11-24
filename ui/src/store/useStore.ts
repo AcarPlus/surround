@@ -333,6 +333,14 @@ function recalc(speakers0: Speaker[], listener: Point, auto: Record<string, Auto
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined
+/** Bekleyen kaydın zamanı (Date.now() ms). */
+let saveDue = 0
+/** Hoparlör/dinleyici sürüklenirken kaydın (motorun canlı güncellemesinin) en sık aralığı: ses sürüklemeyi izler, IPC boğulmaz. */
+export const DRAG_SAVE_MS = 100
+const cancelSave = () => {
+  clearTimeout(saveTimer)
+  saveTimer = undefined
+}
 
 /**
  * Motora gidecek hoparlörler: "Konuma göre dağıt" açıksa katılan hoparlörlerin `source`'u konumdan hesaplanır, rol satırı
@@ -441,9 +449,17 @@ export const useStore = create<State>()((set, get) => {
     ...(s.positionalMix ? { positionalMix: true } : {}),
   })
 
-  const scheduleSave = (delayMs: number) => {
+  /**
+   * `throttle`: bekleyen bir kayıt varsa ertelenmez (sürüklemede her `delayMs`'de bir kayıt, son konum dahil); yoksa her
+   * değişiklik zamanlayıcıyı yeniden kurar (debounce).
+   */
+  const scheduleSave = (delayMs: number, throttle = false) => {
+    const due = Date.now() + delayMs
+    if (throttle && saveTimer !== undefined && saveDue <= due) return
     clearTimeout(saveTimer)
+    saveDue = due
     saveTimer = setTimeout(() => {
+      saveTimer = undefined
       api.saveConfig(buildConfig(get())).catch((e) => get().showError(e, 6000))
     }, delayMs)
   }
@@ -492,7 +508,7 @@ export const useStore = create<State>()((set, get) => {
    * Yapılandırmayı değiştiren her eylem buradan geçer: geçmişe yaz + yeniden hesapla + gecikmeli kaydet.
    * `label` geri al ipucunda görünür; aynı `label` ile art arda (sürükleme) gelen değişiklikler tek adımdır.
    */
-  const commit = (patch: Partial<State>, delayMs = 400, label = 'Değişiklik') => {
+  const commit = (patch: Partial<State>, delayMs = 400, label = 'Değişiklik', throttle = false) => {
     const cur = get()
     const now = Date.now()
     const coalesce =
@@ -502,7 +518,7 @@ export const useStore = create<State>()((set, get) => {
     const next = { ...cur, ...patch }
     const speakers = recalc(next.speakers, next.room.listener, next.auto)
     set({ ...patch, speakers, past, future: [] })
-    scheduleSave(delayMs)
+    scheduleSave(delayMs, throttle)
   }
 
   const restore = (snap: Snapshot) => {
@@ -759,7 +775,7 @@ export const useStore = create<State>()((set, get) => {
         return
       }
       set({ runState: 'starting' })
-      clearTimeout(saveTimer)
+      cancelSave()
       try {
         await api.saveConfig(buildConfig(get()))
         await api.start()
@@ -1001,7 +1017,7 @@ export const useStore = create<State>()((set, get) => {
     },
 
     async flushSave() {
-      clearTimeout(saveTimer)
+      cancelSave()
       await api.saveConfig(buildConfig(get()))
     },
 
@@ -1047,7 +1063,7 @@ export const useStore = create<State>()((set, get) => {
     moveListener(x, y) {
       const { room } = get()
       const p = clampToRoom({ x: round(x, 2), y: round(y, 2) }, room)
-      commit({ room: { ...room, listener: p } }, 400, 'Dinleyiciyi taşı')
+      commit({ room: { ...room, listener: p } }, DRAG_SAVE_MS, 'Dinleyiciyi taşı', true)
     },
 
     snapSpeaker(id) {
@@ -1071,7 +1087,8 @@ export const useStore = create<State>()((set, get) => {
     moveSpeaker(id, x, y) {
       const { room, speakers } = get()
       const p = clampToRoom({ x: round(x, 2), y: round(y, 2) }, room)
-      commit({ speakers: speakers.map((s) => (s.id === id ? { ...s, ...p } : s)) }, 400, `Taşı:${id}`)
+      // Motor konum değişikliğini yeniden başlamadan, yumuşak geçişle uygular: ses sürüklemeyi ~10 Hz izler.
+      commit({ speakers: speakers.map((s) => (s.id === id ? { ...s, ...p } : s)) }, DRAG_SAVE_MS, `Taşı:${id}`, true)
     },
 
     nudgeSelected(dx, dy) {
@@ -1400,7 +1417,7 @@ export const useStore = create<State>()((set, get) => {
       if (on === abBypass || (on && !processing.enabled)) return
       // Geçmişe yazılmaz (commit kullanılmaz); doğrudan kaydedilir, böylece motor hemen uygular.
       set({ abBypass: on })
-      clearTimeout(saveTimer)
+      cancelSave()
       api.saveConfig(buildConfig(get())).catch((e) => get().showError(e, 6000))
     },
 

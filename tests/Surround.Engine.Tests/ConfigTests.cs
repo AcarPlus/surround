@@ -191,7 +191,10 @@ public class ConfigRoundTripTests
         var b = SurroundConfig.Parse(UiJson.Replace("\"x\": 0.75", "\"x\": 3.1").Replace("\"widthM\": 5", "\"widthM\": 9"));
         Assert.Equal(a.EngineFingerprint(), b.EngineFingerprint());
 
+        // Delay, gain and mix row are applied live (no restart); the jitter buffer is part of the graph.
         var c = SurroundConfig.Parse(UiJson.Replace("\"delayMs\": 1.5", "\"delayMs\": 2.5"));
-        Assert.NotEqual(a.EngineFingerprint(), c.EngineFingerprint());
+        Assert.Equal(a.EngineFingerprint(), c.EngineFingerprint());
+        var d = SurroundConfig.Parse(UiJson.Replace("\"bufferMs\": 40", "\"bufferMs\": 60"));
+        Assert.NotEqual(a.EngineFingerprint(), d.EngineFingerprint());
     }
 }

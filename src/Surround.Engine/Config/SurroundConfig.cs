@@ -243,19 +243,35 @@ public sealed class SurroundConfig
     /// <summary>
     /// Canonical JSON of the engine-relevant fields only (extra/UI members dropped). Two configs with the same
     /// fingerprint produce an identical audio graph, so a running engine need not restart between them.
-    /// Processing, per-speaker EQ and the upmix gains (center/surround/height)/LFE switch are excluded: <see cref="SurroundEngine.UpdateLive"/>
-    /// applies them in place. The upmix mode is kept (switching it rebuilds the upmixer).
+    /// Processing, per-speaker EQ, the upmix gains (center/surround/height)/LFE switch and the speakers' mix rows, gains and
+    /// delays (and the outputs' latencies, which only shift those delays) are excluded: <see cref="SurroundEngine.UpdateLive"/>
+    /// applies them in place, so dragging a speaker on the room map never restarts the engine. What the graph is built
+    /// from stays: the upmix mode, the set of logical channels the (unmuted, routed) speakers use (upmix layout, channel
+    /// fold) and per speaker whether its row carries LFE (bass management).
     /// </summary>
     public string EngineFingerprint()
     {
         var copy = Parse(ToJson());
-        copy.Extra = null;
+        var used = new SortedSet<int>();
+        foreach (var s in copy.ForRouting().Speakers.Where(s => !s.Mute))
+            foreach (var (k, v) in s.Source)
+            {
+                int c = Channels.IndexOf(k);
+                if (c >= 0 && (float)v != 0f) used.Add(c);
+            }
+        copy.Extra = new() { ["usedChannels"] = JsonSerializer.SerializeToElement(used.Select(c => Channels.Names[c]).ToArray()) };
         copy.Processing = new();
         copy.UpmixOptions = new() { Mode = copy.UpmixOptions.IsGame ? UpmixOptions.Game : copy.UpmixOptions.IsDirect ? UpmixOptions.Direct : UpmixOptions.Film };
         copy.Source.Extra = null;
         copy.Source.DeviceName = null;
-        foreach (var o in copy.Outputs) { o.Extra = null; o.DeviceName = null; }
-        foreach (var s in copy.Speakers) { s.Extra = null; s.Name = ""; s.Eq = null; s.EqPreset = null; s.Peq = null; s.RoomEq = null; }
+        foreach (var o in copy.Outputs) { o.Extra = null; o.DeviceName = null; o.LatencyMs = 0; }
+        foreach (var s in copy.Speakers)
+        {
+            bool lfe = s.Source.Any(kv => Channels.IndexOf(kv.Key) == Channels.LFE && (float)kv.Value != 0f);
+            s.Source = lfe ? new() { ["LFE"] = 1 } : new();
+            s.DelayMs = 0; s.GainDb = 0;
+            s.Extra = null; s.Name = ""; s.Eq = null; s.EqPreset = null; s.Peq = null; s.RoomEq = null;
+        }
         return copy.ToJson();
     }
 

@@ -34,6 +34,7 @@ public sealed class SurroundEngine : IDisposable
     private float[] _bassBuf = new float[4096];
     private GlobalProcessor? _proc;
     private BassManager? _bass;
+    private BassPlanResult _bassPlan;
     private long _frames;
     private long _dspTicks, _dspMaxTicks;
     private bool _started;
@@ -104,7 +105,7 @@ public sealed class SurroundEngine : IDisposable
             _proc = new GlobalProcessor(fs, used);
             _proc.Update(ProcessingSettings.Build(_cfg.Processing, fs));
             // A multichannel source may carry a real LFE at any time (the upmix only takes over while it is silent).
-            var bass = PlanBass(fs, nativeMultichannel: n > 2);
+            var bass = _bassPlan = PlanBass(fs, nativeMultichannel: n > 2);
 
             var latencyGroup = new LatencyGroup();
             foreach (var o in _cfg.Outputs)
@@ -112,7 +113,7 @@ public sealed class SurroundEngine : IDisposable
                 var dev = en.GetDevice(o.DeviceId.Trim());
                 var routes = _cfg.Speakers
                     .Where(s => SurroundConfig.SameId(s.OutputDeviceId, o.DeviceId))
-                    .Select(s => BuildRoute(s, fs, bass))
+                    .Select(s => BuildRoute(_cfg, s, fs, bass))
                     .ToList();
                 var sink = new OutputSink(dev, o.BufferMs, fs, routes, _cfg.Processing.Limiter, _log, msg => Error?.Invoke(msg), latencyGroup: latencyGroup);
                 _sinks.Add(sink);
@@ -190,7 +191,7 @@ public sealed class SurroundEngine : IDisposable
         return row;
     }
 
-    private SpeakerRoute BuildRoute(SpeakerConfig s, int fs, BassPlanResult bass)
+    private static SpeakerRoute BuildRoute(SurroundConfig cfg, SpeakerConfig s, int fs, BassPlanResult bass)
     {
         var row = MixRow(s);
         float share = 0f;
@@ -199,7 +200,7 @@ public sealed class SurroundEngine : IDisposable
             share = bass.BusShare;
             if (!HasLfe(s)) row[Channels.LFE] = bass.LfeFold;
         }
-        int delay = (int)Math.Round(Math.Max(0, _cfg.EffectiveDelayMs(s)) * fs / 1000.0);
+        int delay = (int)Math.Round(Math.Max(0, cfg.EffectiveDelayMs(s)) * fs / 1000.0);
         return new SpeakerRoute(s.Name, s.DeviceChannel - 1, row, s.GainDb, s.Mute, delay, s.HighPassHz, share, s.Eq, s.Peq, s.RoomEq);
     }
 
@@ -217,28 +218,39 @@ public sealed class SurroundEngine : IDisposable
     public bool DemoActive => _demo is not null;
 
     /// <summary>
-    /// Applies the live-updatable part of <paramref name="cfg"/> (processing, per-speaker EQ, limiter switch, upmix and
-    /// height levels) without a
-    /// restart. The caller ensures the config has the running engine's <see cref="SurroundConfig.EngineFingerprint"/>.
-    /// Coefficients are built here, off the audio thread, and swapped in by reference.
+    /// Applies the live-updatable part of <paramref name="cfg"/> (processing, per-speaker EQ, mix rows, gains and delays,
+    /// output latencies, limiter switch, upmix and height levels) without a restart, so moving a speaker on the room map
+    /// does not interrupt the sound. The caller ensures the config has the running engine's
+    /// <see cref="SurroundConfig.EngineFingerprint"/>. Everything is built here, off the audio thread, and handed over by
+    /// reference; the audio thread glides to the new values. Returns false when a change does not fit the running graph
+    /// (e.g. a delay beyond the delay lines' headroom): the caller must restart the engine with <paramref name="cfg"/>.
     /// </summary>
-    public void UpdateLive(SurroundConfig cfg)
+    public bool UpdateLive(SurroundConfig cfg)
     {
-        if (!_started || _srcFormat is null) return;
+        if (!_started || _srcFormat is null) return true;
+        int fs = _srcFormat.SampleRate;
         var routed = cfg.ForRouting();
-        _proc?.Update(ProcessingSettings.Build(routed.Processing, _srcFormat.SampleRate));
+        _proc?.Update(ProcessingSettings.Build(routed.Processing, fs));
         var up = UpmixSettings.Build(routed.UpmixOptions);
         _upmix?.Update(up);
         _heights?.Update(up);
+        bool ok = routed.Outputs.Count == _sinks.Count;
         // Sinks were created in routed.Outputs order with speakers in config order; the fingerprint keeps both stable.
         for (int i = 0; i < _sinks.Count && i < routed.Outputs.Count; i++)
         {
-            var eqs = routed.Speakers
+            var routes = routed.Speakers
                 .Where(s => SurroundConfig.SameId(s.OutputDeviceId, routed.Outputs[i].DeviceId))
-                .Select(s => new SinkMixer.SpeakerEq(s.Eq, s.Peq, s.RoomEq))
+                .Select(s => BuildRoute(routed, s, fs, _bassPlan))
                 .ToList();
-            _sinks[i].UpdateLive(eqs, routed.Processing.Limiter);
+            ok &= _sinks[i].UpdateLive(routes, routed.Processing.Limiter);
         }
+        if (_bass != null)
+        {
+            var cut = routed.Speakers.Where(s => !s.Mute && s.HighPassHz > 0)
+                .Select(s => new BassSource(MixRow(s), s.GainDb, s.HighPassHz)).ToList();
+            ok &= _bass.SetSources(cut);
+        }
+        return ok;
     }
 
     private void OnData(object? sender, WaveInEventArgs e)
