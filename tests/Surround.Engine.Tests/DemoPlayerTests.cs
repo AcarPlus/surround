@@ -30,9 +30,34 @@ public class DemoPlayerTests
         Assert.Equal(90, DemoPlayer.Azimuth(DemoScene.Orbit, 2.5), 6);
         Assert.Equal(-90, DemoPlayer.Azimuth(DemoScene.Orbit, 7.5), 6);
         Assert.Equal(-90, DemoPlayer.Azimuth(DemoScene.PingPong, 0), 6);
-        Assert.Equal(90, DemoPlayer.Azimuth(DemoScene.PingPong, 2), 6);
+        Assert.Equal(90, DemoPlayer.Azimuth(DemoScene.PingPong, 1.5), 6);
+        Assert.Equal(-90, DemoPlayer.Azimuth(DemoScene.PingPong, 3), 6);
+        Assert.Equal(0, DemoPlayer.Azimuth(DemoScene.PingPong, 0.75), 6);
+        Assert.Equal(15, DemoPlayer.Duration(DemoScene.PingPong), 6);
         Assert.Equal(180, DemoPlayer.Azimuth(DemoScene.Flyby, 7), 6);
         Assert.Equal(30, DemoPlayer.Azimuth(DemoScene.Speakers, 2.5), 6);
+    }
+
+    [Fact]
+    public void PingPongStrikesTheLeftThenTheRightSide()
+    {
+        const int fs = 48000, block = 480;
+        var p = new DemoPlayer(DemoScene.PingPong, fs);
+        var buf = new float[block * Channels.Count];
+        double left = 0, right = 0, leftLate = 0, rightLate = 0;
+        for (int i = 0; i < (int)(1.6 * fs / block); i++)
+        {
+            p.Process(buf, block);
+            double t = (double)(i + 1) * block / fs;
+            for (int f = 0; f < block; f++)
+            {
+                float l = buf[f * Channels.Count + Channels.SL], r = buf[f * Channels.Count + Channels.SR];
+                if (t < 0.1) { left += l * l; right += r * r; }
+                else if (t > 1.5) { leftLate += l * l; rightLate += r * r; }
+            }
+        }
+        Assert.True(left > 10 * right, "ilk vurus solda olmali");
+        Assert.True(rightLate > 10 * leftLate, "1,5 sn'de vurus sagda olmali");
     }
 
     [Theory]

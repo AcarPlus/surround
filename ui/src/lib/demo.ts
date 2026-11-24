@@ -19,9 +19,9 @@ export interface DemoScene {
 
 export const DEMO_SCENES: readonly DemoScene[] = [
   { id: 'orbit', title: 'Tur', sub: 'Bir melodi etrafında döner', duration: 20, beat: 0.25 },
-  { id: 'pingpong', title: 'Sol ↔ Sağ', sub: 'Top bir yandan öbürüne seker', duration: 16, beat: 2 },
-  { id: 'flyby', title: 'Uçuş', sub: 'Yanından arkaya, arkadan öne geçer', duration: 16, beat: 8 },
-  { id: 'speakers', title: 'Kanal kanal', sub: 'Her yönden bir çan: FL, FC, FR, SR, BR, BL, SL', duration: 8.4, beat: 1.2 },
+  { id: 'pingpong', title: 'Sol ↔ Sağ', sub: 'Marimba arpeji bir yandan öbürüne sekip tırmanır, iner', duration: 15, beat: 0.375 },
+  { id: 'flyby', title: 'Uçuş', sub: 'Yanından geçerken pesleşen (Doppler) bir uçuş sesi', duration: 16, beat: 8 },
+  { id: 'speakers', title: 'Kanal kanal', sub: 'Her yönden üç notalık çan arpeji: FL, FC, FR, SR, BR, BL, SL', duration: 8.4, beat: 1.2 },
 ]
 
 const SPEAKER_STEPS = [-30, 0, 30, 90, 150, -150, -90] as const
@@ -33,7 +33,7 @@ export function demoAzimuth(id: DemoSceneId, t: number): number {
     case 'orbit':
       return normalizeAngle(36 * t)
     case 'pingpong':
-      return -90 * Math.cos((Math.PI * t) / 2)
+      return -90 * Math.cos((Math.PI * t) / 1.5)
     case 'flyby': {
       const u = (t % 8) / 8
       const e = 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, u * 1.25))
@@ -50,11 +50,11 @@ export function demoPulse(id: DemoSceneId, t: number): number {
     case 'orbit':
       return Math.exp(-((t % 0.25) * 5))
     case 'pingpong':
-      return Math.exp(-((t % 2) * 6))
+      return Math.exp(-((t % 0.375) * 7))
     case 'flyby':
       return Math.sin(Math.PI * Math.min(1, ((t % 8) / 8) * 1.25)) ** 2
     case 'speakers':
-      return Math.exp(-((t % 1.2) * 3.2))
+      return Math.max(Math.exp(-((t % 1.2) * 3.2)), 0.7 * Math.exp(-(((t % 1.2) - 0.18 + 1.2) % 1.2 * 3.2)), 0.5 * Math.exp(-(((t % 1.2) - 0.36 + 1.2) % 1.2 * 3.2)))
   }
 }
 

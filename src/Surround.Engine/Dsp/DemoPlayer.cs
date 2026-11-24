@@ -25,7 +25,7 @@ public sealed class DemoPlayer
     private long _n;
     private uint _rng = 0x9E3779B9;
     // Sentez durumu.
-    private double _bp1, _bp2, _lp, _hp;
+    private double _bp1, _bp2, _ph;
     private int _lastEvent = -1;
     private double _evT = 1e9;
     private double _evF;
@@ -44,7 +44,7 @@ public sealed class DemoPlayer
     public static double Duration(DemoScene s) => s switch
     {
         DemoScene.Orbit => 20,
-        DemoScene.PingPong => 16,
+        DemoScene.PingPong => 15,
         DemoScene.Flyby => 16,
         _ => 8.4,
     };
@@ -58,8 +58,8 @@ public sealed class DemoPlayer
                 // Önden başlar, 10 sn'de bir tam tur saat yönünde.
                 return Norm(36.0 * t);
             case DemoScene.PingPong:
-                // Sol ↔ sağ (−90 ↔ +90), 2 sn'de bir yön değişir; uçlarda yumuşak.
-                return -90 * Math.Cos(Math.PI * t / 2);
+                // Sol ↔ sağ (−90 ↔ +90), 1,5 sn'de bir yön değişir; uçlarda yumuşak, ortadan hızlı geçer.
+                return -90 * Math.Cos(Math.PI * t / 1.5);
             case DemoScene.Flyby:
             {
                 // 8 sn'lik iki geçiş: önden sağ yandan arkaya, sonra arkadan sol yandan öne.
@@ -111,6 +111,15 @@ public sealed class DemoPlayer
     }
 
     private static readonly double[] Scale = { 220, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33 };
+    // Marimba/çan sahneleri için pentatonik merdiven (C E G C E) ve çan oranları.
+    private static readonly double[] Penta = { 261.63, 329.63, 392, 523.25, 659.25 };
+
+    private static double Marimba(double f, double x) =>
+        Math.Exp(-x * 7) * Math.Min(1, x * 500) * (Math.Sin(2 * Math.PI * f * x) + 0.45 * Math.Exp(-x * 25) * Math.Sin(2 * Math.PI * 4 * f * x));
+
+    private static double Bell(double f, double x) =>
+        x < 0 ? 0 : Math.Exp(-x * 3.2) * Math.Min(1, x * 400) *
+        (Math.Sin(2 * Math.PI * f * x) + 0.5 * Math.Sin(2 * Math.PI * f * 2.76 * x) + 0.25 * Math.Sin(2 * Math.PI * f * 5.4 * x));
 
     /// <summary>Kaynak sinyalinin bir örneği (t saniye).</summary>
     private float Sample(double t)
@@ -131,38 +140,46 @@ public sealed class DemoPlayer
             }
             case DemoScene.PingPong:
             {
-                // Uçlarda "tok" vuruş (gürültü patlaması + 900 Hz), yolda hafif çalkalama sesi.
-                int ev = (int)Math.Floor(t / 2);
+                // Marimba arpeji: her 0,375 sn'de bir nota; sağa giderken tırmanır, sola giderken iner. Uçlardaki (en
+                // sol/sağ) nota en tiz/pes, vurgulu ve "tok" bir vuruşla başlar.
+                int ev = (int)Math.Floor(t / 0.375);
                 if (ev != _lastEvent) { _lastEvent = ev; _evT = 0; }
+                int k = ev % 4, swing = (ev / 4) % 2;
+                int idx = swing == 0 ? k : 4 - k;
                 double x = _evT;
-                double knock = Math.Exp(-x * 40) * (Math.Sin(2 * Math.PI * 900 * x) + 0.8 * Noise()) * Math.Min(1, x * 500);
-                double n = Noise();
-                _hp = 0.85 * (_hp + n - _lp); _lp = n; // basit yüksek geçiren
-                double shaker = _hp * 0.18 * (0.5 + 0.5 * Math.Sin(2 * Math.PI * 7 * t)) * Math.Sin(Math.PI * (t % 2) / 2);
+                double accent = k == 0 ? 1.0 : 0.65;
+                double v = accent * Marimba(Penta[idx], x);
+                if (k == 0) v += 0.35 * Math.Exp(-x * 45) * Noise();
                 _evT += dt;
-                return (float)(0.8 * knock + shaker);
+                return (float)(0.8 * v);
             }
             case DemoScene.Flyby:
             {
-                // Vınlama: süpürülen bant geçiren gürültü (yaklaşırken parlaklaşır), altta alçak uğultu.
+                // Doppler'li geçiş: yaklaşırken tiz ve parlak, yanımızdan geçerken hızla pesleşen tonal bir uğultu
+                // (testere benzeri tını) + süpürülen rüzgâr gürültüsü ve altta alçak uğultu.
                 double u = t % 8 / 8;
-                double env = Math.Sin(Math.PI * Math.Min(1, u * 1.25));
+                double w = Math.Min(1, u * 1.25);
+                double env = Math.Sin(Math.PI * w);
+                double fTone = 340 + 560 * (0.5 + 0.5 * Math.Cos(Math.PI * w));
+                _ph += 2 * Math.PI * fTone * dt;
+                double tone = Math.Sin(_ph) + 0.5 * Math.Sin(2 * _ph) + 0.3 * Math.Sin(3 * _ph);
                 double fc = 300 + 2700 * env;
                 double f = 2 * Math.Sin(Math.PI * fc / _fs);
                 double n = Noise();
                 _bp1 += f * _bp2; double hp = n - _bp1 - 0.5 * _bp2; _bp2 += f * hp; // durum değişkenli filtre
                 double rumble = Math.Sin(2 * Math.PI * (55 + 20 * env) * t) * 0.3;
-                return (float)(env * env * (0.8 * _bp2 + rumble));
+                return (float)(env * env * (0.45 * tone + 0.5 * _bp2 + rumble));
             }
             default:
             {
-                // Çan: her kanalda bir kez, uyumsuz kısmilerle (yön ve kanal kolay ayırt edilir).
+                // Çan arpeji: her kanalda üç nota (kök, beşli, oktav) 0,18 sn arayla; her kanalın kökü pentatonik
+                // merdivende bir basamak yukarıdadır (yön ve kanal kolay ayırt edilir).
                 int ev = (int)(t / 1.2);
-                if (ev != _lastEvent) { _lastEvent = ev; _evT = 0; _evF = 660 * Math.Pow(2, (ev % 7) / 12.0); }
-                double x = _evT, env = Math.Exp(-x * 3.2) * Math.Min(1, x * 400);
-                double v = env * (Math.Sin(2 * Math.PI * _evF * x) + 0.5 * Math.Sin(2 * Math.PI * _evF * 2.76 * x) + 0.25 * Math.Sin(2 * Math.PI * _evF * 5.4 * x));
+                if (ev != _lastEvent) { _lastEvent = ev; _evT = 0; _evF = 392 * Math.Pow(2, (ev * 2) / 12.0); }
+                double x = _evT;
+                double v = Bell(_evF, x) + 0.7 * Bell(_evF * 1.5, x - 0.18) + 0.5 * Bell(_evF * 2, x - 0.36);
                 _evT += dt;
-                return (float)(0.6 * v);
+                return (float)(0.45 * v);
             }
         }
     }

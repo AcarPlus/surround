@@ -292,11 +292,11 @@ export function ScreenHeader({ title, sub, right }: { title: string; sub?: strin
     <div className="aurora-in mb-5 flex items-end justify-between gap-4">
       <div>
         {/* Hareketli aurora zemin üstünde okunsun: zemin renginde yumuşak hale + daha parlak metin. */}
-        <h1 className="text-[26px] font-bold tracking-tight [filter:drop-shadow(0_1px_10px_rgb(var(--bg)/0.9))_brightness(1.15)]">
+        <h1 className="text-[26px] font-bold tracking-tight [filter:drop-shadow(0_1px_2px_rgb(var(--bg)/0.95))_drop-shadow(0_0_14px_rgb(var(--bg)/0.9))_brightness(1.3)_saturate(1.15)]">
           <span className="aurora-text">{title}</span>
         </h1>
         {sub && (
-          <p className="mt-1 max-w-[760px] text-[13.5px] leading-relaxed text-fg/85 [text-shadow:0_1px_2px_rgb(var(--bg)/0.9),0_0_14px_rgb(var(--bg)/0.85)]">
+          <p className="mt-1 max-w-[760px] text-[13.5px] leading-relaxed text-fg [text-shadow:0_1px_2px_rgb(var(--bg)/1),0_0_8px_rgb(var(--bg)/0.95),0_0_22px_rgb(var(--bg)/0.9)]">
             {sub}
           </p>
         )}
