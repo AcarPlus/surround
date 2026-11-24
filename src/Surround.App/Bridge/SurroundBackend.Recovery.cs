@@ -153,6 +153,9 @@ public sealed partial class SurroundBackend
         switch (_recovery.Evaluate(probes, streamFailed, deviceEvent, Now))
         {
             case RecoveryAction.Stop:
+                // A speaker's device went away (e.g. the Bluetooth speaker was switched off): keep playing on the others
+                // right away, no waiting and no question; it joins again when it comes back.
+                if (await TryStartWithoutMissingAsync()) break;
                 await _host.StopAsync();
                 _runningFingerprint = null;
                 RunningChanged?.Invoke(false); // the page's status/meters go "off"
@@ -167,8 +170,33 @@ public sealed partial class SurroundBackend
             case RecoveryAction.Rejoin:
                 await RejoinAsync();
                 break;
+            case RecoveryAction.None when _recovery.State == RecoveryState.Waiting && _recovery.Missing.Count > 0:
+                // Waiting for a device while the others could play (it vanished in a way the running engine did not
+                // notice at once, or the source was back first): play on what is there instead of waiting.
+                if (!_host.IsRunning) await TryStartWithoutMissingAsync();
+                break;
         }
         PublishState();
+    }
+
+    /// <summary>
+    /// Under <c>_gate</c>: some output devices of the saved config are absent but the rest can play: (re)start without
+    /// them now. They are watched and taken in again when they come back (<see cref="RecoveryAction.Rejoin"/>). False
+    /// (nothing changed, except a failed attempt's message) when nothing is absent, the source itself is absent, nothing
+    /// would play or the start fails.
+    /// </summary>
+    private async Task<bool> TryStartWithoutMissingAsync()
+    {
+        var cfg = _store.Load();
+        _recovery.SeedNames(cfg);
+        var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
+        var absent = probes.Where(p => !p.Present).ToList();
+        if (absent.Count == 0) return false;
+        var reduced = DeviceRecovery.WithoutMissing(cfg, probes, out var dropped);
+        if (reduced is null) return false;
+        if (!await TryRestartAsync(reduced, absent)) return false;
+        AppLog.Info($"Eksik cihaz olmadan devam ediliyor; sessiz hoparlörler: {string.Join(", ", dropped)}");
+        return true;
     }
 
     /// <summary>

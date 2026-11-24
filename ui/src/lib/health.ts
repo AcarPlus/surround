@@ -86,7 +86,7 @@ export function checkHealth(h: HealthInput): HealthItem[] {
       title: missing.length > 0 ? `Cihaz bekleniyor: ${missing.join(', ')}` : 'Motor yeniden başlatılmayı bekliyor',
       detail:
         (missing.length > 0
-          ? 'Cihaz çıkarıldı veya devre dışı kaldı; geri gelince motor kayıtlı ayarlarla kendiliğinden yeniden başlar.'
+          ? 'Çalacak başka cihaz yok; cihaz gelince ses kendiliğinden başlar.'
           : `${message ?? 'Ses akışı kesildi.'} Motor birazdan kendiliğinden yeniden başlar.`) +
         ' Beklemeyi bitirmek için Durdur’a bas.',
     })
@@ -135,8 +135,8 @@ export function checkHealth(h: HealthInput): HealthItem[] {
       items.push({
         id: `dev-missing-${s.id}`,
         level: 'warn',
-        title: `${s.name}: cihaz bağlı değil`,
-        detail: 'Hoparlörün çıkış cihazı bulunamadı (kapalı, çıkarılmış veya devre dışı). Diğer hoparlörler çalar; cihaz gelince bu hoparlör kendiliğinden katılır.',
+        title: `${s.name} bağlı değil`,
+        detail: 'Diğer hoparlörler çalmaya devam ediyor. Cihaz açılınca bu hoparlör kendiliğinden katılır.',
         fix: { id: 'select-speaker', label: 'Hoparlörü aç', arg: s.id },
       })
     } else if (s.deviceChannel > d.channels) {

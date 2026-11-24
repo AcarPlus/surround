@@ -65,6 +65,17 @@ describe('checkHealth', () => {
     expect(item.detail).toContain('kendiliğinden')
   })
 
+  it('bağlı olmayan hoparlör (ör. kapalı Bluetooth) yalnız sakin bir uyarıdır, başlatmayı engellemez', () => {
+    const h = base()
+    h.speakers = h.speakers.map((s) => (s.id === 'BL' ? { ...s, outputDeviceId: 'beats' } : s))
+    const items = checkHealth(h)
+    const item = items.find((i) => i.id === 'dev-missing-BL')!
+    expect(item.level).toBe('warn')
+    expect(item.title).toBe('BL bağlı değil')
+    expect(item.detail).toContain('kendiliğinden katılır')
+    expect(items.some((i) => i.level === 'error')).toBe(false)
+  })
+
   it('cihaz eksik değilse bekleme nedenini gösterir', () => {
     const item = checkHealth(base({ waiting: { missing: [], message: 'Ses akışı kesildi; motor yeniden başlatılacak.' } })).find(
       (i) => i.id === 'waiting-devices',

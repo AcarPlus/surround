@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
-import { waitedLongEnough } from '../lib/waiting'
 import { checkHealth } from '../lib/health'
 import { upmixStateLabel } from '../lib/upmix'
 import { cx } from './ui'
@@ -186,32 +185,6 @@ function IconButton({ label, onClick, disabled, children }: { label: string; onC
   )
 }
 
-/** Cihaz uzun süredir bekleniyorsa: eksiksiz başlat ya da cihazı değiştir. */
-function WaitingActions() {
-  const runState = useStore((s) => s.runState)
-  const since = useStore((s) => s.waitingSince)
-  const waitingFor = useStore((s) => s.waitingFor)
-  const startWithoutMissing = useStore((s) => s.startWithoutMissing)
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (runState !== 'waiting') return
-    const id = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [runState])
-  if (runState !== 'waiting' || waitingFor.length === 0 || !waitedLongEnough(since, now)) return null
-  return (
-    <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-warn/40 bg-warn/10 px-4 py-2 text-[13px]" role="status">
-      <span className="text-warn">Bu cihazlar uzun süredir yok: {waitingFor.join(', ')}.</span>
-      <button
-        onClick={() => void startWithoutMissing()}
-        className="rounded border border-warn/60 px-2.5 py-1 font-semibold text-warn hover:bg-warn/10"
-      >
-        Eksik cihaz olmadan başlat
-      </button>
-    </div>
-  )
-}
-
 /** Yeni sürüm indirildi: yeniden başlatınca kurulur (kapatılırsa bir sonraki açılışta kendiliğinden kurulur). */
 export function UpdateStrip() {
   const update = useUpdate()
@@ -294,7 +267,6 @@ export function TopBar() {
         </IconButton>
       </div>
     </header>
-    <WaitingActions />
     <UpdateStrip />
     </>
   )
