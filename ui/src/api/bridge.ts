@@ -14,6 +14,8 @@ import {
   type SinkStatus,
   type UpdateState,
   type VolumeState,
+  type WindowCommand,
+  type WindowState,
 } from './types'
 
 /**
@@ -21,7 +23,7 @@ import {
  *
  *   JS -> C#: { id, method, params: unknown[] }
  *   C# -> JS: { id, result } | { id, error: { message, errors? } }
- *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'engineState' | 'deviceRejoined' | 'calibration' | 'profileApplied' | 'phoneLink' | 'phoneStart' | 'volume' | 'update', data }
+ *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'engineState' | 'deviceRejoined' | 'calibration' | 'profileApplied' | 'phoneLink' | 'phoneStart' | 'volume' | 'update' | 'window', data }
  */
 
 interface WebViewHost {
@@ -90,6 +92,7 @@ export function createBridgeApi(): SurroundApi {
   const phoneStartListeners = new Set<() => void>()
   const volumeListeners = new Set<(v: VolumeState) => void>()
   const updateListeners = new Set<(u: UpdateState) => void>()
+  const windowListeners = new Set<(s: Partial<WindowState>) => void>()
   let nextId = 1
 
   host.addEventListener('message', (e) => {
@@ -140,6 +143,9 @@ export function createBridgeApi(): SurroundApi {
           updateListeners.forEach((cb) => cb(u))
           break
         }
+        case 'window':
+          if (msg.data && typeof msg.data === 'object') windowListeners.forEach((cb) => cb(msg.data as Partial<WindowState>))
+          break
         case 'deviceRejoined': {
           const names: string[] = Array.isArray(msg.data?.names) ? msg.data.names.map(String) : []
           if (names.length) rejoinListeners.forEach((cb) => cb(names))
@@ -226,5 +232,19 @@ export function createBridgeApi(): SurroundApi {
     checkUpdate: async () => normalizeUpdate(await call<unknown>('checkUpdate')),
     applyUpdate: () => call<void>('applyUpdate'),
     onUpdate: (cb) => subscribe(updateListeners, cb),
+    windowCommand: (cmd: WindowCommand) => {
+      switch (cmd.kind) {
+        case 'button':
+          return call<void>('window.button', cmd.button)
+        case 'resize':
+          return call<void>('window.resize', cmd.edge)
+        case 'menu':
+          return call<void>('window.menu')
+        case 'theme':
+          return call<void>('window.theme', cmd.theme)
+      }
+    },
+    getWindowState: () => call<Partial<WindowState>>('window.state'),
+    onWindowState: (cb) => subscribe(windowListeners, cb),
   }
 }

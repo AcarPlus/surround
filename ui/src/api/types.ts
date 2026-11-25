@@ -565,3 +565,23 @@ export interface UpdateState {
   progress: number
   message?: string | null
 }
+
+/**
+ * Masaüstü pencere durumu (kendi çizdiğimiz başlık çubuğu için). `frameless`: Windows başlığı kaldırıldı, başlık
+ * çubuğunu sayfa çiziyor; tarayıcıda (sahte veri) ve çerçeve kurulamadığında `false`.
+ */
+export interface WindowState {
+  frameless: boolean
+  maximized: boolean
+  active: boolean
+}
+
+/** Başlık çubuğu düğmeleri ve üst kenar tutamakları. */
+export type CaptionButton = 'minimize' | 'maximize' | 'close'
+export type ResizeEdge = 'top' | 'topleft' | 'topright'
+
+export type WindowCommand =
+  | { kind: 'button'; button: CaptionButton }
+  | { kind: 'resize'; edge: ResizeEdge }
+  | { kind: 'menu' }
+  | { kind: 'theme'; theme: 'dark' | 'light' }

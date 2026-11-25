@@ -13,6 +13,8 @@ import type {
   SinkStatus,
   UpdateState,
   VolumeState,
+  WindowCommand,
+  WindowState,
 } from './types'
 import { createMockApi } from './mock'
 import { createBridgeApi, hasBridge } from './bridge'
@@ -100,6 +102,11 @@ export interface SurroundApi {
   /** İndirilen sürümü kurar: uygulama kapanır, güncellenir ve yeniden açılır. */
   applyUpdate(): Promise<void>
   onUpdate(cb: (u: UpdateState) => void): () => void
+  /** Kendi çizdiğimiz başlık çubuğu: düğmeler, üst kenar tutamağı, sistem menüsü, tema (masaüstü; tarayıcıda yok sayılır). */
+  windowCommand(cmd: WindowCommand): Promise<void>
+  /** Pencere büyütüldü/geri yüklendi, etkinleşti/etkinliğini yitirdi. */
+  getWindowState(): Promise<Partial<WindowState>>
+  onWindowState(cb: (s: Partial<WindowState>) => void): () => void
 }
 
 export const api: SurroundApi = hasBridge() ? createBridgeApi() : createMockApi()

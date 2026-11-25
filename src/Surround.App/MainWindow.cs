@@ -18,6 +18,7 @@ public sealed class MainWindow : Window
     private static readonly System.Windows.Media.Color Backdrop = System.Windows.Media.Color.FromRgb(14, 15, 17);
 
     private readonly WebView2 _web;
+    private readonly WindowFrame _frame;
     private readonly SurroundBackend _backend = new();
     private BridgeHost? _bridge;
     private string? _devOrigin;
@@ -53,6 +54,8 @@ public sealed class MainWindow : Window
         Background = new SolidColorBrush(Backdrop);
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         try { Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/surround.ico", UriKind.Absolute)); } catch { }
+        // No Windows caption: the page draws an Aurora title bar (TitleBar.tsx); snap, shadow, Alt+Tab ... stay native.
+        _frame = new WindowFrame(this);
 
         _web = new WebView2
         {
@@ -226,7 +229,13 @@ public sealed class MainWindow : Window
         core.DownloadStarting += (_, e) => e.Cancel = true;
         core.NavigationCompleted += (_, _) => StartupTrace.Mark("page");
 
-        _bridge = new BridgeHost(core, _backend, Dispatcher, IsTrusted);
+        _bridge = new BridgeHost(core, _backend, Dispatcher, IsTrusted, _frame);
+        // Before any page script: the page draws its own title bar only when the Windows caption is really gone.
+        if (_frame.Active)
+        {
+            try { await core.AddScriptToExecuteOnDocumentCreatedAsync("window.__SURROUND_FRAMELESS__ = true;"); }
+            catch { /* page keeps the plain layout; the window still has its native borders */ }
+        }
 
         string uiDir = Path.Combine(AppContext.BaseDirectory, "ui");
         if (devUrl is null)
@@ -253,6 +262,8 @@ public sealed class MainWindow : Window
         s.IsPasswordAutosaveEnabled = false;
         s.IsGeneralAutofillEnabled = false;
         s.IsSwipeNavigationEnabled = false;
+        // CSS app-region: drag on the page's title bar = the window's caption (move, snap, double-click, system menu).
+        s.IsNonClientRegionSupportEnabled = true;
 #if DEBUG
         s.AreDevToolsEnabled = true;
         s.AreDefaultContextMenusEnabled = true;
