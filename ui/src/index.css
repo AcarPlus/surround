@@ -943,45 +943,41 @@ input[type='range'].big-range::-webkit-slider-thumb {
 }
 
 /*
- * Başlık çubuğu (TitleBar.tsx): Windows başlığının yerine. app-region: drag = pencere başlığı (WebView2 yerel
- * sürükleme, Aero Snap, çift tık büyüt, sağ tık sistem menüsü); düğmeler ve tutamaklar no-drag.
+ * Ayrı başlık şeridi yok: uygulamanın üst satırı (TopBar) pencerenin en tepesinde. Çerçevesiz pencerede
+ * (html.frameless, WindowControls.tsx) satırın boş yeri pencere başlığıdır: app-region: drag = WebView2 yerel
+ * sürükleme, Aero Snap, çift tık büyüt, sağ tık sistem menüsü. Etkileşimli öğeler no-drag. Bölgeler belge sırasıyla
+ * birleşir/çıkarılır: sonraki no-drag (sihirbaz, iletişim kutusu) üst satırın sürükleme alanını örter.
+ * Tarayıcıda ve yerel Windows başlığında hiçbiri etkin değildir.
  */
-.app-drag {
+.frameless .app-drag {
   app-region: drag;
   -webkit-app-region: drag;
 }
-.app-no-drag {
+.frameless .app-no-drag,
+.frameless .app-drag :where(button, input, select, textarea, a[href], [role='group'], [role='dialog'], [role='menu'], [role='listbox']) {
   app-region: no-drag;
   -webkit-app-region: no-drag;
 }
-.titlebar {
-  background:
-    linear-gradient(90deg, rgb(var(--aurora-1) / 0.1), rgb(var(--aurora-2) / 0.12) 55%, rgb(var(--aurora-3) / 0.08)),
-    rgb(var(--sky-top));
-  transition: background-color 200ms ease;
+/* Yalnız çerçevesiz pencerede var olan öğe (ör. üst satırı olmayan kablo ekranındaki görünmez sürükleme şeridi). */
+.frameless-only {
+  display: none;
 }
-.titlebar::after {
-  /* İnce aurora ışığı: başlıkla üst çubuk arasında. */
-  content: '';
-  position: absolute;
-  inset: auto 0 0 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgb(var(--aurora-1) / 0.35), rgb(var(--aurora-2) / 0.35), transparent);
-  transition: opacity 200ms ease;
-  pointer-events: none;
+.frameless .frameless-only {
+  display: block;
 }
-.titlebar-fade {
+/* Üst satırın sağı pencere düğmelerine ayrılır (--caption-w; çerçeve yokken 0). */
+.caption-pad-right {
+  padding-right: calc(1.25rem + var(--caption-w, 0px));
+}
+.caption-bar .caption-glyph {
   transition: opacity 200ms ease;
 }
-.titlebar-inactive .titlebar-fade {
+.caption-inactive .caption-glyph {
   opacity: 0.45;
-}
-.titlebar-inactive::after {
-  opacity: 0.3;
 }
 .caption-btn {
   display: flex;
-  width: 46px;
+  height: 100%;
   align-items: center;
   justify-content: center;
   color: rgb(var(--fg));
@@ -1004,7 +1000,7 @@ input[type='range'].big-range::-webkit-slider-thumb {
   background-color: color-mix(in srgb, var(--close-hover, #c42b1c) 85%, transparent);
   color: #fff;
 }
-.caption-close:hover .caption-glyph {
+.caption-btn:hover .caption-glyph {
   opacity: 1;
 }
 .caption-glyph {

@@ -1,7 +1,39 @@
 import type { CaptionButton, ResizeEdge, WindowState } from '../api/types'
 
-/** Başlık çubuğu yüksekliği (px); C# WindowFrame.TitleBarHeight ile aynı. */
-export const TITLEBAR_HEIGHT = 32
+/*
+ * Ayrı başlık şeridi yok: uygulamanın üst satırı (TopBar) pencerenin en tepesindedir, boş yerleri sürükleme alanıdır
+ * (app-region: drag) ve küçült / büyüt / kapat düğmeleri o satırın sağ üst köşesinde durur (Windows 11 gibi).
+ */
+
+/** Pencere düğmesi boyutu (px): Windows 11'in kendi başlık düğmeleri gibi; yükseklik C# WindowFrame.TitleBarHeight ile aynı. */
+export const CAPTION_BUTTON_WIDTH = 46
+export const CAPTION_BUTTON_HEIGHT = 32
+/** Pencere düğmelerinin sayısı (küçült, büyüt, kapat). */
+const CAPTION_BUTTON_COUNT = 3
+
+/**
+ * Üst satırın sağında pencere düğmelerine ayrılan genişlik (px). Çerçeve kaldırılmadıysa (tarayıcı / mock, yerel
+ * Windows başlığı) 0: düzen eskisi gibi kalır.
+ */
+export function captionAreaWidth(frameless: boolean): number {
+  return frameless ? CAPTION_BUTTON_WIDTH * CAPTION_BUTTON_COUNT : 0
+}
+
+/** `document.documentElement`in burada kullanılan kısmı (testte sahtesi verilir). */
+export interface FramelessRoot {
+  classList: { toggle(name: string, force?: boolean): boolean }
+  style: { setProperty(name: string, value: string): void }
+}
+
+/**
+ * Çerçevesiz pencereyi sayfaya bildirir: `html.frameless` sınıfı sürükleme alanlarını (`.app-drag`) açar,
+ * `--caption-w` üst satırın sağında pencere düğmelerine yer ayırır. Çerçeve yokken ikisi de etkisiz (düzen aynen).
+ */
+export function syncFrameless(frameless: boolean, root: FramelessRoot = document.documentElement) {
+  root.classList.toggle('frameless', frameless)
+  root.style.setProperty('--caption-w', `${captionAreaWidth(frameless)}px`)
+}
+
 /** Üst kenardan yeniden boyutlandırma şeridi (px); büyütülmüşken yok. */
 export const RESIZE_GRIP = 5
 /** Köşe tutamağının genişliği (px). */

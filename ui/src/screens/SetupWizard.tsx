@@ -68,8 +68,9 @@ export function SetupWizard() {
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex flex-col bg-bg" role="dialog" aria-modal="true" aria-label="Kurulum sihirbazı">
-      <header className="flex h-14 shrink-0 items-center gap-4 border-b border-line bg-surface px-5">
+    // Sihirbaz üst satırın sürükleme alanını örter (app-no-drag); kendi başlığı pencereyi sürükler, sağ üst köşe pencere düğmelerinin.
+    <div className="app-no-drag fixed inset-0 z-40 flex flex-col bg-bg" role="dialog" aria-modal="true" aria-label="Kurulum sihirbazı">
+      <header className="app-drag caption-pad-right flex h-14 shrink-0 select-none items-center gap-4 border-b border-line bg-surface pl-5">
         <span className="text-[15px] font-semibold">Kurulum sihirbazı</span>
         <ol className="flex items-center gap-1.5">
           {STEPS.map((t, i) => (

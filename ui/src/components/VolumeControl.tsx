@@ -58,7 +58,8 @@ export function VolumeControl() {
 
   return (
     <div
-      className="flex items-center gap-2"
+      // Fare tekerleği bütün kutuda çalışır: üst satırın sürükleme alanından çıkar.
+      className="app-no-drag flex items-center gap-2"
       title="Ses düzeyi: klavyedeki ses tuşları ve Windows'un ses kaydırıcısı da bunu değiştirir"
       onWheel={(e) => change(level + (e.deltaY < 0 ? WHEEL_STEP : -WHEEL_STEP))}
     >

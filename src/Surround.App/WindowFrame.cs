@@ -13,10 +13,12 @@ namespace Surround.Desktop;
 /// Win+Z), the minimise / maximise animations, the taskbar button and icon, Alt+Tab, the system menu (Alt+Space) and
 /// the DWM drop shadow all keep working. Maximised, the client area is exactly the monitor's work area.
 ///
-/// The page draws the title bar (ui/src/components/TitleBar.tsx): dragging and double-clicking it is WebView2's own
-/// non-client support (CSS <c>app-region: drag</c>); its buttons, the top resize grip and the icon's system menu reach
-/// this class through the bridge (<c>window.*</c> methods) and are handed to Windows' own move / size loop.
-/// Any failure leaves the normal frame in place (<see cref="Active"/> false); the page then draws no title bar.
+/// There is no separate title bar: the app's own top row (ui/src/components/TopBar.tsx) sits at the very top of the
+/// window. Dragging and double-clicking its empty space is WebView2's own non-client support (CSS
+/// <c>app-region: drag</c>); the minimise / maximise / close buttons in its top-right corner and the top resize grip
+/// (ui/src/components/WindowControls.tsx) reach this class through the bridge (<c>window.*</c> methods) and are
+/// handed to Windows' own move / size loop. Any failure leaves the normal frame in place (<see cref="Active"/> false);
+/// the page then draws no window buttons.
 /// </summary>
 public sealed class WindowFrame
 {
@@ -31,7 +33,7 @@ public sealed class WindowFrame
     private const int SC_MOVE = 0xF010, SC_SIZE = 0xF000;
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20, DWMWA_BORDER_COLOR = 34;
 
-    /// <summary>Height of the page's title bar in DIPs (TitleBar.tsx); before the page is up, the window drags there.</summary>
+    /// <summary>Height of the page's window buttons in DIPs (WindowControls.tsx); before the page is up, the window drags there.</summary>
     public const double TitleBarHeight = 32;
     private const double TopGrip = 5;
 
@@ -47,7 +49,7 @@ public sealed class WindowFrame
         window.Deactivated += (_, _) => RaiseChanged();
     }
 
-    /// <summary>True once the caption is gone (the page must then draw its own title bar).</summary>
+    /// <summary>True once the caption is gone (the page must then draw its own window buttons).</summary>
     public bool Active { get; private set; }
 
     public bool Maximized => _hwnd != IntPtr.Zero && IsZoomed(_hwnd);
