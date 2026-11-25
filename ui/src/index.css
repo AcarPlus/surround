@@ -941,3 +941,74 @@ input[type='range'].big-range::-webkit-slider-thumb {
     display: none;
   }
 }
+
+/*
+ * Başlık çubuğu (TitleBar.tsx): Windows başlığının yerine. app-region: drag = pencere başlığı (WebView2 yerel
+ * sürükleme, Aero Snap, çift tık büyüt, sağ tık sistem menüsü); düğmeler ve tutamaklar no-drag.
+ */
+.app-drag {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+.titlebar {
+  background:
+    linear-gradient(90deg, rgb(var(--aurora-1) / 0.1), rgb(var(--aurora-2) / 0.12) 55%, rgb(var(--aurora-3) / 0.08)),
+    rgb(var(--sky-top));
+  transition: background-color 200ms ease;
+}
+.titlebar::after {
+  /* İnce aurora ışığı: başlıkla üst çubuk arasında. */
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(var(--aurora-1) / 0.35), rgb(var(--aurora-2) / 0.35), transparent);
+  transition: opacity 200ms ease;
+  pointer-events: none;
+}
+.titlebar-fade {
+  transition: opacity 200ms ease;
+}
+.titlebar-inactive .titlebar-fade {
+  opacity: 0.45;
+}
+.titlebar-inactive::after {
+  opacity: 0.3;
+}
+.caption-btn {
+  display: flex;
+  width: 46px;
+  align-items: center;
+  justify-content: center;
+  color: rgb(var(--fg));
+  background-color: transparent;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease;
+}
+.caption-btn:hover {
+  background-color: rgb(var(--fg) / 0.09);
+}
+.caption-btn:active {
+  background-color: rgb(var(--fg) / 0.05);
+}
+.caption-close:hover {
+  background-color: var(--close-hover, #c42b1c);
+  color: #fff;
+}
+.caption-close:active {
+  background-color: color-mix(in srgb, var(--close-hover, #c42b1c) 85%, transparent);
+  color: #fff;
+}
+.caption-close:hover .caption-glyph {
+  opacity: 1;
+}
+.caption-glyph {
+  font-family: 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+  font-size: 10px;
+  line-height: 1;
+}

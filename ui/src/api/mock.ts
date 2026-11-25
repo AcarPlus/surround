@@ -560,5 +560,13 @@ export function createMockApi(): SurroundApi {
       updateListeners.add(cb)
       return () => updateListeners.delete(cb)
     },
+    // Tarayıcıda pencere yok: başlık çubuğu çizilmez (frameless false), komutlar yok sayılır.
+    async windowCommand() {},
+    async getWindowState() {
+      return {}
+    },
+    onWindowState() {
+      return () => {}
+    },
   }
 }

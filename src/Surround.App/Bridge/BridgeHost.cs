@@ -8,7 +8,7 @@ namespace Surround.Desktop.Bridge;
 /// JSON-RPC over WebView2 messages.
 ///   page -> host: { id, method, params: [] }
 ///   host -> page: { id, result } | { id, error: { message, errors } }
-///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "engineState" | "deviceRejoined" | "calibration" | "profileApplied" | "phoneLink" | "phoneStart" | "volume" | "update", data }
+///   host -> page (push): { event: "status" | "levels" | "engine" | "engineError" | "engineState" | "deviceRejoined" | "calibration" | "profileApplied" | "phoneLink" | "phoneStart" | "volume" | "update" | "window", data }
 /// </summary>
 public sealed class BridgeHost : IDisposable
 {
@@ -19,14 +19,17 @@ public sealed class BridgeHost : IDisposable
     private readonly SurroundBackend _backend;
     private readonly Dispatcher _ui;
     private readonly Func<string, bool> _isTrustedSource;
+    private readonly WindowFrame? _frame;
     private volatile bool _closed;
 
-    public BridgeHost(CoreWebView2 web, SurroundBackend backend, Dispatcher ui, Func<string, bool> isTrustedSource)
+    public BridgeHost(CoreWebView2 web, SurroundBackend backend, Dispatcher ui, Func<string, bool> isTrustedSource, WindowFrame? frame = null)
     {
         _web = web;
         _backend = backend;
         _ui = ui;
         _isTrustedSource = isTrustedSource;
+        _frame = frame;
+        if (_frame is not null) _frame.Changed += OnWindowState;
 
         _web.WebMessageReceived += OnMessage;
         _backend.Status += OnStatus;
@@ -45,6 +48,9 @@ public sealed class BridgeHost : IDisposable
     }
 
     private void OnVolume(VolumeDto v) => PushEvent("volume", v);
+
+    /// <summary>The page's own title bar follows the window: restore glyph when maximised, faded when inactive.</summary>
+    private void OnWindowState(object state) => PushEvent("window", state);
 
     private void OnUpdate(UpdateDto u) => PushEvent("update", u);
 
@@ -129,7 +135,10 @@ public sealed class BridgeHost : IDisposable
         string response;
         try
         {
-            var result = await _backend.InvokeAsync(method, args);
+            // window.* drive the frameless window (title bar buttons, resize grip, system menu); UI thread, no await.
+            var result = method.StartsWith("window.", StringComparison.Ordinal) && _frame is not null
+                ? _frame.Invoke(method, args)
+                : await _backend.InvokeAsync(method, args);
             response = JsonSerializer.Serialize(new { id, result }, Json);
         }
         catch (BridgeException ex)
@@ -159,6 +168,7 @@ public sealed class BridgeHost : IDisposable
         _backend.PhoneStartRequested -= OnPhoneStart;
         _backend.VolumeChanged -= OnVolume;
         _backend.Updater.Changed -= OnUpdate;
+        if (_frame is not null) _frame.Changed -= OnWindowState;
         try { _web.WebMessageReceived -= OnMessage; } catch { }
     }
 }
