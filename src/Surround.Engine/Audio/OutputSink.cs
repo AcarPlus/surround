@@ -36,7 +36,7 @@ public sealed class OutputSink : IDisposable
     {
         _device = device;
         _log = log;
-        Name = device.FriendlyName;
+        Name = DeviceEnumeration.NameOf(device);
         var mix = device.AudioClient.MixFormat;
         DeviceRate = mix.SampleRate;
         DeviceChannels = mix.Channels;

@@ -85,6 +85,7 @@ public sealed partial class SurroundBackend : IDisposable
             case "cancelCalibration": Volatile.Read(ref _calCts)?.Cancel(); return null;
             case "getVolume" or "setVolume" or "setMute": return await VolumeAsync(method, args);
             case "getUpdate": return Updater.State;
+            case "startupMark": StartupTrace.Mark("ui-" + (Arg(args, 0).GetString() ?? "?")); return null;
             case "checkUpdate": return await Updater.CheckAsync();
             case "applyUpdate":
                 if (Updater.State.State != "ready") throw new BridgeException("Uygulanacak indirilmiş güncelleme yok.");

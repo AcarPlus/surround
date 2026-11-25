@@ -544,6 +544,7 @@ export function createMockApi(): SurroundApi {
       volumeListeners.add(cb)
       return () => volumeListeners.delete(cb)
     },
+    async startupMark() {},
     async getUpdate() {
       return { ...update }
     },

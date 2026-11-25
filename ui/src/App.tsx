@@ -1,14 +1,10 @@
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 import { useStore, LISTENER_ID } from './store/useStore'
 import { TopBar } from './components/TopBar'
 import { CableGate, cableMissing } from './components/CableGate'
 import { NavRail } from './components/NavRail'
 import { HomeScreen } from './screens/HomeScreen'
-import { CalibrationScreen } from './screens/CalibrationScreen'
-import { SoundScreen } from './screens/SoundScreen'
-import { SettingsScreen } from './screens/SettingsScreen'
-import { SetupWizard } from './screens/SetupWizard'
 import { IconX } from './components/icons'
 import { AuroraSky } from './components/aurora'
 import { ErrorBoundary } from './components/ErrorBoundary'
@@ -16,6 +12,23 @@ import { InitErrorScreen } from './components/InitErrorScreen'
 import { cx } from './components/ui'
 import { frameEnergy, useLevels } from './lib/useLevels'
 import { resolveShortcut } from './lib/shortcuts'
+
+/*
+ * Açılışta yalnızca Oda (ana) ekranı yüklenir; diğer ekranlar ayrı parçalarda gelir ve ilk çizimden sonra boşta önceden
+ * indirilir (yerel diskten, birkaç ms), böylece ilk açılışta ayrıştırılacak kod küçülür, ekran geçişi beklemez.
+ */
+const loadSound = () => import('./screens/SoundScreen')
+const loadCalibration = () => import('./screens/CalibrationScreen')
+const loadSettings = () => import('./screens/SettingsScreen')
+const loadWizard = () => import('./screens/SetupWizard')
+const SoundScreen = lazy(() => loadSound().then((m) => ({ default: m.SoundScreen })))
+const CalibrationScreen = lazy(() => loadCalibration().then((m) => ({ default: m.CalibrationScreen })))
+const SettingsScreen = lazy(() => loadSettings().then((m) => ({ default: m.SettingsScreen })))
+const SetupWizard = lazy(() => loadWizard().then((m) => ({ default: m.SetupWizard })))
+
+function prefetchScreens() {
+  for (const load of [loadSound, loadCalibration, loadSettings, loadWizard]) void load().catch(() => {})
+}
 
 function isTyping(t: EventTarget | null) {
   const el = t as HTMLElement | null
@@ -42,6 +55,8 @@ export function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = useStore.getState().theme
     void useStore.getState().init()
+    const id = window.setTimeout(prefetchScreens, 1500)
+    return () => window.clearTimeout(id)
   }, [])
 
   // Windows'taki değişiklikler (7.1 yapılandırma, varsayılan cihaz, takılan cihaz) uygulamaya kendiliğinden yansısın.
@@ -132,10 +147,12 @@ export function App() {
             // (requestAnimationFrame durur) ekran değişimi takılmaz.
             <ErrorBoundary resetKey={screen}>
               <div key={screen} className="screen-in h-full">
-                {screen === 'home' && <HomeScreen />}
-                {screen === 'sound' && <SoundScreen />}
-                {screen === 'calibration' && <CalibrationScreen />}
-                {screen === 'settings' && <SettingsScreen />}
+                <Suspense fallback={null}>
+                  {screen === 'home' && <HomeScreen />}
+                  {screen === 'sound' && <SoundScreen />}
+                  {screen === 'calibration' && <CalibrationScreen />}
+                  {screen === 'settings' && <SettingsScreen />}
+                </Suspense>
               </div>
             </ErrorBoundary>
           )}
@@ -143,7 +160,9 @@ export function App() {
       </div>
       {ready && wizardOpen && (
         <ErrorBoundary compact>
-          <SetupWizard />
+          <Suspense fallback={null}>
+            <SetupWizard />
+          </Suspense>
         </ErrorBoundary>
       )}
       <AnimatePresence>

@@ -19,6 +19,9 @@
     <!-- Startup: the DSP loops must not run as slow tier-0 code (that starved the sinks and caused an underrun in the first second). -->
     <TieredPGO>false</TieredPGO>
     <TieredCompilationQuickJitForLoops>false</TieredCompilationQuickJitForLoops>
+    <!-- Startup: precompiled (ReadyToRun) code for the app and its libraries, so the window, WebView2 host and engine
+         start do not wait for the JIT (measured in the launch log, "Açılış süreleri"). Publish only (build.ps1). -->
+    <PublishReadyToRun>true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>

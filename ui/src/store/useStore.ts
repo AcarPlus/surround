@@ -594,6 +594,10 @@ export const useStore = create<State>()((set, get) => {
       set({ initError: null })
       try {
         await get().loadAll()
+        // Açılış ölçümü: veriler bu karede çizilir.
+        const mark = () => api.startupMark('init').catch(() => {})
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(mark)
+        else void mark()
       } catch (e) {
         set({ initError: explainError(e) })
       }

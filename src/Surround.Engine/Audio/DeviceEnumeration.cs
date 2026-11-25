@@ -64,11 +64,9 @@ public static class DeviceEnumeration
         {
             using var en = new MMDeviceEnumerator();
             using var dev = en.GetDevice(id.Trim());
-            string? name = null;
-            try { name = dev.FriendlyName; } catch { /* property store unavailable */ }
-            if (dev.State != DeviceState.Active) return new DeviceProbe(id, name, false);
+            if (dev.State != DeviceState.Active) return new DeviceProbe(id, ReadProps(dev).Name, false);
             var info = Describe(dev);
-            return new DeviceProbe(id, name ?? info.Name, true, info.Channels, info.SampleRate);
+            return new DeviceProbe(id, info.Name, true, info.Channels, info.SampleRate);
         }
         catch
         {
@@ -88,18 +86,26 @@ public static class DeviceEnumeration
             }
             catch { /* device busy or exclusive-only */ }
         }
-        string? enumerator = null;
-        try
-        {
-            // PKEY_Device_EnumeratorName {a45c254e-df1c-4efd-8020-67d146a850e0},24
-            var key = new PropertyKey(new Guid("a45c254e-df1c-4efd-8020-67d146a850e0"), 24);
-            if (dev.Properties.Contains(key)) enumerator = dev.Properties[key].Value as string;
-        }
-        catch { /* property store unavailable */ }
-        var (bt, hf) = DeviceClassifier.Classify(enumerator, dev.FriendlyName);
-        return new DeviceInfo(dev.ID, dev.FriendlyName,
+        var (name, enumerator) = ReadProps(dev);
+        var (bt, hf) = DeviceClassifier.Classify(enumerator, name);
+        return new DeviceInfo(dev.ID, name ?? "",
             dev.DataFlow == DataFlow.Render ? DeviceFlow.Render : DeviceFlow.Capture,
             dev.State.ToString(), rate, ch, defaultId != null && dev.ID == defaultId, bt, hf);
+    }
+
+    /// <summary>The endpoint's friendly name, read by key (fast; see <see cref="EndpointProperties"/>); "" if unreadable.</summary>
+    public static string NameOf(MMDevice dev) => ReadProps(dev).Name ?? "";
+
+    /// <summary>Friendly name and enumerator (PKEY_Device_EnumeratorName), read by key (see <see cref="EndpointProperties"/>).</summary>
+    private static (string? Name, string? Enumerator) ReadProps(MMDevice dev)
+    {
+        var (name, enumerator) = EndpointProperties.Read(dev.ID);
+        if (name is null)
+        {
+            // Fallback: NAudio's own (slower) lookup.
+            try { name = dev.FriendlyName; } catch { /* property store unavailable */ }
+        }
+        return (name, enumerator);
     }
 }
 

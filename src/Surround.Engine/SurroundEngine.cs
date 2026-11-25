@@ -146,7 +146,7 @@ public sealed class SurroundEngine : IDisposable
             foreach (var s in _sinks) s.Start();
             _capture.StartRecording();
             _started = true;
-            _log?.Invoke($"Kaynak: {_srcDevice.FriendlyName} ({fs} Hz, {n} kanal, {(loopback ? "loopback" : "capture")})");
+            _log?.Invoke($"Kaynak: {DeviceEnumeration.NameOf(_srcDevice)} ({fs} Hz, {n} kanal, {(loopback ? "loopback" : "capture")})");
         }
         catch
         {

@@ -21,12 +21,30 @@ public sealed class MainWindow : Window
     private readonly SurroundBackend _backend = new();
     private BridgeHost? _bridge;
     private string? _devOrigin;
-    private readonly TrayIcon _tray;
+    private TrayIcon? _tray;
+
+    /// <summary>
+    /// The notification-area icon, created on first use (UI thread only). The constructor queues its creation behind
+    /// the window's first frame: building the WinForms menu and reading the profiles took ~110 ms of the launch.
+    /// </summary>
+    private TrayIcon Tray
+    {
+        get
+        {
+            if (_tray is not null) return _tray;
+            _tray = new TrayIcon(BringToFront, () => _ = ToggleEngineAsync(), id => _ = ApplyProfileAsync(id), ExitApplication);
+            RefreshTrayProfiles();
+            var st = _backend.EngineState;
+            _tray.SetRunning(st.State != EngineStateDto.StoppedName, st.State == EngineStateDto.WaitingName);
+            return _tray;
+        }
+    }
     private bool _exiting;
     private bool _shutDown;
 
     public MainWindow()
     {
+        StartupTrace.Mark("backend"); // field initializers (the backend) have run
         Title = "Surround";
         MinWidth = 1024;
         MinHeight = 700;
@@ -42,25 +60,26 @@ public sealed class MainWindow : Window
             CreationProperties = new CoreWebView2CreationProperties { UserDataFolder = AppPaths.WebView2Dir },
         };
         Content = _web;
+        StartupTrace.Mark("webctl");
 
-        _tray = new TrayIcon(BringToFront, () => _ = ToggleEngineAsync(), id => _ = ApplyProfileAsync(id), ExitApplication);
-        RefreshTrayProfiles();
+        // After the first frame (Render runs before Background); in the tray (no window) as soon as the loop is idle.
+        Dispatcher.InvokeAsync(() => { if (!_shutDown) _ = Tray; }, System.Windows.Threading.DispatcherPriority.Background);
         // Every save (the page saves while editing) re-reads the profiles from the saved document, off the UI thread.
         _backend.ConfigSaved += cfg =>
         {
             var profiles = ProfileCatalog.List(cfg);
             var active = ProfileCatalog.ActiveId(cfg);
-            _ = Dispatcher.InvokeAsync(() => { if (!_shutDown) _tray.SetProfiles(profiles, active); });
+            _ = Dispatcher.InvokeAsync(() => { if (!_shutDown) Tray.SetProfiles(profiles, active); });
         };
         _backend.StateChanged += st => _ = Dispatcher.InvokeAsync(() =>
         {
-            if (!_shutDown) _tray.SetRunning(st.State != EngineStateDto.StoppedName, st.State == EngineStateDto.WaitingName);
+            if (!_shutDown) Tray.SetRunning(st.State != EngineStateDto.StoppedName, st.State == EngineStateDto.WaitingName);
         });
 
         _backend.Updater.Changed += u => _ = Dispatcher.InvokeAsync(() =>
         {
             if (_shutDown || u.State != "ready") return;
-            if (!IsVisible) _tray.Balloon($"Surround {u.Version} indirildi. Pencereden yeniden başlatarak kurabilirsin; kapatıp açınca da kurulur.");
+            if (!IsVisible) Tray.Balloon($"Surround {u.Version} indirildi. Pencereden yeniden başlatarak kurabilirsin; kapatıp açınca da kurulur.");
         });
         _backend.UpdateRestartRequested += () => _ = Dispatcher.InvokeAsync(() =>
         {
@@ -69,10 +88,11 @@ public sealed class MainWindow : Window
             {
                 if (_backend.Updater.PrepareRestart()) ExitApplication();
             }
-            catch (Exception ex) { _tray.Balloon("Güncelleme başlatılamadı: " + ex.Message); }
+            catch (Exception ex) { Tray.Balloon("Güncelleme başlatılamadı: " + ex.Message); }
         });
 
         Loaded += async (_, _) => await InitializeWebAsync();
+        ContentRendered += (_, _) => StartupTrace.Mark("shown");
         Closing += OnClosing;
         Closed += (_, _) => Shutdown();
     }
@@ -80,20 +100,33 @@ public sealed class MainWindow : Window
     /// <summary>Launch-time chores that do not need the page: repair the default output after a crash, auto-start the engine.</summary>
     public async Task RunStartupAsync()
     {
-        _backend.Updater.StartBackground();
+        // A run with its own data folder (measurements) leaves the installed app's Run entry, updates and default output alone.
+        bool isolated = AppPaths.IsIsolated;
+        if (!isolated) _backend.Updater.StartBackground();
         var settings = _backend.Settings.Load();
-        try { StartupRegistration.Apply(settings.StartWithWindows); } catch { /* keep the stored value */ }
+        if (!isolated)
+        {
+            try { StartupRegistration.Apply(settings.StartWithWindows); } catch { /* keep the stored value */ }
+        }
 
         if (settings.StartEngineOnLaunch)
         {
-            try { await _backend.StartAsync(); return; }
+            try
+            {
+                // Off the UI thread: the window, WebView2 and the page come up meanwhile (a slow device, e.g. Bluetooth,
+                // only delays the sound, never the window).
+                await Task.Run(_backend.StartAsync);
+                StartupTrace.Mark("engine");
+                return;
+            }
             catch (Exception ex)
             {
-                _tray.Balloon("Motor başlatılamadı: " + (ex is BridgeException { Errors.Count: > 0 } be ? be.Errors[0] : ex.Message));
+                Tray.Balloon("Motor başlatılamadı: " + (ex is BridgeException { Errors.Count: > 0 } be ? be.Errors[0] : ex.Message));
             }
         }
         // The engine is not running: if an earlier crash left the source as the default output, undo that now.
-        await Task.Run(_backend.RestoreDefaultDevice);
+        if (!isolated) await Task.Run(_backend.RestoreDefaultDevice);
+        StartupTrace.Mark("engine");
     }
 
     private async Task ToggleEngineAsync()
@@ -105,7 +138,7 @@ public sealed class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _tray.Balloon((_backend.IsRunning ? "Durdurulamadı: " : "Başlatılamadı: ") +
+            Tray.Balloon((_backend.IsRunning ? "Durdurulamadı: " : "Başlatılamadı: ") +
                 (ex is BridgeException { Errors.Count: > 0 } be ? be.Errors[0] : ex.Message));
         }
     }
@@ -116,7 +149,7 @@ public sealed class MainWindow : Window
         try
         {
             var (profiles, active) = _backend.GetProfiles();
-            _tray.SetProfiles(profiles, active);
+            Tray.SetProfiles(profiles, active);
         }
         catch { /* unreadable config: keep the previous menu */ }
     }
@@ -125,13 +158,13 @@ public sealed class MainWindow : Window
     {
         try
         {
-            if (!await _backend.ApplyProfileAsync(id)) _tray.Balloon("Profil bulunamadı.");
+            if (!await _backend.ApplyProfileAsync(id)) Tray.Balloon("Profil bulunamadı.");
         }
         catch (Exception ex)
         {
             // Saved either way; only a running engine cares that the new settings could not be applied now.
             if (_backend.IsRunning)
-                _tray.Balloon("Profil uygulanamadı: " + (ex is BridgeException { Errors.Count: > 0 } be ? be.Errors[0] : ex.Message));
+                Tray.Balloon("Profil uygulanamadı: " + (ex is BridgeException { Errors.Count: > 0 } be ? be.Errors[0] : ex.Message));
         }
     }
 
@@ -144,7 +177,7 @@ public sealed class MainWindow : Window
         if (!s.TrayHintShown)
         {
             _backend.Settings.Update(x => x with { TrayHintShown = true });
-            _tray.Balloon("Surround arka planda çalışıyor");
+            Tray.Balloon("Surround arka planda çalışıyor");
         }
     }
 
@@ -168,6 +201,7 @@ public sealed class MainWindow : Window
         {
             Directory.CreateDirectory(AppPaths.WebView2Dir);
             await _web.EnsureCoreWebView2Async();
+            StartupTrace.Mark("webview");
         }
         catch (Exception ex)
         {
@@ -190,6 +224,7 @@ public sealed class MainWindow : Window
         core.NewWindowRequested += (_, e) => e.Handled = true;
         core.PermissionRequested += (_, e) => e.State = CoreWebView2PermissionState.Deny;
         core.DownloadStarting += (_, e) => e.Cancel = true;
+        core.NavigationCompleted += (_, _) => StartupTrace.Mark("page");
 
         _bridge = new BridgeHost(core, _backend, Dispatcher, IsTrusted);
 
@@ -203,6 +238,7 @@ public sealed class MainWindow : Window
             }
             core.SetVirtualHostNameToFolderMapping(VirtualHost, uiDir, CoreWebView2HostResourceAccessKind.DenyCors);
             core.Navigate(AppOrigin + "index.html");
+            StartupTrace.Mark("navigate");
         }
         else
         {
@@ -257,7 +293,7 @@ public sealed class MainWindow : Window
         _shutDown = true;
         _bridge?.Dispose();
         _backend.Dispose(); // stops the engine and restores the default output device
-        _tray.Dispose();
+        _tray?.Dispose();
         _web.Dispose();
     }
 

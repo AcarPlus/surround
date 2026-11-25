@@ -9,9 +9,11 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        StartupTrace.Mark("main");
         // Must be the very first thing: handles installer/updater hooks (install, uninstall, updated ...)
         // and exits the process for them before any UI starts.
         VelopackApp.Build().Run();
+        StartupTrace.Mark("velopack");
 
         // It also installs an update that was downloaded but never applied (auto-apply on startup). The checks
         // themselves run in the background once the window is up (Bridge/AppUpdater.cs).
@@ -23,7 +25,9 @@ public static class Program
         bool startInTray = args.Any(a => a.Equals(StartupRegistration.TrayArgument, StringComparison.OrdinalIgnoreCase));
 
         var app = new Application { ShutdownMode = ShutdownMode.OnMainWindowClose };
+        StartupTrace.Mark("app");
         var window = new MainWindow();
+        StartupTrace.Mark("window");
         instance.Activated += () => app.Dispatcher.InvokeAsync(window.BringToFront);
         app.SessionEnding += (_, _) => window.PrepareForSessionEnd();
         app.Exit += (_, _) => window.Shutdown();

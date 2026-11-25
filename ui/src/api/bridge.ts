@@ -222,6 +222,7 @@ export function createBridgeApi(): SurroundApi {
     setMute: async (muted) => normalizeVolume(await call<unknown>('setMute', muted)),
     onVolume: (cb) => subscribe(volumeListeners, cb),
     getUpdate: async () => normalizeUpdate(await call<unknown>('getUpdate')),
+    startupMark: (step) => call<void>('startupMark', step),
     checkUpdate: async () => normalizeUpdate(await call<unknown>('checkUpdate')),
     applyUpdate: () => call<void>('applyUpdate'),
     onUpdate: (cb) => subscribe(updateListeners, cb),

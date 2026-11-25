@@ -94,6 +94,8 @@ export interface SurroundApi {
   onVolume(cb: (v: VolumeState) => void): () => void
   /** Otomatik güncelleme: açılıştan kısa süre sonra ve birkaç saatte bir arka planda denetlenir ve indirilir. */
   getUpdate(): Promise<UpdateState>
+  /** Açılış ölçümü: sayfanın bir adıma ulaştığını bildirir ("paint" ilk çizim, "init" veriler yüklendi); günlüğe yazılır. */
+  startupMark(step: string): Promise<void>
   checkUpdate(): Promise<UpdateState>
   /** İndirilen sürümü kurar: uygulama kapanır, güncellenir ve yeniden açılır. */
   applyUpdate(): Promise<void>
