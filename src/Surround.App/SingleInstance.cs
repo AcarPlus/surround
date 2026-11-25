@@ -3,8 +3,16 @@ namespace Surround.Desktop;
 /// <summary>Per-user single instance: the first process owns a mutex and listens for an activation signal.</summary>
 public sealed class SingleInstance : IDisposable
 {
-    private const string MutexName = @"Local\Surround.SingleInstance.5f0c8a1e";
-    private const string SignalName = @"Local\Surround.Activate.5f0c8a1e";
+    /// <summary>
+    /// A trial run (SURROUND_DATA_DIR, see AppPaths) gets its own lock and signal per data folder, so it opens next to
+    /// an installed Surround instead of bringing that one to the front.
+    /// </summary>
+    private static readonly string Scope = Bridge.AppPaths.IsRedirected ? "." + StableId(Bridge.AppPaths.DataDir) : "";
+    private static readonly string MutexName = @"Local\Surround.SingleInstance.5f0c8a1e" + Scope;
+    private static readonly string SignalName = @"Local\Surround.Activate.5f0c8a1e" + Scope;
+
+    private static string StableId(string path) => Convert.ToHexString(
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(path.ToUpperInvariant())))[..12];
 
     private readonly Mutex _mutex;
     private readonly EventWaitHandle _signal;

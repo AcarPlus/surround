@@ -235,7 +235,8 @@ export function TopBar() {
 
   return (
     <>
-    <header className="glass relative z-20 flex h-[72px] shrink-0 items-center gap-5 border-b border-line/60 px-5">
+    {/* Pencerenin en üst satırı: boş yeri sürüklenir (çerçevesiz pencerede), sağ üst köşe pencere düğmelerinin. */}
+    <header className="glass app-drag caption-pad-right relative z-20 flex h-[72px] shrink-0 select-none items-center gap-5 border-b border-line/60 pl-5">
       {running && <span className="run-line" aria-hidden />}
       <div className="flex w-[124px] shrink-0 items-center gap-2.5">
         <span className="logo-pulse flex h-9 w-9 items-center justify-center rounded-xl">

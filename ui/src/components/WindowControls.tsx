@@ -2,14 +2,15 @@ import { useEffect, useState } from 'react'
 import type { ResizeEdge, WindowState } from '../api/types'
 import { api } from '../api/client'
 import { useStore } from '../store/useStore'
-import appIcon from '../../../src/Surround.App/Assets/surround.ico'
 import {
+  CAPTION_BUTTON_HEIGHT,
+  CAPTION_BUTTON_WIDTH,
   CLOSE_HOVER,
   EDGE_CURSOR,
-  TITLEBAR_HEIGHT,
   captionButtons,
   initialWindowState,
   normalizeWindowState,
+  syncFrameless,
   topEdgeAt,
 } from '../lib/titlebar'
 import { cx } from './ui'
@@ -32,9 +33,8 @@ function useWindowState(): WindowState {
 }
 
 /** Üst kenar tutamağı: Windows'un üst çerçevesi sayfanın altında kaldığı için yeniden boyutlandırmayı buradan başlatır. */
-function TopGrip({ maximized }: { maximized: boolean }) {
+function TopGrip() {
   const [cursor, setCursor] = useState<string>('ns-resize')
-  if (maximized) return null
   const edgeOf = (e: React.PointerEvent<HTMLDivElement>): ResizeEdge | null => {
     const r = e.currentTarget.getBoundingClientRect()
     return topEdgeAt(e.clientX - r.left, e.clientY - r.top, r.width, false)
@@ -42,7 +42,7 @@ function TopGrip({ maximized }: { maximized: boolean }) {
   return (
     <div
       aria-hidden
-      className="app-no-drag absolute inset-x-0 top-0 z-10 h-[5px]"
+      className="app-no-drag fixed inset-x-0 top-0 z-[91] h-[5px]"
       style={{ cursor }}
       onPointerMove={(e) => {
         const edge = edgeOf(e)
@@ -59,13 +59,15 @@ function TopGrip({ maximized }: { maximized: boolean }) {
 }
 
 /**
- * Uygulamanın kendi başlık çubuğu (Windows başlığının yerine, C# WindowFrame). Boş yeri sürüklenir ve çift tıkla
- * büyür (WebView2 `app-region: drag`; Aero Snap, sağ tık sistem menüsü dahil). Simge: sistem menüsü. Düğmeler
- * yerel küçült/büyüt/kapat komutlarını gönderir (animasyonlar ve tepsiye gizleme aynen). Pencere etkin değilken soluk.
+ * Küçült / büyüt / kapat: ayrı başlık şeridi yok, uygulamanın üst satırının sağ üst köşesinde (Windows 11 gibi)
+ * durur. Sabit konumlu ve en üstte: sihirbaz, iletişim kutuları ve kablo ekranı açıkken de erişilir. Üst satırın
+ * boş yeri sürüklenir ve çift tıkla büyür (WebView2 `app-region: drag`, TopBar). Pencere etkin değilken soluk.
  */
-export function TitleBar() {
+export function WindowControls() {
   const win = useWindowState()
   const theme = useStore((s) => s.theme)
+
+  useEffect(() => syncFrameless(win.frameless), [win.frameless])
 
   // Sistem menüsü ve Windows 11 kenarlığı temaya uysun.
   useEffect(() => {
@@ -73,27 +75,14 @@ export function TitleBar() {
   }, [theme, win.frameless])
 
   if (!win.frameless) return null
-  const dim = !win.active
 
   return (
-    <div
-      className={cx('titlebar app-drag relative z-[70] flex shrink-0 select-none items-stretch', dim && 'titlebar-inactive')}
-      style={{ height: TITLEBAR_HEIGHT }}
-    >
-      <TopGrip maximized={win.maximized} />
-      <button
-        type="button"
-        tabIndex={-1}
-        aria-label="Pencere menüsü"
-        className="app-no-drag flex w-10 shrink-0 items-center justify-center"
-        onClick={() => void api.windowCommand({ kind: 'menu' }).catch(() => {})}
-        onDoubleClick={() => void api.windowCommand({ kind: 'button', button: 'close' }).catch(() => {})}
+    <>
+      {!win.maximized && <TopGrip />}
+      <div
+        className={cx('caption-bar app-no-drag fixed right-0 top-0 z-[90] flex select-none', !win.active && 'caption-inactive')}
+        style={{ height: CAPTION_BUTTON_HEIGHT }}
       >
-        <img src={appIcon} alt="" width={16} height={16} draggable={false} className="titlebar-fade h-4 w-4" />
-      </button>
-      <span className="titlebar-fade flex items-center text-xs font-medium tracking-wide text-fg/80">Surround</span>
-      <div className="flex-1" />
-      <div className="app-no-drag flex">
         {captionButtons(win.maximized).map((b) => (
           <button
             key={b.button}
@@ -102,13 +91,16 @@ export function TitleBar() {
             aria-label={b.label}
             title={b.label}
             className={cx('caption-btn', b.button === 'close' && 'caption-close')}
-            style={b.button === 'close' ? ({ ['--close-hover' as string]: CLOSE_HOVER } as React.CSSProperties) : undefined}
+            style={{
+              width: CAPTION_BUTTON_WIDTH,
+              ...(b.button === 'close' ? { ['--close-hover' as string]: CLOSE_HOVER } : {}),
+            }}
             onClick={() => void api.windowCommand({ kind: 'button', button: b.button }).catch(() => {})}
           >
-            <span className="caption-glyph titlebar-fade">{b.glyph}</span>
+            <span className="caption-glyph">{b.glyph}</span>
           </button>
         ))}
       </div>
-    </div>
+    </>
   )
 }

@@ -109,6 +109,8 @@ export function App() {
   if (ready && gate) {
     return (
       <div className="h-full min-w-[1000px]">
+        {/* Üst satır yok: pencereyi tepedeki boş şeritten sürükle (görünmez, yalnız çerçevesiz pencerede etkin). */}
+        <div aria-hidden className="frameless-only app-drag fixed inset-x-0 top-0 h-8" />
         <ErrorBoundary compact>
           <CableGate devices={devices} />
         </ErrorBoundary>

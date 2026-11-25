@@ -7,17 +7,16 @@ import '@fontsource/geist-mono/400.css'
 import '@fontsource/geist-mono/600.css'
 import './index.css'
 import { App } from './App'
-import { TitleBar } from './components/TitleBar'
+import { WindowControls } from './components/WindowControls'
+import { initialWindowState, syncFrameless } from './lib/titlebar'
+
+// İlk çizimden önce: çerçevesiz pencerede üst satır düğmelere yer ayırır ve sürüklenir (sayfa kayması olmasın).
+syncFrameless(initialWindowState().frameless)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <div className="flex h-full flex-col">
-      {/* Windows başlığının yerine (yalnız masaüstü uygulamasında). */}
-      <TitleBar />
-      {/* contain: paint -> tam ekran katmanlar (sihirbaz, bildirim) başlık çubuğunun altında kalır. */}
-      <div className="min-h-0 flex-1" style={{ contain: 'paint' }}>
-        <App />
-      </div>
-    </div>
+    <App />
+    {/* Ayrı başlık şeridi yok: pencere düğmeleri uygulamanın üst satırının sağ üst köşesinde (yalnız masaüstünde). */}
+    <WindowControls />
   </StrictMode>,
 )

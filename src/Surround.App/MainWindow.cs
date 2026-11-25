@@ -36,7 +36,8 @@ public sealed class MainWindow : Window
         Background = new SolidColorBrush(Backdrop);
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         try { Icon = BitmapFrame.Create(new Uri("pack://application:,,,/Assets/surround.ico", UriKind.Absolute)); } catch { }
-        // No Windows caption: the page draws an Aurora title bar (TitleBar.tsx); snap, shadow, Alt+Tab ... stay native.
+        // No Windows caption and no separate title bar: the app's top row is the caption, with the window buttons in its
+        // top-right corner (WindowControls.tsx); snap, shadow, Alt+Tab ... stay native.
         _frame = new WindowFrame(this);
 
         _web = new WebView2
@@ -199,7 +200,7 @@ public sealed class MainWindow : Window
         core.DownloadStarting += (_, e) => e.Cancel = true;
 
         _bridge = new BridgeHost(core, _backend, Dispatcher, IsTrusted, _frame);
-        // Before any page script: the page draws its own title bar only when the Windows caption is really gone.
+        // Before any page script: the page draws its own window buttons only when the Windows caption is really gone.
         if (_frame.Active)
         {
             try { await core.AddScriptToExecuteOnDocumentCreatedAsync("window.__SURROUND_FRAMELESS__ = true;"); }
@@ -230,7 +231,7 @@ public sealed class MainWindow : Window
         s.IsPasswordAutosaveEnabled = false;
         s.IsGeneralAutofillEnabled = false;
         s.IsSwipeNavigationEnabled = false;
-        // CSS app-region: drag on the page's title bar = the window's caption (move, snap, double-click, system menu).
+        // CSS app-region: drag on the empty space of the page's top row = the window's caption (move, snap, double-click, system menu).
         s.IsNonClientRegionSupportEnabled = true;
 #if DEBUG
         s.AreDevToolsEnabled = true;
