@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect } from 'react'
+import { Suspense, lazy, useEffect, useRef } from 'react'
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion'
 import { useStore, LISTENER_ID } from './store/useStore'
 import { TopBar } from './components/TopBar'
@@ -10,7 +10,7 @@ import { AuroraSky } from './components/aurora'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { InitErrorScreen } from './components/InitErrorScreen'
 import { cx } from './components/ui'
-import { frameEnergy, useLevels } from './lib/useLevels'
+import { useEnergyVar } from './lib/useLevels'
 import { resolveShortcut } from './lib/shortcuts'
 
 /*
@@ -49,8 +49,10 @@ export function App() {
   const initError = useStore((s) => s.initError)
   const devices = useStore((s) => s.devices)
   const runState = useStore((s) => s.runState)
-  const energy = frameEnergy(useLevels(runState === 'running'))
   const gate = cableMissing(devices)
+  // Sesle parlama (--energy): seviyeler 20 Hz gelir, kök yeniden çizilmeden doğrudan öğeye yazılır.
+  const rootRef = useRef<HTMLDivElement>(null)
+  useEnergyVar(rootRef, runState === 'running', `${ready}-${gate}-${!!initError}`)
 
   useEffect(() => {
     document.documentElement.dataset.theme = useStore.getState().theme
@@ -135,7 +137,7 @@ export function App() {
 
   return (
     <MotionConfig reducedMotion="user">
-    <div className="relative isolate flex h-full min-w-[1000px] flex-col bg-bg" style={{ ['--energy' as string]: energy.toFixed(3) }}>
+    <div ref={rootRef} className="relative isolate flex h-full min-w-[1000px] flex-col bg-bg">
       {/* Aurora göğü: akan renk perdeleri ve yıldızlar; motor çalışırken sesle parlar. Cam paneller bunun üstünde durur. */}
       <AuroraSky live={runState === 'running'} />
       <ErrorBoundary compact>

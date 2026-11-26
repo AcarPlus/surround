@@ -21,6 +21,14 @@ public sealed class BridgeHost : IDisposable
     private readonly Func<string, bool> _isTrustedSource;
     private readonly WindowFrame? _frame;
     private volatile bool _closed;
+    private volatile bool _pageVisible = true;
+
+    /// <summary>
+    /// False while the window is in the tray or minimised: the periodic samples (meters 20 Hz, status and engine info
+    /// 4 Hz) are not sent, so a hidden page does no work for them. One-off events (state changes, errors, the "off"
+    /// frame on stop) always go through; the next periodic sample arrives within 250 ms of showing the window.
+    /// </summary>
+    public bool PageVisible { get => _pageVisible; set => _pageVisible = value; }
 
     public BridgeHost(CoreWebView2 web, SurroundBackend backend, Dispatcher ui, Func<string, bool> isTrustedSource, WindowFrame? frame = null)
     {
@@ -80,12 +88,19 @@ public sealed class BridgeHost : IDisposable
 
     private void OnCalibration(Surround.Engine.Calibration.CalibrationProgress p) => PushEvent("calibration", p);
 
-    private void OnInfo(EngineInfoDto info) => PushEvent("engine", info);
+    private void OnInfo(EngineInfoDto info)
+    {
+        if (_pageVisible) PushEvent("engine", info);
+    }
 
-    private void OnStatus(IReadOnlyList<SinkStatusDto> status) => PushEvent("status", status);
+    private void OnStatus(IReadOnlyList<SinkStatusDto> status)
+    {
+        if (_pageVisible) PushEvent("status", status);
+    }
 
     private void OnLevels(float[] db)
     {
+        if (!_pageVisible) return;
         var frame = new Dictionary<string, double>(ChannelNames.Length);
         for (int i = 0; i < ChannelNames.Length && i < db.Length; i++) frame[ChannelNames[i]] = Math.Round(db[i], 1);
         PushEvent("levels", frame);

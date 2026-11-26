@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type RefObject } from 'react'
 import { api } from '../api/client'
 import type { LevelFrame, LogicalChannel, Speaker } from '../api/types'
 import { primaryChannel } from './geometry'
@@ -14,6 +14,36 @@ export function useLevels(active: boolean): LevelFrame | null {
     return api.onLevels(setFrame)
   }, [active])
   return frame
+}
+
+/** `--energy` için yazılan değer: iki basamak (görünür fark yok, aynı değer yeniden yazılmaz). */
+export function energyVar(frame: LevelFrame | null): string {
+  return frameEnergy(frame).toFixed(2)
+}
+
+/**
+ * Sesin genel enerjisini (`--energy`, 0..1) verilen öğeye CSS değişkeni olarak yazar; React çizimi olmadan. Seviyeler
+ * saniyede 20 kez gelir: değer uygulamanın kökünde React durumu olarak tutulunca bütün ağaç her seferinde yeniden
+ * çiziliyordu. `mountKey` öğenin yeniden kurulduğunu bildirir (ör. açılış ekranından ana görünüme geçiş).
+ */
+export function useEnergyVar(ref: RefObject<HTMLElement>, active: boolean, mountKey?: unknown) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let last = ''
+    const write = (v: string) => {
+      if (v === last) return
+      last = v
+      el.style.setProperty('--energy', v)
+    }
+    write(energyVar(null))
+    if (!active) return
+    const off = api.onLevels((f) => write(energyVar(f)))
+    return () => {
+      off()
+      write(energyVar(null))
+    }
+  }, [ref, active, mountKey])
 }
 
 /** Gösterge aralığı: −54 dBFS sessiz, 0 dBFS dolu. */

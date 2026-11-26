@@ -13,7 +13,9 @@ import {
   isCaptionTarget,
   normalizeWindowState,
   syncFrameless,
+  syncWindowIdle,
   topEdgeAt,
+  windowIdle,
 } from '../lib/titlebar'
 import { cx } from './ui'
 
@@ -122,6 +124,9 @@ export function WindowControls() {
 
   useEffect(() => syncFrameless(win.frameless), [win.frameless])
   useCaptionDrag(win.frameless)
+  // Başka uygulama öndeyken süs animasyonları durur (index.css .window-idle).
+  const idle = windowIdle(win)
+  useEffect(() => syncWindowIdle(idle), [idle])
 
   // Sistem menüsü ve Windows 11 kenarlığı temaya uysun.
   useEffect(() => {

@@ -943,6 +943,19 @@ input[type='range'].big-range::-webkit-slider-thumb {
 }
 
 /*
+ * Pencere etkin değilken (başka bir uygulamada çalışılırken; html.window-idle, WindowControls.tsx) süs animasyonları
+ * olduğu yerde durur: görünüm aynı kalır, ama bulanık aurora perdeleri ve yıldızlar her karede yeniden çizilmez
+ * (ekran kartı ve işlemci boşta çalışmaz). Pencereye dönünce kaldığı yerden sürer. Ölçüm göstergeleri (radar, akan
+ * ışık) ve sesle değişen parlaklık sürer: onlar bilgidir.
+ */
+.window-idle :is(.aurora-text, .aurora-band, .aurora-rays, .dust, .beam-flow, .listener-orbit, .run-line, .particle, .stage-ghost, .breath),
+.window-idle .stage-live .stage-ring,
+.window-idle .run-live::before,
+.window-idle .run-idle::after {
+  animation-play-state: paused;
+}
+
+/*
  * Ayrı başlık şeridi yok: uygulamanın üst satırı (TopBar) pencerenin en tepesinde. Çerçevesiz pencerede
  * (html.frameless) .app-drag işaretli satırın boş yeri pencere başlığıdır; .app-no-drag ve etkileşimli öğeler
  * istisnadır. Sürükleme / çift tık / sağ tık sayfada yakalanıp Windows'a verilir (WindowControls.tsx,

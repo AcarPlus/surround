@@ -81,6 +81,18 @@ export function isCaptionTarget<N extends CaptionNode<N>>(target: N | null): boo
   return !blocker || blocker === area || !area.contains(blocker)
 }
 
+/**
+ * Pencere etkin değil mi (başka uygulama önde)? `html.window-idle` süs animasyonlarını durdurur (index.css). Yalnız
+ * masaüstü uygulamasında bilinir; tarayıcıda hep etkin sayılır.
+ */
+export function windowIdle(state: WindowState): boolean {
+  return state.frameless && !state.active
+}
+
+export function syncWindowIdle(idle: boolean, root: Pick<FramelessRoot, 'classList'> = document.documentElement) {
+  root.classList.toggle('window-idle', idle)
+}
+
 /** Üst kenardan yeniden boyutlandırma şeridi (px); büyütülmüşken yok. */
 export const RESIZE_GRIP = 5
 /** Köşe tutamağının genişliği (px). */

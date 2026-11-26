@@ -99,6 +99,25 @@ public sealed class MainWindow : Window
         ContentRendered += (_, _) => StartupTrace.Mark("shown");
         Closing += OnClosing;
         Closed += (_, _) => Shutdown();
+        IsVisibleChanged += (_, _) => UpdatePageVisibility();
+        StateChanged += (_, _) => UpdatePageVisibility();
+    }
+
+    /// <summary>The page is on screen: the window is shown (not in the tray) and not minimised.</summary>
+    private bool PageShown => IsVisible && WindowState != WindowState.Minimized;
+
+    /// <summary>
+    /// Hidden in the tray or minimised, the page costs nothing: WebView2 is told it is not visible (a minimised window
+    /// otherwise keeps drawing every animation frame) and the bridge stops sending the 20 Hz meter and 4 Hz status
+    /// samples (the next one arrives within 250 ms of showing the window again).
+    /// </summary>
+    private void UpdatePageVisibility()
+    {
+        if (_shutDown) return;
+        bool shown = PageShown;
+        if (_bridge is not null) _bridge.PageVisible = shown;
+        var v = shown ? Visibility.Visible : Visibility.Hidden;
+        if (_web.Visibility != v) _web.Visibility = v;
     }
 
     /// <summary>Launch-time chores that do not need the page: repair the default output after a crash, auto-start the engine.</summary>
@@ -230,7 +249,7 @@ public sealed class MainWindow : Window
         core.DownloadStarting += (_, e) => e.Cancel = true;
         core.NavigationCompleted += (_, _) => StartupTrace.Mark("page");
 
-        _bridge = new BridgeHost(core, _backend, Dispatcher, IsTrusted, _frame);
+        _bridge = new BridgeHost(core, _backend, Dispatcher, IsTrusted, _frame) { PageVisible = PageShown };
         // Before any page script: the page draws its own window buttons only when the Windows caption is really gone.
         if (_frame.Active)
         {
