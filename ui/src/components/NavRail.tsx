@@ -42,12 +42,13 @@ export function NavRail() {
                 className="absolute inset-0 rounded-2xl border border-accent/40 bg-[linear-gradient(160deg,rgb(var(--aurora-1)/0.2),rgb(var(--aurora-2)/0.16)_60%,rgb(var(--aurora-3)/0.12))] shadow-[0_0_26px_-4px_rgb(var(--aurora-1)/0.5),inset_0_1px_0_rgb(255_255_255/0.08)]"
               />
             )}
+            {/* Dikey ortalama translate ile değil inset+margin ile: framer-motion layout animasyonu transform'u ezer, bar aşağı kayardı. */}
             {active && (
               <motion.span
                 layoutId="nav-tick"
                 transition={PILL_SPRING}
                 aria-hidden
-                className="absolute -left-[10px] top-1/2 h-7 w-[3px] -translate-y-1/2 rounded-full bg-[linear-gradient(180deg,rgb(var(--aurora-1)),rgb(var(--aurora-2)))] shadow-[0_0_10px_rgb(var(--aurora-1))]"
+                className="absolute inset-y-0 -left-[10px] my-auto h-7 w-[3px] rounded-full bg-[linear-gradient(180deg,rgb(var(--aurora-1)),rgb(var(--aurora-2)))] shadow-[0_0_10px_rgb(var(--aurora-1))]"
               />
             )}
             <span

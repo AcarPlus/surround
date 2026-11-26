@@ -3,11 +3,10 @@ import { useStore } from '../store/useStore'
 import { RoomStage } from '../components/RoomStage'
 import { DemoOverlay } from '../components/DemoOverlay'
 import { SpeakerPopover } from '../components/SpeakerPopover'
-import { LayoutPicker } from '../components/LayoutPicker'
 import { Inspector } from '../components/Inspector'
 import { Menu, type MenuItem } from '../components/Dialog'
-import { Button, NumberField, cx } from '../components/ui'
-import { IconPlus, IconVolume, IconX } from '../components/icons'
+import { Button, cx } from '../components/ui'
+import { IconCheck, IconDots, IconOrbit, IconPlus, IconSpread, IconStop, IconVolume, IconWand, IconX } from '../components/icons'
 import { ROLES, effectiveRole } from '../lib/roles'
 import { GHOST_ROLES } from '../components/RoomStage'
 import { primaryChannel } from '../lib/geometry'
@@ -41,39 +40,7 @@ export function HomeScreen() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Tek sıra: düzen çipleri solda (sığmazsa yatay kayar), araçlar sağda; hiçbir şey alt satıra düşmez. */}
-      <div className="flex shrink-0 items-center gap-4 px-6 pb-1 pt-4">
-        <ChipScroller>
-          <LayoutPicker />
-        </ChipScroller>
-        <div className="flex shrink-0 items-center gap-1.5">
-          <ToolButton
-            active={demo}
-            onClick={() => setDemo((v) => !v)}
-            disabled={speakers.length === 0}
-            title="Ses turu: sentez bir ses odada döner, sağa sola gider; çevresel sesin sende çalışıp çalışmadığını duy."
-          >
-            Ses turu
-          </ToolButton>
-          <ToolButton
-            active={positional}
-            onClick={() => setPositional(!positional)}
-            disabled={speakers.length === 0}
-            title="Açıkken her kanal standart yönünden duyulur: o yöne en yakın iki hoparlör arasında paylaştırılır (ör. orta 0°, sağ 60° ise ön sağ ikisinden eşit çalar). Rol yerine sahnedeki yönler kullanılır; yönleri doğru yerleştir."
-          >
-            Konuma göre dağıt
-          </ToolButton>
-          <ToolButton onClick={() => (playing ? stopTour() : void playTour())} disabled={speakers.length === 0}>
-            <IconVolume width={15} height={15} /> {playing ? 'Durdur' : 'Sırayla çal'}
-          </ToolButton>
-          {editing && <OtherRolesMenu />}
-          <ToolButton active={editing} onClick={() => setEditing((v) => !v)} disabled={speakers.length === 0}>
-            <IconPlus width={15} height={15} /> {editing ? 'Bitti' : 'Hoparlör ekle'}
-          </ToolButton>
-          <RoomMenu />
-        </div>
-      </div>
-
+      <div className="flex min-h-0 flex-1">
       <div className="relative min-h-0 flex-1">
         <RoomStage
           editing={editing}
@@ -114,6 +81,41 @@ export function HomeScreen() {
         )}
       </div>
 
+      {/* Sağda dikey araç sütunu: hepsi aynı boy, hepsinde ikon; seyrek kullanılan kurulum işlemleri en altta. */}
+      <aside aria-label="Oda araçları" className="flex w-[184px] shrink-0 flex-col gap-2 py-4 pl-1 pr-5">
+        <ToolButton active={editing} onClick={() => setEditing((v) => !v)} disabled={speakers.length === 0}>
+          {editing ? <IconCheck width={14} height={14} /> : <IconPlus />}
+          {editing ? 'Bitti' : 'Hoparlör ekle'}
+        </ToolButton>
+        {editing && <OtherRolesMenu />}
+        <ToolButton active={!!playing} onClick={() => (playing ? stopTour() : void playTour())} disabled={speakers.length === 0}>
+          {playing ? <IconStop width={14} height={14} /> : <IconVolume />}
+          {playing ? 'Durdur' : 'Sırayla çal'}
+        </ToolButton>
+        <ToolButton
+          active={demo}
+          onClick={() => setDemo((v) => !v)}
+          disabled={speakers.length === 0}
+          title="Ses turu: sentez bir ses odada döner, sağa sola gider; çevresel sesin sende çalışıp çalışmadığını duy."
+        >
+          <IconOrbit />
+          Ses turu
+        </ToolButton>
+        <ToolButton
+          active={positional}
+          onClick={() => setPositional(!positional)}
+          disabled={speakers.length === 0}
+          title="Açıkken her kanal standart yönünden duyulur: o yöne en yakın iki hoparlör arasında paylaştırılır (ör. orta 0°, sağ 60° ise ön sağ ikisinden eşit çalar). Rol yerine sahnedeki yönler kullanılır; yönleri doğru yerleştir."
+        >
+          <IconSpread />
+          Konuma göre dağıt
+        </ToolButton>
+        <div className="mt-auto">
+          <SetupMenu />
+        </div>
+      </aside>
+      </div>
+
       <LevelStrip />
     </div>
   )
@@ -140,49 +142,12 @@ function ToolButton({
       title={title}
       aria-pressed={active}
       className={cx(
-        'flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 text-xs font-semibold transition-all duration-300 active:scale-[0.96] disabled:opacity-40 disabled:active:scale-100',
+        'flex h-9 w-full items-center gap-2 whitespace-nowrap rounded-xl border px-3 text-left text-xs font-semibold transition-all duration-300 active:scale-[0.97] disabled:opacity-40 disabled:active:scale-100 [&>svg]:shrink-0',
         active ? 'chip-aurora' : 'border-line bg-surface/60 backdrop-blur-sm hover:border-accent/40 hover:shadow-[0_0_16px_-6px_rgb(var(--accent)/0.6)]',
       )}
     >
       {children}
     </button>
-  )
-}
-
-/**
- * Düzen çiplerinin kabı: sığmazsa yatay kayar (fare tekerleği de kaydırır), taşan kenar keskin kesilmek yerine yumuşakça
- * solar; hangi kenarda devamı varsa orada.
- */
-function ChipScroller({ children }: { children: React.ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const [edge, setEdge] = useState({ l: false, r: false })
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    const upd = () => setEdge({ l: el.scrollLeft > 1, r: el.scrollLeft + el.clientWidth < el.scrollWidth - 1 })
-    const wheel = (e: WheelEvent) => {
-      if (el.scrollWidth <= el.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
-      el.scrollLeft += e.deltaY
-      e.preventDefault()
-    }
-    upd()
-    const ro = new ResizeObserver(upd)
-    ro.observe(el)
-    if (el.firstElementChild) ro.observe(el.firstElementChild)
-    el.addEventListener('scroll', upd, { passive: true })
-    el.addEventListener('wheel', wheel, { passive: false })
-    return () => {
-      ro.disconnect()
-      el.removeEventListener('scroll', upd)
-      el.removeEventListener('wheel', wheel)
-    }
-  }, [])
-  const f = 36
-  const mask = `linear-gradient(90deg, ${edge.l ? 'transparent' : '#000'} 0, #000 ${edge.l ? f : 0}px, #000 calc(100% - ${edge.r ? f : 0}px), ${edge.r ? 'transparent' : '#000'} 100%)`
-  return (
-    <div ref={ref} className="min-w-0 flex-1 overflow-x-auto py-1" style={{ scrollbarWidth: 'none', maskImage: mask, WebkitMaskImage: mask }}>
-      {children}
-    </div>
   )
 }
 
@@ -206,61 +171,61 @@ function OtherRolesMenu() {
       items={items}
       trigger={({ toggle, open }) => (
         <ToolButton onClick={toggle} active={open}>
-          Diğer…
+          <IconDots />
+          Diğer konumlar…
         </ToolButton>
       )}
     />
   )
 }
 
-/** Oda boyutu ve seyrek kullanılan oda işlemleri. */
-function RoomMenu() {
-  const room = useStore((s) => s.room)
-  const setRoomSize = useStore((s) => s.setRoomSize)
+/** Seyrek kullanılan kurulum işlemleri (oda boyutu motoru etkilemediği için burada yok; sihirbazda sorulur). */
+function SetupMenu() {
   const autoAll = useStore((s) => s.autoAll)
   const openWizard = useStore((s) => s.openWizard)
   const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: PointerEvent) => root.current && !root.current.contains(e.target as Node) && setOpen(false)
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
   return (
-    <div className="relative">
+    <div ref={root} className="relative">
       <ToolButton onClick={() => setOpen((v) => !v)} active={open}>
-        <span className="num">
-          {room.widthM.toFixed(1).replace('.', ',')} × {room.depthM.toFixed(1).replace('.', ',')} m
-        </span>
+        <IconWand width={14} height={14} />
+        Kurulum
       </ToolButton>
       {open && (
-        <div className="glass-card screen-in absolute right-0 top-10 z-40 w-[280px] space-y-3 p-4 shadow-[var(--shadow)]">
-          <div>
-            <p className="mb-2 text-xs text-muted">Oda boyutu</p>
-            <div className="flex items-center gap-2">
-              <NumberField ariaLabel="Oda genişliği (m)" className="w-[92px]" value={room.widthM} min={2} max={20} step={0.5} unit="m" onChange={(v) => setRoomSize(v, room.depthM)} />
-              <span className="text-faint">×</span>
-              <NumberField ariaLabel="Oda derinliği (m)" className="w-[92px]" value={room.depthM} min={2} max={20} step={0.5} unit="m" onChange={(v) => setRoomSize(room.widthM, v)} />
-            </div>
-          </div>
-          <div className="flex flex-col gap-1 border-t border-line pt-3">
-            <button
-              type="button"
-              onClick={() => {
-                autoAll()
-                setOpen(false)
-              }}
-              className="rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-raised"
-            >
-              Gecikme ve seviyeyi mesafeden hesapla
-              <span className="block text-xs text-muted">Ölçülen değerler de mesafeye döner</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                openWizard()
-                setOpen(false)
-              }}
-              className="rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-raised"
-            >
-              Kurulumu baştan yap
-              <span className="block text-xs text-muted">Cihazlara ne bağlı olduğunu yeniden sorar</span>
-            </button>
-          </div>
+        <div className="glass-card screen-in absolute bottom-11 right-0 z-40 flex w-[280px] flex-col gap-1 p-2 shadow-[var(--shadow)]">
+          <button
+            type="button"
+            onClick={() => {
+              autoAll()
+              setOpen(false)
+            }}
+            className="rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-raised"
+          >
+            Gecikme ve seviyeyi mesafeden hesapla
+            <span className="block text-xs text-muted">Ölçülen değerler de mesafeye döner</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              openWizard()
+              setOpen(false)
+            }}
+            className="rounded-lg px-2 py-1.5 text-left text-[13px] hover:bg-raised"
+          >
+            Kurulumu baştan yap
+            <span className="block text-xs text-muted">Cihazlara ne bağlı olduğunu yeniden sorar</span>
+          </button>
         </div>
       )}
     </div>

@@ -161,3 +161,24 @@ export const IconCopy = (p: SVGProps<SVGSVGElement>) => (
     <path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" />
   </svg>
 )
+/** Ses turu: odada dönen ses. */
+export const IconOrbit = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base({ width: 14, height: 14, ...p })}>
+    <circle cx="12" cy="12" r="2" />
+    <path d="M19.5 9.5A8 8 0 0 0 6 6.3M4.5 14.5A8 8 0 0 0 18 17.7" />
+    <path d="M17 6.8 19.6 9.6 21 6.2M7 17.2 4.4 14.4 3 17.8" />
+  </svg>
+)
+/** Konuma göre dağıt: bir noktadan yönlere yayılan ses. */
+export const IconSpread = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base({ width: 14, height: 14, ...p })}>
+    <circle cx="12" cy="14" r="2" />
+    <path d="M12 12V4M10.6 12.6 5 7M13.4 12.6 19 7M10 14H3M14 14h7" />
+  </svg>
+)
+/** Diğer seçenekler. */
+export const IconDots = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base({ width: 14, height: 14, ...p })}>
+    <path d="M6 12h.01M12 12h.01M18 12h.01" strokeWidth={2.6} />
+  </svg>
+)

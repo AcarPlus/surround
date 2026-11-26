@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { checkHealth } from '../lib/health'
-import { upmixStateLabel } from '../lib/upmix'
 import { cx } from './ui'
 import { ProfileMenu } from './ProfileMenu'
 import { SurroundMark } from './SurroundMark'
 import { VolumeControl } from './VolumeControl'
 import { api } from '../api/client'
 import { useUpdate } from '../lib/useSystem'
-import { IconMoon, IconPlay, IconRedo, IconStop, IconSun, IconUndo } from './icons'
+import { IconMoon, IconPlay, IconStop, IconSun } from './icons'
 
 /** Ara sıra bir kesinti (cihaz uykudan uyanırken vb.) duyulmaz; işaret ancak bu kadar birikince sarıya döner. */
 const DROPS_WORTH_SHOWING = 10
@@ -128,24 +127,6 @@ function StatusButton() {
   )
 }
 
-/** Motorun şu an ne yaptığı, tek bakışta. */
-function EngineReadout() {
-  const runState = useStore((s) => s.runState)
-  const engine = useStore((s) => s.engine)
-  const running = runState === 'running'
-  return (
-    <div className="hidden min-w-0 flex-col gap-0.5 xl:flex">
-      <span className={cx('flex items-center gap-1.5 text-xs font-medium', running ? 'text-accent' : 'text-muted')}>
-        <span className={cx('h-1.5 w-1.5 rounded-full', running ? 'breath bg-accent shadow-[0_0_8px_rgb(var(--accent))]' : 'bg-faint')} />
-        {running ? 'Ses odaya yayılıyor' : runState === 'starting' ? 'Başlatılıyor…' : 'Durdu'}
-      </span>
-      <span className="num truncate text-xs text-muted">
-        {running && engine ? upmixStateLabel(engine) : 'Başlat’a bas, gerisi otomatik'}
-      </span>
-    </div>
-  )
-}
-
 export function RunButton({ big }: { big?: boolean }) {
   const runState = useStore((s) => s.runState)
   const toggleRun = useStore((s) => s.toggleRun)
@@ -225,12 +206,6 @@ export function UpdateStrip() {
 export function TopBar() {
   const theme = useStore((s) => s.theme)
   const setTheme = useStore((s) => s.setTheme)
-  const undo = useStore((s) => s.undo)
-  const redo = useStore((s) => s.redo)
-  const past = useStore((s) => s.past)
-  const future = useStore((s) => s.future)
-  const lastUndo = past[past.length - 1]?.label
-  const lastRedo = future[future.length - 1]?.label
   const running = useStore((s) => s.runState === 'running')
 
   return (
@@ -247,16 +222,6 @@ export function TopBar() {
 
       <RunButton />
       <ProfileMenu />
-      <EngineReadout />
-
-      <div className="flex items-center gap-1.5">
-        <IconButton label={lastUndo ? `Geri al: ${lastUndo} (Ctrl+Z)` : 'Geri alınacak değişiklik yok'} onClick={undo} disabled={!lastUndo}>
-          <IconUndo />
-        </IconButton>
-        <IconButton label={lastRedo ? `Yinele: ${lastRedo} (Ctrl+Y)` : 'Yinelenecek değişiklik yok'} onClick={redo} disabled={!lastRedo}>
-          <IconRedo />
-        </IconButton>
-      </div>
 
       <div className="ml-auto flex min-w-0 items-center gap-3">
         <VolumeControl />
