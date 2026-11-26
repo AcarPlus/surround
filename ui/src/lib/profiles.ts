@@ -25,17 +25,25 @@ export const MAX_PROFILE_NAME = 24
  * tests/Surround.Engine.Tests/ModeLoudnessTests.cs). Motor artık önleri olduğu gibi bırakıyor; profiller üstüne bas ve
  * tiz rafı ekler. Otomatik ön kazanç rafların tamamını ortadan keserdi (orta frekanslar Düz'ün altında kalırdı): sabit
  * −1 dB ön kazanç + hafif dinamik; ender tepeleri cihaz limiter'ı tutar.
+ * 4 (0.7.1): Geri bildirim: modlar sesi kısıyor ve "kesik" geliyor, Müzik Flat'in aynısı. Sıkıştırıcı (−9,6 dB eşik, 5/150 ms)
+ * yüksek masterlarda sürekli çalışıp pompalıyordu ve −1 dB ön kazanç ortaları Düz'ün altına itiyordu: Film/Oyun artık
+ * 0 dB ön kazanç, sıkıştırıcı yok, daha ılımlı raflar. Müzik kendi karakterini aldı: "V" (100 Hz bas rafı +3, 350 Hz
+ * −1,5, 8 kHz hava rafı +2,5) ve daha geniş stereo (ambience 0,25), yine doğrudan dağıtım. Ölçümler
+ * tests/Surround.Engine.Tests/ModeLoudnessTests.cs (REV 4).
  */
-export const BUILTIN_PROFILES_REV = 3
+export const BUILTIN_PROFILES_REV = 4
 
-/** Film ve Oyun'un canlılığı: 120 Hz bas rafı + 5 kHz tiz rafı (C# testindeki `ModeChain.Lively` ile aynı). */
+/**
+ * Film ve Oyun'un canlılığı: 120 Hz bas rafı + 5 kHz tiz rafı, 0 dB ön kazanç, sıkıştırıcı yok (C# testindeki
+ * `ModeChain.Lively` ile aynı). Rafların ender tepelerini cihaz limiter'ı tutar.
+ */
 const lively = (bassDb: number, trebleDb: number, id: string): Processing => {
   const p = normalizeProcessing({
     enabled: true,
     autoPreamp: false,
-    preampDb: -1,
+    preampDb: 0,
     limiter: true,
-    dynamicBoost: 0.15,
+    dynamicBoost: 0,
     peq: [
       { id: `${id}-bass`, type: 'lowShelf', freqHz: 120, gainDb: bassDb, q: 0.7 },
       { id: `${id}-treble`, type: 'highShelf', freqHz: 5000, gainDb: trebleDb, q: 0.7 },
@@ -45,8 +53,21 @@ const lively = (bassDb: number, trebleDb: number, id: string): Processing => {
   return p
 }
 
-const gentle = (v: Partial<Processing>): Processing => {
-  const p = normalizeProcessing({ enabled: true, autoPreamp: true, limiter: true, ...v })
+/** Müzik: "V" eğrisi ve biraz daha geniş stereo (C# testindeki `ModeChain.Music` ile aynı). */
+const musicProcessing = (): Processing => {
+  const p = normalizeProcessing({
+    enabled: true,
+    autoPreamp: false,
+    preampDb: 0,
+    limiter: true,
+    dynamicBoost: 0,
+    ambience: 0.25,
+    peq: [
+      { id: 'music-bass', type: 'lowShelf', freqHz: 100, gainDb: 3, q: 0.7 },
+      { id: 'music-lowmid', type: 'peak', freqHz: 350, gainDb: -1.5, q: 1 },
+      { id: 'music-air', type: 'highShelf', freqHz: 8000, gainDb: 2.5, q: 0.7 },
+    ],
+  })
   p.preset = matchSoundPreset(p)
   return p
 }
@@ -55,33 +76,33 @@ const gentle = (v: Partial<Processing>): Processing => {
 export function builtinProfiles(): Profile[] {
   return [
     {
-      // Dolgun ve canlı: önler olduğu gibi, diyalog ortaya ayrıca (+1 dB); bas +3,5 / tiz +2,5 dB raf, sessiz konuşmayı
-      // biraz toparlayan hafif dinamik; arka dağınıklık azaltılmış (daha az "fazlı").
+      // Dolgun ve canlı: önler olduğu gibi, diyalog ortaya ayrıca (+1 dB); bas +2,5 / tiz +2 dB raf; arka dağınıklık
+      // azaltılmış (daha az "fazlı").
       id: 'builtin-film',
       name: 'Film',
       builtin: true,
       rev: BUILTIN_PROFILES_REV,
-      processing: lively(3.5, 2.5, 'film'),
+      processing: lively(2.5, 2, 'film'),
       upmix: true,
       upmixOptions: normalizeUpmixOptions({ mode: 'film', centerDb: 1, diffusion: 0.6 }),
     },
     {
-      // Gecikmesiz (oyun modu matris çözücü) ve canlı: ayak sesi/konum için tiz +3 dB, bas +2,5 dB raf.
+      // Gecikmesiz (oyun modu matris çözücü) ve canlı: ayak sesi/konum için tiz +2,5 dB, bas +2 dB raf.
       id: 'builtin-game',
       name: 'Oyun',
       builtin: true,
       rev: BUILTIN_PROFILES_REV,
-      processing: lively(2.5, 3, 'game'),
+      processing: lively(2, 2.5, 'game'),
       upmix: true,
       upmixOptions: normalizeUpmixOptions({ mode: 'game', diffusion: 0.6 }),
     },
     {
-      // Müzik stereo karışımı için yapılır: Flat'in doğrudan dağıtımı (çözümleme yok) + biraz sıcaklık ve parlaklık.
+      // Müzik stereo karışımı için yapılır: Flat'in doğrudan dağıtımı (çözümleme yok) + "V" eğrisi ve daha geniş sahne.
       id: 'builtin-music',
       name: 'Müzik',
       builtin: true,
       rev: BUILTIN_PROFILES_REV,
-      processing: gentle({ bassBoostDb: 1.5, clarityDb: 1 }),
+      processing: musicProcessing(),
       upmix: true,
       upmixOptions: normalizeUpmixOptions({ mode: 'direct' }),
     },

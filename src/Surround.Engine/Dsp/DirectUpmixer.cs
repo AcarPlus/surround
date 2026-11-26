@@ -4,7 +4,8 @@ namespace Surround.Engine.Dsp;
 /// "Flat" stereo distribution: no decoding, filtering, decorrelation or delay, every playing speaker gets the original
 /// signal. FL/FR pass through; the center gets the plain mono sum (L+R)/2; left side/back/height lanes copy L, right
 /// ones copy R; LFE stays silent (bass management still feeds the bass receivers). Only channels some speaker plays are
-/// written, so the channel fold never adds a copy on top of a front (+6 dB). Native multichannel content is untouched
+/// written, so the channel fold never adds a copy on top of a front (+6 dB), and not the side/back channels that only
+/// land on speakers already playing a front (<see cref="UpmixLayout.Silent"/>; "distribute by position" with fronts only). Native multichannel content is untouched
 /// (<see cref="AdaptiveUpmix"/> only calls this while the source is stereo).
 /// </summary>
 public sealed class DirectUpmixer : IStereoUpmixer
@@ -19,8 +20,8 @@ public sealed class DirectUpmixer : IStereoUpmixer
     {
         layout ??= UpmixLayout.Full;
         _center = layout.Has(Channels.FC);
-        _left = LeftCopies.Where(layout.Has).ToArray();
-        _right = RightCopies.Where(layout.Has).ToArray();
+        _left = LeftCopies.Where(c => layout.Has(c) && !layout.Silent(c)).ToArray();
+        _right = RightCopies.Where(c => layout.Has(c) && !layout.Silent(c)).ToArray();
     }
 
     public int LatencyFrames => 0;

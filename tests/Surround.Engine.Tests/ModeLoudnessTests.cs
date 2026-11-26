@@ -30,23 +30,52 @@ internal static class ModeChain
         new("Oyun", UpmixOptions.Game, Gentle(1, 2, 0.2), Diffusion: 0.6),
     };
 
-    /// <summary>Built-in profiles now (BUILTIN_PROFILES_REV 3); keep in sync with ui/src/lib/profiles.ts.</summary>
-    public static readonly Profile[] Profiles =
+    /// <summary>Built-in profiles as they were in 0.7.0 (BUILTIN_PROFILES_REV 3): -1 dB preamp + compressor.</summary>
+    public static readonly Profile[] Rev3Profiles =
     {
         OldProfiles[0],
         OldProfiles[1],
-        new("Film", UpmixOptions.Film, Lively(3.5, 2.5), CenterDb: 1, Diffusion: 0.6),
-        new("Oyun", UpmixOptions.Game, Lively(2.5, 3), Diffusion: 0.6),
+        new("Film", UpmixOptions.Film, Rev3Lively(3.5, 2.5), CenterDb: 1, Diffusion: 0.6),
+        new("Oyun", UpmixOptions.Game, Rev3Lively(2.5, 3), Diffusion: 0.6),
+    };
+
+    private static ProcessingConfig Rev3Lively(double bassDb, double trebleDb) => new()
+    {
+        Enabled = true, AutoPreamp = false, PreampDb = -1, Limiter = true, DynamicBoost = 0.15, Peq = Shelves(bassDb, trebleDb),
+    };
+
+    /// <summary>Built-in profiles now (BUILTIN_PROFILES_REV 4); keep in sync with ui/src/lib/profiles.ts.</summary>
+    public static readonly Profile[] Profiles =
+    {
+        OldProfiles[0],
+        new("Müzik", UpmixOptions.Direct, Music()),
+        new("Film", UpmixOptions.Film, Lively(2.5, 2), CenterDb: 1, Diffusion: 0.6),
+        new("Oyun", UpmixOptions.Game, Lively(2, 2.5), Diffusion: 0.6),
     };
 
     /// <summary>
-    /// Film and game profiles: bass and treble shelves, a fixed -1 dB preamp (not the automatic one, which would take the
-    /// whole shelf gain off the mids and leave them quieter than the flat profile) and a light dynamic boost whose makeup
-    /// lifts quiet passages; the device limiter catches the rare peak (see <see cref="ModeLoudnessTests"/>).
+    /// Film and game profiles: a bass and a treble shelf at unity preamp, no compressor. The 0.7.0 compressor
+    /// (threshold -9.6 dB, 5 ms / 150 ms) sat on every hot master and pumped ("choppy"), and the -1 dB preamp made
+    /// the mids quieter than flat; the device limiter alone catches the rare peak the shelves push over -1 dBFS.
     /// </summary>
     public static ProcessingConfig Lively(double bassDb, double trebleDb) => new()
     {
-        Enabled = true, AutoPreamp = false, PreampDb = -1, Limiter = true, DynamicBoost = 0.15, Peq = Shelves(bassDb, trebleDb),
+        Enabled = true, AutoPreamp = false, PreampDb = 0, Limiter = true, DynamicBoost = 0, Peq = Shelves(bassDb, trebleDb),
+    };
+
+    /// <summary>
+    /// Music: the flat profile's direct distribution with its own character: a "V" (bass and air shelves, a small
+    /// low-mid dip that also frees headroom) and a wider stereo image; unity preamp, no compressor.
+    /// </summary>
+    public static ProcessingConfig Music() => new()
+    {
+        Enabled = true, AutoPreamp = false, PreampDb = 0, Limiter = true, DynamicBoost = 0, Ambience = 0.25,
+        Peq = new List<PeqBand>
+        {
+            new PeqBand { Type = "lowShelf", FreqHz = 100, GainDb = 3, Q = 0.7 },
+            new PeqBand { Type = "peak", FreqHz = 350, GainDb = -1.5, Q = 1 },
+            new PeqBand { Type = "highShelf", FreqHz = 8000, GainDb = 2.5, Q = 0.7 },
+        },
     };
 
     /// <summary>The "liveliness" of the film and game profiles: a gentle bass and a gentle treble shelf.</summary>
@@ -313,18 +342,16 @@ public class ModeLoudnessTests
         var layout = Layouts[layoutIndex];
         var input = ModeChain.Program(Frames);
         var flat = ModeChain.Measure(ModeChain.Run(ModeChain.Profiles[0], layout, input));
-        var music = ModeChain.Measure(ModeChain.Run(ModeChain.Profiles[1], layout, input));
-        foreach (var p in ModeChain.Profiles.Skip(2))
+        foreach (var p in ModeChain.Profiles.Skip(1))
         {
             var m = ModeChain.Measure(ModeChain.Run(p, layout, input));
             string who = $"{p.Name}, {layout.Name}";
             double P(ModeChain.Metrics x, ModeChain.Band b) => x.Bands[b].Power;
             Assert.True(m.PowerDb >= flat.PowerDb + 0.5, $"{who}: {m.PowerDb - flat.PowerDb:+0.0;-0.0} dB vs flat");
-            Assert.True(m.PowerDb >= music.PowerDb + 0.5, $"{who}: {m.PowerDb - music.PowerDb:+0.0;-0.0} dB vs music");
             Assert.True(m.SumDb >= flat.SumDb, $"{who}: in-room sum {m.SumDb - flat.SumDb:+0.0;-0.0} dB vs flat");
             Assert.True(P(m, ModeChain.Band.Low) >= P(flat, ModeChain.Band.Low) + 1.0, $"{who}: bass");
             Assert.True(P(m, ModeChain.Band.High) >= P(flat, ModeChain.Band.High) + 1.0, $"{who}: treble");
-            Assert.True(P(m, ModeChain.Band.Mid) >= P(flat, ModeChain.Band.Mid) - 1.0, $"{who}: mids {P(m, ModeChain.Band.Mid) - P(flat, ModeChain.Band.Mid):+0.0;-0.0} dB");
+            Assert.True(P(m, ModeChain.Band.Mid) >= P(flat, ModeChain.Band.Mid) - 0.5, $"{who}: mids {P(m, ModeChain.Band.Mid) - P(flat, ModeChain.Band.Mid):+0.0;-0.0} dB");
             // Every speaker still plays (none emptied into another one), and no peak beyond the limiter's ceiling.
             for (int k = 0; k < m.SpeakerDb.Length; k++)
                 Assert.True(m.SpeakerDb[k] >= flat.SpeakerDb[k] - 1.5, $"{who}: {layout.Names[k]} {m.SpeakerDb[k] - flat.SpeakerDb[k]:+0.0;-0.0} dB");
@@ -342,12 +369,46 @@ public class ModeLoudnessTests
             double Loss(ModeChain.Profile p) =>
                 ModeChain.Measure(ModeChain.Run(p, layout, input, limit: false)).PowerDb - ModeChain.Measure(ModeChain.Run(p, layout, input)).PowerDb;
             double flat = Loss(ModeChain.Profiles[0]);
-            foreach (var p in ModeChain.Profiles.Skip(2))
+            foreach (var p in ModeChain.Profiles.Skip(1))
             {
                 double loss = Loss(p);
                 Assert.True(loss <= flat + 1.0, $"{p.Name}, {layout.Name}: limiter takes {loss:0.0} dB, flat {flat:0.0} dB");
             }
         }
+    }
+
+    /// <summary>
+    /// Music sounded the same as flat (0.7.0: +1.5 dB bass, +1 dB clarity, then the automatic preamp took most of it
+    /// back). Now it must be audibly its own: a clear bass and air lift and a wider image than flat.
+    /// </summary>
+    [Fact]
+    public void MusicIsAudiblyDifferentFromFlat()
+    {
+        var input = ModeChain.Program(Frames);
+        var layout = ModeChain.Lr;
+        var flatOut = ModeChain.Run(ModeChain.Profiles[0], layout, input);
+        var musicOut = ModeChain.Run(ModeChain.Profiles[1], layout, input);
+        var flat = ModeChain.Measure(flatOut);
+        var music = ModeChain.Measure(musicOut);
+        Assert.True(music.Bands[ModeChain.Band.Low].Power >= flat.Bands[ModeChain.Band.Low].Power + 2.0, "music bass");
+        Assert.True(music.Bands[ModeChain.Band.High].Power >= flat.Bands[ModeChain.Band.High].Power + 1.5, "music treble");
+        static double Corr(float[] l, float[] r)
+        {
+            double lr = 0, ll = 0, rr = 0;
+            for (int i = 0; i < l.Length; i++) { lr += l[i] * r[i]; ll += l[i] * l[i]; rr += r[i] * r[i]; }
+            return lr / Math.Sqrt(ll * rr);
+        }
+        double cf = Corr(flatOut[0], flatOut[1]), cm = Corr(musicOut[0], musicOut[1]);
+        _out.WriteLine($"L/R ilinti: Düz {cf:0.00}, Müzik {cm:0.00}");
+        Assert.True(cm <= cf - 0.1, $"music not wider: {cm:0.00} vs flat {cf:0.00}");
+    }
+
+    /// <summary>No built-in profile runs the compressor: on hot masters it pumped ("choppy" sound).</summary>
+    [Fact]
+    public void BuiltinsDoNotCompress()
+    {
+        foreach (var p in ModeChain.Profiles)
+            Assert.True(p.Processing.DynamicBoost == 0, p.Name);
     }
 
     /// <summary>Program at several levels (input RMS per channel): mid-band power and the loudest speaker peak, vs flat.</summary>
@@ -377,6 +438,7 @@ public class ModeLoudnessTests
     public void Report()
     {
         Table(ModeChain.OldProfiles, "ESKİ PROFİL DEĞERLERİ, YENİ UPMIX");
+        Table(ModeChain.Rev3Profiles, "0.7.0 (REV 3)");
         Table(ModeChain.Profiles, "SONRA");
     }
 }

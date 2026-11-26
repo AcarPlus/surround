@@ -24,38 +24,44 @@ describe('yerleşik profiller', () => {
     }
   })
 
-  it('Film: film modu, diyalog +1 dB, bas/tiz rafı, sabit −1 dB ön kazanç, hafif dinamik, genişletme yok', () => {
+  it('Film: film modu, diyalog +1 dB, bas/tiz rafı, 0 dB ön kazanç, sıkıştırıcı yok, genişletme yok', () => {
     const p = builtinProfile('builtin-film')!
     expect(p.upmixOptions).toMatchObject({ mode: 'film', centerDb: 1, diffusion: 0.6 })
-    expect(p.processing).toMatchObject({ enabled: true, autoPreamp: false, preampDb: -1, dynamicBoost: 0.15, ambience: 0, limiter: true })
+    expect(p.processing).toMatchObject({ enabled: true, autoPreamp: false, preampDb: 0, dynamicBoost: 0, ambience: 0, limiter: true })
     expect(p.processing.peq.map(({ type, freqHz, gainDb }) => ({ type, freqHz, gainDb }))).toEqual([
-      { type: 'lowShelf', freqHz: 120, gainDb: 3.5 },
-      { type: 'highShelf', freqHz: 5000, gainDb: 2.5 },
+      { type: 'lowShelf', freqHz: 120, gainDb: 2.5 },
+      { type: 'highShelf', freqHz: 5000, gainDb: 2 },
     ])
     expect(p.processing.eq.every((v) => v === 0)).toBe(true)
   })
 
-  it('Oyun: oyun modu (gecikmesiz), tiz ağırlıklı raf, hafif dinamik', () => {
+  it('Oyun: oyun modu (gecikmesiz), tiz ağırlıklı raf, sıkıştırıcı yok', () => {
     const p = builtinProfile('builtin-game')!
     expect(p.upmixOptions.mode).toBe('game')
-    expect(p.processing).toMatchObject({ autoPreamp: false, preampDb: -1, dynamicBoost: 0.15, ambience: 0 })
-    expect(p.processing.peq.map((b) => b.gainDb)).toEqual([2.5, 3])
+    expect(p.processing).toMatchObject({ autoPreamp: false, preampDb: 0, dynamicBoost: 0, ambience: 0 })
+    expect(p.processing.peq.map((b) => b.gainDb)).toEqual([2, 2.5])
   })
 
-  it('Film ve Oyun Düz/Müzik ile aynı güvenlik: limiter açık, ön kazanç rafların altında', () => {
-    for (const id of ['builtin-film', 'builtin-game']) {
+  it('Film, Oyun ve Müzik: limiter açık, raflar ılımlı, hiçbiri sıkıştırmaz (pompalama = "kesik" ses)', () => {
+    for (const id of ['builtin-film', 'builtin-game', 'builtin-music']) {
       const p = builtinProfile(id)!.processing
       expect(p.limiter).toBe(true)
       expect(Math.max(...p.peq.map((b) => b.gainDb)) + p.preampDb).toBeLessThanOrEqual(3)
+      expect(p.dynamicBoost).toBe(0)
       // Kimlikler sabit: her çağrıda aynı config yazılır.
       expect(p.peq.map((b) => b.id)).toEqual(builtinProfile(id)!.processing.peq.map((b) => b.id))
     }
   })
 
-  it('Müzik: doğrudan dağıtım (Flat yönlendirmesi) + biraz sıcaklık ve parlaklık', () => {
+  it('Müzik: doğrudan dağıtım + "V" eğrisi ve daha geniş sahne (Flat ile aynı değil)', () => {
     const p = builtinProfile('builtin-music')!
     expect(p.upmixOptions.mode).toBe('direct')
-    expect(p.processing).toMatchObject({ enabled: true, bassBoostDb: 1.5, clarityDb: 1, dynamicBoost: 0, ambience: 0 })
+    expect(p.processing).toMatchObject({ enabled: true, autoPreamp: false, preampDb: 0, dynamicBoost: 0, ambience: 0.25 })
+    expect(p.processing.peq.map(({ type, freqHz, gainDb }) => ({ type, freqHz, gainDb }))).toEqual([
+      { type: 'lowShelf', freqHz: 100, gainDb: 3 },
+      { type: 'peak', freqHz: 350, gainDb: -1.5 },
+      { type: 'highShelf', freqHz: 8000, gainDb: 2.5 },
+    ])
   })
 
   it('eski sürüm kayıtlı yerleşik kopya yeni tanımla değişir; güncel sürüm korunur', () => {

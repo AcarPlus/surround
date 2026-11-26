@@ -216,23 +216,41 @@ public class UpmixerTests
 
     [Theory]
     [MemberData(nameof(Modes))]
-    public void SurroundsSharingAFrontSpeakerGetPlainCopies(string mode)
+    public void SurroundsSharingAFrontSpeakerStayEmptyOrGetPlainCopies(string mode)
     {
-        // "Distribute by position" with three fronts: the left speaker also plays SL and BL. Ambience rendered there
-        // (decorrelated, 10 ms later) would comb with the front in the same cone, and the speaker would be quieter
-        // than in the flat mode, so these channels get exactly what the flat mode gives them.
-        float[] Row(params int[] chs) { var r = new float[Up.Ch]; foreach (var c in chs) r[c] = 1; return r; }
+        // "Distribute by position" with three fronts: the left speaker also plays SL and BL at full level. A copy of L
+        // there would add up coherently with FL in the same speaker (+9.5 dB with three lanes; the device limiter then
+        // squashes everything), and ambience would comb with the front, so a stereo source leaves them empty: the
+        // speaker plays exactly what it plays for the front.
+        float[] Row(params (int Ch, float G)[] chs) { var r = new float[Up.Ch]; foreach (var (c, g) in chs) r[c] = g; return r; }
         var layout = UpmixLayout.ForSpeakers(new[]
         {
-            Row(Channels.FL, Channels.SL, Channels.BL), Row(Channels.FR, Channels.SR, Channels.BR), Row(Channels.FC),
+            Row((Channels.FL, 1), (Channels.SL, 1), (Channels.BL, 1)),
+            Row((Channels.FR, 0.96f), (Channels.SR, 1), (Channels.BR, 1)),
+            Row((Channels.FC, 1)),
         });
         Assert.True(layout.Shared(Channels.SL) && layout.Shared(Channels.BR));
+        Assert.True(layout.Silent(Channels.SL) && layout.Silent(Channels.BR));
         Assert.False(layout.Steerable.Has(Channels.SL));
         var l = Up.Noise(N, 40); var r = Up.Noise(N, 41);
-        var up = Up.Make(mode, layout);
-        var lg = Up.Run(up, l, r);
+        var lg = Up.Run(Up.Make(mode, layout), l, r);
+        foreach (int ch in new[] { Channels.SL, Channels.BL, Channels.SR, Channels.BR })
+            Assert.True(Up.Energy(lg, ch, Warm) < Up.Energy(l, Warm) * 1e-9, $"{mode}: {Channels.Names[ch]} is not empty");
+
+        // A side speaker that only carries a little of the front (here 0.2 of FR next to SR at 1) still needs a signal:
+        // its surround channels stay shared and get what the flat mode gives them, a plain copy.
+        var side = UpmixLayout.ForSpeakers(new[]
+        {
+            Row((Channels.FL, 1), (Channels.SL, 1), (Channels.BL, 1)),
+            Row((Channels.FR, 0.2f), (Channels.SR, 1), (Channels.BR, 1)),
+            Row((Channels.FR, 1)),
+            Row((Channels.FC, 1)),
+        });
+        Assert.True(side.Shared(Channels.SR) && !side.Silent(Channels.SR));
+        var up = Up.Make(mode, side);
+        lg = Up.Run(up, l, r);
         int lat = up.LatencyFrames;
-        foreach (var (ch, src) in new[] { (Channels.SL, l), (Channels.BL, l), (Channels.SR, r), (Channels.BR, r) })
+        foreach (var (ch, src) in new[] { (Channels.SR, r), (Channels.BR, r) })
         {
             double err = 0;
             for (int f = Warm; f < N; f++) { double d = lg[f * Up.Ch + ch] - src[f - lat]; err += d * d; }
@@ -242,7 +260,7 @@ public class UpmixerTests
         // Real side/back speakers (rows without a front) are separate: they get the decorrelated ambience.
         var five = UpmixLayout.ForSpeakers(new[]
         {
-            Row(Channels.FL), Row(Channels.FR), Row(Channels.FC), Row(Channels.SL, Channels.BL), Row(Channels.SR, Channels.BR),
+            Row((Channels.FL, 1)), Row((Channels.FR, 1)), Row((Channels.FC, 1)), Row((Channels.SL, 1), (Channels.BL, 1)), Row((Channels.SR, 1), (Channels.BR, 1)),
         });
         Assert.False(five.Shared(Channels.SL));
         Assert.Same(five, five.Steerable);
