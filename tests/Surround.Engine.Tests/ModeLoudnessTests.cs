@@ -44,7 +44,7 @@ internal static class ModeChain
         Enabled = true, AutoPreamp = false, PreampDb = -1, Limiter = true, DynamicBoost = 0.15, Peq = Shelves(bassDb, trebleDb),
     };
 
-    /// <summary>Built-in profiles of 0.7.1 (BUILTIN_PROFILES_REV 4): mild shelves, no compressor.</summary>
+    /// <summary>Built-in profiles of the 0.7.0 development build (BUILTIN_PROFILES_REV 4): mild shelves, no compressor.</summary>
     public static readonly Profile[] Rev4Profiles =
     {
         OldProfiles[0],
@@ -447,7 +447,7 @@ public class ModeLoudnessTests
     }
 
     /// <summary>
-    /// The modes sounded alike (0.7.1: ±2-3 dB shelves). Every pair of built-in profiles now differs by at least 2.5 dB in
+    /// The modes sounded alike (REV 4: ±2-3 dB shelves). Every pair of built-in profiles now differs by at least 2.5 dB in
     /// some band (low &lt; 150 Hz, mid, presence 2-5 kHz, high &gt; 4 kHz) on the two-speaker layout, where no mode has surrounds to spread into.
     /// </summary>
     [Fact]
@@ -500,8 +500,8 @@ public class ModeLoudnessTests
     public void Report()
     {
         Table(ModeChain.OldProfiles, "ESKİ PROFİL DEĞERLERİ, YENİ UPMIX");
-        Table(ModeChain.Rev3Profiles, "0.7.0 (REV 3)");
-        Table(ModeChain.Rev4Profiles, "0.7.1 (REV 4)");
+        Table(ModeChain.Rev3Profiles, "REV 3");
+        Table(ModeChain.Rev4Profiles, "REV 4");
         Table(ModeChain.Profiles, "SONRA");
     }
 }

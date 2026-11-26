@@ -25,12 +25,12 @@ export const MAX_PROFILE_NAME = 24
  * tests/Surround.Engine.Tests/ModeLoudnessTests.cs). Motor artık önleri olduğu gibi bırakıyor; profiller üstüne bas ve
  * tiz rafı ekler. Otomatik ön kazanç rafların tamamını ortadan keserdi (orta frekanslar Düz'ün altında kalırdı): sabit
  * −1 dB ön kazanç + hafif dinamik; ender tepeleri cihaz limiter'ı tutar.
- * 4 (0.7.1): Geri bildirim: modlar sesi kısıyor ve "kesik" geliyor, Müzik Flat'in aynısı. Sıkıştırıcı (−9,6 dB eşik, 5/150 ms)
+ * 4 (0.7.0 geliştirme): Geri bildirim: modlar sesi kısıyor ve "kesik" geliyor, Müzik Flat'in aynısı. Sıkıştırıcı (−9,6 dB eşik, 5/150 ms)
  * yüksek masterlarda sürekli çalışıp pompalıyordu ve −1 dB ön kazanç ortaları Düz'ün altına itiyordu: Film/Oyun artık
  * 0 dB ön kazanç, sıkıştırıcı yok, daha ılımlı raflar. Müzik kendi karakterini aldı: "V" (100 Hz bas rafı +3, 350 Hz
  * −1,5, 8 kHz hava rafı +2,5) ve daha geniş stereo (ambience 0,25), yine doğrudan dağıtım. Ölçümler
  * tests/Surround.Engine.Tests/ModeLoudnessTests.cs (REV 4).
- * 5 (0.7.2): Geri bildirim: modlar hâlâ birbirinin aynısı. Her mod belirgin karakter aldı: Film bas +4 / diyalog +3,
+ * 5 (0.7.0): Geri bildirim: modlar hâlâ birbirinin aynısı. Her mod belirgin karakter aldı: Film bas +4 / diyalog +3,
  * Oyun 2–5 kHz +4 / gümbürtü −2 / geniş, Müzik bas +4 / hava +3 / geniş. Her çift en az 2,5 dB ayrışır (ölçüm testi).
  */
 export const BUILTIN_PROFILES_REV = 5
