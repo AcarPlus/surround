@@ -56,12 +56,11 @@ public class DirectUpmixTests
     }
 
     [Fact]
-    public void ConfigAcceptsDirectModeAndFingerprintKeepsIt()
+    public void ConfigAcceptsDirectMode()
     {
         var cfg = new SurroundConfig { UpmixOptions = new() { Mode = "direct" } };
         Assert.True(cfg.UpmixOptions.IsDirect);
         Assert.DoesNotContain(ConfigValidator.Validate(cfg), m => m.Contains("upmixOptions.mode"));
-        var film = new SurroundConfig { UpmixOptions = new() { Mode = "film" } };
-        Assert.NotEqual(film.EngineFingerprint(), cfg.EngineFingerprint());
+        // The mode is swapped live, not by a restart (ModeSwapTests).
     }
 }

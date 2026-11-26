@@ -52,16 +52,31 @@ public sealed class StereoDetector
 /// 30 ms. The native path is delayed by the upmixer's latency so both are
 /// time-aligned (film mode: the whole chain then has that constant latency). The upmixer runs all the time so it is
 /// warm when the crossfade starts.
+/// The upmix mode changes live (<see cref="SwapUpmixer"/>): the new upmixer runs next to the old one until it is warm
+/// (its own latency), then takes over in a <see cref="ModeCrossfadeMs"/> crossfade, so switching Film/Game/Flat never
+/// restarts the audio devices or leaves a gap.
 /// </summary>
 public sealed class AdaptiveUpmix
 {
     private const int Ch = Channels.Count;
     public const double CrossfadeMs = 30;
+    public const double ModeCrossfadeMs = 40;
 
-    private readonly IStereoUpmixer _up;
+    private IStereoUpmixer _up;
+    private volatile Pending? _pending;
+    private IStereoUpmixer? _old;
+    private int _warm;
+    private float _xf = 1f;
+    private bool _equalPower;
+    private readonly float _modeStep;
+    private float[] _oldBuf;
+
+    /// <summary>An upmixer prepared off the audio thread, with native delay lines matching its latency.</summary>
+    private sealed record Pending(IStereoUpmixer Up, DelayLine[] Native);
+
     private readonly bool _adaptive;
     private readonly StereoDetector _det;
-    private readonly DelayLine[] _native;
+    private DelayLine[] _native;
     private readonly NativeHeights? _heights;
     private readonly float[] _nf = new float[Ch];
     private readonly float _step;
@@ -80,17 +95,31 @@ public sealed class AdaptiveUpmix
         _native = new DelayLine[Channels.SourceCount];
         for (int c = 0; c < _native.Length; c++) _native[c] = new DelayLine(adaptive ? upmixer.LatencyFrames : 0);
         _step = (float)(1000 / (CrossfadeMs * sampleRate));
+        _modeStep = (float)(1000 / (ModeCrossfadeMs * sampleRate));
+        _oldBuf = new float[Ch * 4096];
         _w = 1f;
         _state = (int)UpmixState.Stereo;
     }
 
     public UpmixState State => (UpmixState)_state;
     public int LatencyFrames => _up.LatencyFrames;
-    public IStereoUpmixer Upmixer => _up;
+    public IStereoUpmixer Upmixer => _pending?.Up ?? _up;
+
+    /// <summary>
+    /// Switches to <paramref name="next"/> (already updated with the current settings) without a gap; call off the audio
+    /// thread. A swap requested while another is still pending replaces it.
+    /// </summary>
+    public void SwapUpmixer(IStereoUpmixer next)
+    {
+        var native = new DelayLine[Channels.SourceCount];
+        for (int c = 0; c < native.Length; c++) native[c] = new DelayLine(_adaptive ? next.LatencyFrames : 0);
+        _pending = new Pending(next, native);
+    }
 
     public void Update(UpmixSettings settings)
     {
         _up.Update(settings);
+        _pending?.Up.Update(settings);
         _heights?.Update(settings);
     }
 
@@ -99,7 +128,18 @@ public sealed class AdaptiveUpmix
         int total = frames * Ch;
         if (_buf.Length < total) _buf = new float[total * 2];
         var up = _buf.AsSpan(0, total);
+        if (_pending is { } p)
+        {
+            _pending = null;
+            _old = _up;
+            _equalPower = _old.LatencyFrames != p.Up.LatencyFrames;
+            _up = p.Up;
+            _native = p.Native;
+            _warm = p.Up.LatencyFrames;
+            _xf = 0f;
+        }
         _up.Process(logical, up, frames);
+        if (_old != null) BlendOld(logical, up, frames);
         if (!_adaptive)
         {
             up.CopyTo(logical);
@@ -132,6 +172,31 @@ public sealed class AdaptiveUpmix
             }
         }
         _state = (int)(stereo ? UpmixState.Stereo : UpmixState.Native);
+    }
+
+    /// <summary>
+    /// Mode switch in progress: the old upmixer keeps playing until the new one is warm, then they are crossfaded. Same
+    /// latency: the two are the same program in time, gains sum to 1 (smoothstep). Different latency (film's 21 ms
+    /// against 0): the time-shifted copies are uncorrelated for broadband sound, so an equal-power fade (cos/sin) keeps
+    /// the level instead of dipping 3 dB in the middle. Allocates only if a block outgrows the buffer.
+    /// </summary>
+    private void BlendOld(ReadOnlySpan<float> input, Span<float> up, int frames)
+    {
+        int total = frames * Ch;
+        if (_oldBuf.Length < total) _oldBuf = new float[total * 2];
+        var old = _oldBuf.AsSpan(0, total);
+        _old!.Process(input, old, frames);
+        for (int f = 0; f < frames; f++)
+        {
+            int b = f * Ch;
+            if (_warm > 0) { _warm--; for (int c = 0; c < Ch; c++) up[b + c] = old[b + c]; continue; }
+            _xf = Math.Min(1f, _xf + _modeStep);
+            float gNew, gOld;
+            if (_equalPower) { gNew = MathF.Sin(_xf * MathF.PI / 2); gOld = MathF.Cos(_xf * MathF.PI / 2); }
+            else { gNew = _xf * _xf * (3 - 2 * _xf); gOld = 1f - gNew; }
+            for (int c = 0; c < Ch; c++) up[b + c] = gOld * old[b + c] + gNew * up[b + c];
+        }
+        if (_warm == 0 && _xf >= 1f) _old = null;
     }
 }
 

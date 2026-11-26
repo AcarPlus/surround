@@ -578,14 +578,14 @@ public class UpmixConfigTests
     }
 
     [Fact]
-    public void FingerprintIgnoresGainsButNotMode()
+    public void FingerprintIgnoresGainsAndMode()
     {
         var a = SurroundConfig.Parse(Json);
         var b = SurroundConfig.Parse(Json);
         b.UpmixOptions.CenterDb = -6; b.UpmixOptions.SurroundDb = 4; b.UpmixOptions.LfeEnabled = false;
         Assert.Equal(a.EngineFingerprint(), b.EngineFingerprint());
-        b.UpmixOptions.Mode = "game";
-        Assert.NotEqual(a.EngineFingerprint(), b.EngineFingerprint());
+        b.UpmixOptions.Mode = "game"; // swapped live with a crossfade (ModeSwapTests)
+        Assert.Equal(a.EngineFingerprint(), b.EngineFingerprint());
         var c = SurroundConfig.Parse(Json);
         c.UpmixOptions.Mode = "FILM";
         Assert.Equal(a.EngineFingerprint(), c.EngineFingerprint());

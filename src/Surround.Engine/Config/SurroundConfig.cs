@@ -246,8 +246,10 @@ public sealed class SurroundConfig
     /// Processing, per-speaker EQ, the upmix gains (center/surround/height)/LFE switch and the speakers' mix rows, gains and
     /// delays (and the outputs' latencies, which only shift those delays) are excluded: <see cref="SurroundEngine.UpdateLive"/>
     /// applies them in place, so dragging a speaker on the room map never restarts the engine. What the graph is built
-    /// from stays: the upmix mode, the set of logical channels the (unmuted, routed) speakers use (upmix layout, channel
-    /// fold) and per speaker whether its row carries LFE (bass management).
+    /// from stays: the set of logical channels the (unmuted, routed) speakers use (upmix layout, channel fold), which
+    /// side/back channels are shared, and per speaker whether its row carries LFE (bass management). The upmix mode and
+    /// which shared channels are silent (they depend on the row weights) are swapped live too (crossfade, see
+    /// <see cref="Dsp.AdaptiveUpmix.SwapUpmixer"/>).
     /// </summary>
     public string EngineFingerprint()
     {
@@ -274,7 +276,8 @@ public sealed class SurroundConfig
             ["sharedChannels"] = JsonSerializer.SerializeToElement(shared),
         };
         copy.Processing = new();
-        copy.UpmixOptions = new() { Mode = copy.UpmixOptions.IsGame ? UpmixOptions.Game : copy.UpmixOptions.IsDirect ? UpmixOptions.Direct : UpmixOptions.Film };
+        // The upmix mode is not part of it: SurroundEngine.UpdateLive swaps the upmixer with a crossfade.
+        copy.UpmixOptions = new();
         copy.Source.Extra = null;
         copy.Source.DeviceName = null;
         foreach (var o in copy.Outputs) { o.Extra = null; o.DeviceName = null; o.LatencyMs = 0; }

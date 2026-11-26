@@ -26,6 +26,8 @@ public sealed class SurroundEngine : IDisposable
     private WasapiOut? _keepAlive;
     private WaveFormat? _srcFormat;
     private AdaptiveUpmix? _upmix;
+    private UpmixLayout? _upLayout;
+    private string _upMode = "";
     private NativeHeights? _heights;
     private ChannelFold? _fold;
     private int[] _map = Array.Empty<int>();
@@ -88,11 +90,12 @@ public sealed class SurroundEngine : IDisposable
             {
                 if (n >= 2)
                 {
-                    IStereoUpmixer up = _cfg.UpmixOptions.IsDirect ? new DirectUpmixer(layout)
-                        : _cfg.UpmixOptions.IsGame ? new GameUpmixer(fs, layout) : new FilmUpmixer(fs, layout);
+                    IStereoUpmixer up = MakeUpmixer(_cfg.UpmixOptions, fs, layout);
+                    _upLayout = layout;
+                    _upMode = ModeKey(_cfg.UpmixOptions);
                     up.Update(upSettings);
                     _upmix = new AdaptiveUpmix(fs, up, adaptive: n > 2, n > 2 ? nativeHeights : null);
-                    _log?.Invoke($"Upmix: {(_cfg.UpmixOptions.IsDirect ? "doğrudan (flat)" : _cfg.UpmixOptions.IsGame ? "oyun" : "film")} modu, {up.LatencyFrames * 1000.0 / fs:0.#} ms gecikme"
+                    _log?.Invoke($"Upmix: {ModeName(_cfg.UpmixOptions)} modu, {up.LatencyFrames * 1000.0 / fs:0.#} ms gecikme"
                         + (n > 2 ? ", stereo içerik otomatik algılanır" : ""));
                 }
                 else _log?.Invoke($"Uyarı: upmix en az 2 kanallı kaynak gerektirir (kaynak {n} kanal); atlandı.");
@@ -184,6 +187,13 @@ public sealed class SurroundEngine : IDisposable
     private static bool HasLfe(SpeakerConfig s) =>
         s.Source.Any(kv => Channels.IndexOf(kv.Key) == Channels.LFE && kv.Value != 0);
 
+    private static IStereoUpmixer MakeUpmixer(UpmixOptions o, int fs, UpmixLayout layout) =>
+        o.IsDirect ? new DirectUpmixer(layout) : o.IsGame ? new GameUpmixer(fs, layout) : new FilmUpmixer(fs, layout);
+
+    private static string ModeKey(UpmixOptions o) => o.IsDirect ? UpmixOptions.Direct : o.IsGame ? UpmixOptions.Game : UpmixOptions.Film;
+
+    private static string ModeName(UpmixOptions o) => o.IsDirect ? "doğrudan (flat)" : o.IsGame ? "oyun" : "film";
+
     private static float[] MixRow(SpeakerConfig s)
     {
         var row = new float[Channels.Count];
@@ -232,6 +242,24 @@ public sealed class SurroundEngine : IDisposable
         var routed = cfg.ForRouting();
         _proc?.Update(ProcessingSettings.Build(routed.Processing, fs));
         var up = UpmixSettings.Build(routed.UpmixOptions);
+        // A mode change (Film/Game/Flat), or moved speakers that change which shared side/back channels stay silent,
+        // swaps the upmixer in place with a crossfade: no restart, no gap.
+        if (_upmix != null && _upLayout != null)
+        {
+            var layout = UpmixLayout.ForSpeakers(routed.Speakers.Where(s => !s.Mute).Select(MixRow));
+            bool modeChanged = ModeKey(routed.UpmixOptions) != _upMode;
+            bool silentChanged = Enumerable.Range(0, Channels.Count).Any(c => layout.Silent(c) != _upLayout.Silent(c));
+            if (modeChanged || silentChanged)
+            {
+                var next = MakeUpmixer(routed.UpmixOptions, fs, layout);
+                next.Update(up);
+                _upmix.SwapUpmixer(next);
+                _upLayout = layout;
+                _upMode = ModeKey(routed.UpmixOptions);
+                if (modeChanged)
+                    _log?.Invoke($"Upmix: {ModeName(routed.UpmixOptions)} moduna kesintisiz geçildi, {next.LatencyFrames * 1000.0 / fs:0.#} ms gecikme");
+            }
+        }
         _upmix?.Update(up);
         _heights?.Update(up);
         bool ok = routed.Outputs.Count == _sinks.Count;
