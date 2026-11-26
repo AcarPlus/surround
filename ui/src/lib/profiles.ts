@@ -30,69 +30,74 @@ export const MAX_PROFILE_NAME = 24
  * 0 dB ön kazanç, sıkıştırıcı yok, daha ılımlı raflar. Müzik kendi karakterini aldı: "V" (100 Hz bas rafı +3, 350 Hz
  * −1,5, 8 kHz hava rafı +2,5) ve daha geniş stereo (ambience 0,25), yine doğrudan dağıtım. Ölçümler
  * tests/Surround.Engine.Tests/ModeLoudnessTests.cs (REV 4).
+ * 5 (0.7.2): Geri bildirim: modlar hâlâ birbirinin aynısı. Her mod belirgin karakter aldı: Film bas +4 / diyalog +3,
+ * Oyun 2–5 kHz +4 / gümbürtü −2 / geniş, Müzik bas +4 / hava +3 / geniş. Her çift en az 2,5 dB ayrışır (ölçüm testi).
  */
-export const BUILTIN_PROFILES_REV = 4
+export const BUILTIN_PROFILES_REV = 5
+
+type Band = { type: 'lowShelf' | 'peak' | 'highShelf'; freqHz: number; gainDb: number; q: number }
 
 /**
- * Film ve Oyun'un canlılığı: 120 Hz bas rafı + 5 kHz tiz rafı, 0 dB ön kazanç, sıkıştırıcı yok (C# testindeki
- * `ModeChain.Lively` ile aynı). Rafların ender tepelerini cihaz limiter'ı tutar.
+ * Yerleşik mod zinciri: 0 dB ön kazanç, sıkıştırıcı yok, birkaç parametrik bant ve stereo genişlik (C# testindeki
+ * `ModeChain.Film/Game/Music` ile aynı). Artışların tepelerini cihaz limiter'ı (−0,1 dBFS, programa bağlı bırakma) tutar.
  */
-const lively = (bassDb: number, trebleDb: number, id: string): Processing => {
+const chain = (id: string, ambience: number, bands: (Band & { key: string })[]): Processing => {
   const p = normalizeProcessing({
     enabled: true,
     autoPreamp: false,
     preampDb: 0,
     limiter: true,
     dynamicBoost: 0,
-    peq: [
-      { id: `${id}-bass`, type: 'lowShelf', freqHz: 120, gainDb: bassDb, q: 0.7 },
-      { id: `${id}-treble`, type: 'highShelf', freqHz: 5000, gainDb: trebleDb, q: 0.7 },
-    ],
+    ambience,
+    peq: bands.map(({ key, ...b }) => ({ id: `${id}-${key}`, ...b })),
   })
   p.preset = matchSoundPreset(p)
   return p
 }
 
-/** Müzik: "V" eğrisi ve biraz daha geniş stereo (C# testindeki `ModeChain.Music` ile aynı). */
-const musicProcessing = (): Processing => {
-  const p = normalizeProcessing({
-    enabled: true,
-    autoPreamp: false,
-    preampDb: 0,
-    limiter: true,
-    dynamicBoost: 0,
-    ambience: 0.25,
-    peq: [
-      { id: 'music-bass', type: 'lowShelf', freqHz: 100, gainDb: 3, q: 0.7 },
-      { id: 'music-lowmid', type: 'peak', freqHz: 350, gainDb: -1.5, q: 1 },
-      { id: 'music-air', type: 'highShelf', freqHz: 8000, gainDb: 2.5, q: 0.7 },
-    ],
-  })
-  p.preset = matchSoundPreset(p)
-  return p
-}
+/** Film: bas +4 dB, diyalog (2 kHz) +3 dB, biraz geniş. */
+const filmProcessing = (): Processing =>
+  chain('film', 0.15, [
+    { key: 'bass', type: 'lowShelf', freqHz: 90, gainDb: 4, q: 0.7 },
+    { key: 'dialog', type: 'peak', freqHz: 2000, gainDb: 3, q: 1 },
+  ])
+
+/** Oyun: ayak sesi/konum (2–5 kHz) +4 dB, gümbürtü −2 dB, geniş sahne. */
+const gameProcessing = (): Processing =>
+  chain('game', 0.4, [
+    { key: 'rumble', type: 'lowShelf', freqHz: 80, gainDb: -2, q: 0.7 },
+    { key: 'cues', type: 'peak', freqHz: 3200, gainDb: 4, q: 0.7 },
+  ])
+
+/** Müzik: "V" eğrisi (bas +4, hava +3, alt orta −1,5) ve geniş sahne. */
+const musicProcessing = (): Processing =>
+  chain('music', 0.35, [
+    { key: 'bass', type: 'lowShelf', freqHz: 90, gainDb: 4, q: 0.7 },
+    { key: 'lowmid', type: 'peak', freqHz: 350, gainDb: -1.5, q: 1 },
+    { key: 'air', type: 'highShelf', freqHz: 6000, gainDb: 3, q: 0.7 },
+  ])
 
 /** Yerleşik profil tanımları (sıra, arayüzdeki sıradır). Her çağrıda yeni kopya döner. */
 export function builtinProfiles(): Profile[] {
   return [
     {
-      // Dolgun ve canlı: önler olduğu gibi, diyalog ortaya ayrıca (+1 dB); bas +2,5 / tiz +2 dB raf; arka dağınıklık
-      // azaltılmış (daha az "fazlı").
+      // Dolgun ve sinematik: önler olduğu gibi, diyalog ortaya ayrıca (+1 dB) ve 2 kHz'te +3 dB; bas +4 dB; arka
+      // dağınıklık azaltılmış (daha az "fazlı").
       id: 'builtin-film',
       name: 'Film',
       builtin: true,
       rev: BUILTIN_PROFILES_REV,
-      processing: lively(2.5, 2, 'film'),
+      processing: filmProcessing(),
       upmix: true,
       upmixOptions: normalizeUpmixOptions({ mode: 'film', centerDb: 1, diffusion: 0.6 }),
     },
     {
-      // Gecikmesiz (oyun modu matris çözücü) ve canlı: ayak sesi/konum için tiz +2,5 dB, bas +2 dB raf.
+      // Gecikmesiz (oyun modu matris çözücü): ayak sesi/konum için 2–5 kHz +4 dB, gümbürtü −2 dB, geniş sahne.
       id: 'builtin-game',
       name: 'Oyun',
       builtin: true,
       rev: BUILTIN_PROFILES_REV,
-      processing: lively(2, 2.5, 'game'),
+      processing: gameProcessing(),
       upmix: true,
       upmixOptions: normalizeUpmixOptions({ mode: 'game', diffusion: 0.6 }),
     },

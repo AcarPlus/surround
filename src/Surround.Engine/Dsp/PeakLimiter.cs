@@ -10,16 +10,17 @@ namespace Surround.Engine.Dsp;
 /// </summary>
 public sealed class PeakLimiter
 {
-    public static readonly float DefaultCeiling = (float)Math.Pow(10, -1.0 / 20); // -1 dBFS
+    /// <summary>-0.1 dBFS: the source (often already maximized, e.g. by FxSound) passes at full level; -1 dBFS cost 1 dB.</summary>
+    public static readonly float DefaultCeiling = (float)Math.Pow(10, -0.1 / 20);
 
     private readonly int _ch, _win;
-    private readonly float _ceiling, _release;
+    private readonly float _ceiling, _release, _slowAttack, _slowRelease;
     private readonly float[] _req;     // required gain per frame, ring of _win
     private readonly float[] _env;     // smoothed gain per frame, ring of _win (for the moving average)
     private readonly float[] _delay;   // audio ring, _win - 1 frames x channels
     private int _pos, _dpos;
     private double _sum;
-    private float _rel = 1f;
+    private float _rel = 1f, _slow = 1f;
 
     /// <remarks>
     /// Defaults 5 ms look-ahead / 200 ms release: a 60 Hz tone pushed 1–6 dB over the ceiling stays at about −77 dB THD
@@ -31,11 +32,21 @@ public sealed class PeakLimiter
         _win = Math.Max(1, (int)Math.Round(lookaheadMs * sampleRate / 1000.0));
         _ceiling = ceiling ?? DefaultCeiling;
         _release = (float)(1 - Math.Exp(-1 / (releaseMs / 1000.0 * sampleRate)));
+        _slowAttack = (float)(1 - Math.Exp(-1 / (SlowAttackMs / 1000.0 * sampleRate)));
+        _slowRelease = (float)(1 - Math.Exp(-1 / (SlowReleaseMs / 1000.0 * sampleRate)));
         _req = new float[_win]; Array.Fill(_req, 1f);
         _env = new float[_win]; Array.Fill(_env, 1f);
         _sum = _win;
         _delay = new float[(_win - 1) * channels];
     }
+
+    /// <summary>
+    /// Program-dependent release: a slow envelope (300 ms toward more reduction, 2 s back) settles at the reduction dense,
+    /// loud material keeps needing, and the gain is the smaller of it and the fast envelope. Loud passages (an EQ boost on
+    /// an already maximized source) then sit at a steady gain instead of pumping with every beat; an isolated peak still
+    /// recovers with the fast release.
+    /// </summary>
+    private const double SlowAttackMs = 300, SlowReleaseMs = 2000;
 
     public int LatencyFrames => _win - 1;
 
@@ -58,11 +69,13 @@ public sealed class PeakLimiter
                 float hold = 1f;
                 for (int i = 0; i < _win; i++) if (_req[i] < hold) hold = _req[i];
                 _rel = hold < _rel ? hold : _rel + (hold - _rel) * _release;
-                _sum += _rel - _env[_pos];
-                _env[_pos] = _rel;
+                _slow += (hold - _slow) * (hold < _slow ? _slowAttack : _slowRelease);
+                float target = _rel < _slow ? _rel : _slow;
+                _sum += target - _env[_pos];
+                _env[_pos] = target;
                 g = (float)(_sum / _win);
             }
-            else if (_rel != 1f) Reset();
+            else if (_rel != 1f || _slow != 1f) Reset();
             if (++_pos == _win) _pos = 0;
 
             // Delay the audio by _win - 1 frames so each peak meets the fully settled average.
@@ -86,6 +99,6 @@ public sealed class PeakLimiter
     private void Reset()
     {
         Array.Fill(_req, 1f); Array.Fill(_env, 1f);
-        _sum = _win; _rel = 1f;
+        _sum = _win; _rel = 1f; _slow = 1f;
     }
 }

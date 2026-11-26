@@ -44,14 +44,43 @@ internal static class ModeChain
         Enabled = true, AutoPreamp = false, PreampDb = -1, Limiter = true, DynamicBoost = 0.15, Peq = Shelves(bassDb, trebleDb),
     };
 
-    /// <summary>Built-in profiles now (BUILTIN_PROFILES_REV 4); keep in sync with ui/src/lib/profiles.ts.</summary>
+    /// <summary>Built-in profiles of 0.7.1 (BUILTIN_PROFILES_REV 4): mild shelves, no compressor.</summary>
+    public static readonly Profile[] Rev4Profiles =
+    {
+        OldProfiles[0],
+        new("Müzik", UpmixOptions.Direct, Rev4Music()),
+        new("Film", UpmixOptions.Film, Lively(2.5, 2), CenterDb: 1, Diffusion: 0.6),
+        new("Oyun", UpmixOptions.Game, Lively(2, 2.5), Diffusion: 0.6),
+    };
+
+    /// <summary>Built-in profiles now (BUILTIN_PROFILES_REV 5); keep in sync with ui/src/lib/profiles.ts.</summary>
     public static readonly Profile[] Profiles =
     {
         OldProfiles[0],
         new("Müzik", UpmixOptions.Direct, Music()),
-        new("Film", UpmixOptions.Film, Lively(2.5, 2), CenterDb: 1, Diffusion: 0.6),
-        new("Oyun", UpmixOptions.Game, Lively(2, 2.5), Diffusion: 0.6),
+        new("Film", UpmixOptions.Film, Film(), CenterDb: 1, Diffusion: 0.6),
+        new("Oyun", UpmixOptions.Game, Game(), Diffusion: 0.6),
     };
+
+    private static ProcessingConfig Chain(double ambience, params PeqBand[] bands) => new()
+    {
+        Enabled = true, AutoPreamp = false, PreampDb = 0, Limiter = true, DynamicBoost = 0, Ambience = ambience,
+        Peq = bands.ToList(),
+    };
+
+    private static PeqBand Eq(string type, double hz, double db, double q) => new() { Type = type, FreqHz = hz, GainDb = db, Q = q };
+
+    /// <summary>Film: bass +4 dB and dialog presence +3 dB (2 kHz), a touch wider.</summary>
+    public static ProcessingConfig Film() => Chain(0.15,
+        Eq("lowShelf", 90, 4, 0.7), Eq("peak", 2000, 3, 1));
+
+    /// <summary>Game: footsteps and positional cues +4 dB (2-5 kHz), rumble -2 dB, wide stage.</summary>
+    public static ProcessingConfig Game() => Chain(0.4,
+        Eq("lowShelf", 80, -2, 0.7), Eq("peak", 3200, 4, 0.7));
+
+    /// <summary>Music: "V" (bass +4, air +3, a small low-mid dip that also frees headroom) and a wide stage.</summary>
+    public static ProcessingConfig Music() => Chain(0.35,
+        Eq("lowShelf", 90, 4, 0.7), Eq("peak", 350, -1.5, 1), Eq("highShelf", 6000, 3, 0.7));
 
     /// <summary>
     /// Film and game profiles: a bass and a treble shelf at unity preamp, no compressor. The 0.7.0 compressor
@@ -67,7 +96,7 @@ internal static class ModeChain
     /// Music: the flat profile's direct distribution with its own character: a "V" (bass and air shelves, a small
     /// low-mid dip that also frees headroom) and a wider stereo image; unity preamp, no compressor.
     /// </summary>
-    public static ProcessingConfig Music() => new()
+    public static ProcessingConfig Rev4Music() => new()
     {
         Enabled = true, AutoPreamp = false, PreampDb = 0, Limiter = true, DynamicBoost = 0, Ambience = 0.25,
         Peq = new List<PeqBand>
@@ -250,9 +279,9 @@ internal static class ModeChain
 
     // ---- analysis ----
 
-    public enum Band { Low, Mid, High, All }
+    public enum Band { Low, Mid, High, All, Presence }
 
-    /// <summary>LR4 band split: low &lt; 150 Hz, mid 150 Hz .. 4 kHz, high &gt; 4 kHz.</summary>
+    /// <summary>LR4 band split: low &lt; 150 Hz, mid 150 Hz .. 4 kHz, high &gt; 4 kHz; presence 2 .. 5 kHz (cue band).</summary>
     public static float[] Filter(float[] x, Band band)
     {
         if (band == Band.All) return x;
@@ -261,6 +290,7 @@ internal static class ModeChain
         if (band == Band.Low) Apply(LinkwitzRiley.LowPass(Fs, 150));
         if (band == Band.Mid) { Apply(LinkwitzRiley.HighPass(Fs, 150)); Apply(LinkwitzRiley.LowPass(Fs, 4000)); }
         if (band == Band.High) Apply(LinkwitzRiley.HighPass(Fs, 4000));
+        if (band == Band.Presence) { Apply(LinkwitzRiley.HighPass(Fs, 2000)); Apply(LinkwitzRiley.LowPass(Fs, 5000)); }
         return y;
     }
 
@@ -321,8 +351,9 @@ public class ModeLoudnessTests
     }
 
     /// <summary>
-    /// Film and game at least as full and loud as the flat profile, plus a bass and treble lift, in every layout, on
-    /// a film/game-like program at -20 dBFS RMS (after the device limiters). Measured before this change (0.6.x
+    /// Every built-in mode at least as loud as the flat profile with its own character (REV 5: film and music a clear bass
+    /// lift, game the cue band up and the rumble down, music the air too), in every layout, on a film/game-like program
+    /// at -20 dBFS RMS (after the device limiters). Measured before 0.7.0 (0.6.x
     /// upmix and profiles; power sum, dB relative to the flat profile):
     /// <code>
     /// layout                         Film    Oyun
@@ -346,20 +377,32 @@ public class ModeLoudnessTests
         {
             var m = ModeChain.Measure(ModeChain.Run(p, layout, input));
             string who = $"{p.Name}, {layout.Name}";
-            double P(ModeChain.Metrics x, ModeChain.Band b) => x.Bands[b].Power;
-            Assert.True(m.PowerDb >= flat.PowerDb + 0.5, $"{who}: {m.PowerDb - flat.PowerDb:+0.0;-0.0} dB vs flat");
-            Assert.True(m.SumDb >= flat.SumDb, $"{who}: in-room sum {m.SumDb - flat.SumDb:+0.0;-0.0} dB vs flat");
-            Assert.True(P(m, ModeChain.Band.Low) >= P(flat, ModeChain.Band.Low) + 1.0, $"{who}: bass");
-            Assert.True(P(m, ModeChain.Band.High) >= P(flat, ModeChain.Band.High) + 1.0, $"{who}: treble");
-            Assert.True(P(m, ModeChain.Band.Mid) >= P(flat, ModeChain.Band.Mid) - 0.5, $"{who}: mids {P(m, ModeChain.Band.Mid) - P(flat, ModeChain.Band.Mid):+0.0;-0.0} dB");
+            double D(ModeChain.Band b) => m.Bands[b].Power - flat.Bands[b].Power;
+            // Each mode has its own audible character (REV 5), never quieter than flat overall.
+            Assert.True(m.PowerDb >= flat.PowerDb + (p.Name == "Oyun" ? 0 : 0.5), $"{who}: {m.PowerDb - flat.PowerDb:+0.0;-0.0} dB vs flat");
+            Assert.True(m.SumDb >= flat.SumDb - 0.5, $"{who}: in-room sum {m.SumDb - flat.SumDb:+0.0;-0.0} dB vs flat");
+            if (p.Name == "Oyun")
+            {
+                Assert.True(D(ModeChain.Band.Low) <= -0.5, $"{who}: rumble {D(ModeChain.Band.Low):+0.0;-0.0} dB");
+                Assert.True(D(ModeChain.Band.Presence) >= 2.5, $"{who}: cues {D(ModeChain.Band.Presence):+0.0;-0.0} dB");
+            }
+            else
+            {
+                Assert.True(D(ModeChain.Band.Low) >= 2.0, $"{who}: bass {D(ModeChain.Band.Low):+0.0;-0.0} dB");
+                Assert.True(D(ModeChain.Band.Mid) >= -0.5, $"{who}: mids {D(ModeChain.Band.Mid):+0.0;-0.0} dB");
+            }
+            if (p.Name == "Müzik") Assert.True(D(ModeChain.Band.High) >= 2.0, $"{who}: air {D(ModeChain.Band.High):+0.0;-0.0} dB");
             // Every speaker still plays (none emptied into another one), and no peak beyond the limiter's ceiling.
             for (int k = 0; k < m.SpeakerDb.Length; k++)
                 Assert.True(m.SpeakerDb[k] >= flat.SpeakerDb[k] - 1.5, $"{who}: {layout.Names[k]} {m.SpeakerDb[k] - flat.SpeakerDb[k]:+0.0;-0.0} dB");
-            Assert.True(m.SpeakerPeakDb.Max() <= -0.99, $"{who}: peak {m.SpeakerPeakDb.Max():0.00} dBFS");
+            Assert.True(m.SpeakerPeakDb.Max() <= -0.09, $"{who}: peak {m.SpeakerPeakDb.Max():0.00} dBFS");
         }
     }
 
-    /// <summary>No clipping and no more limiting than the flat profile at loud levels (hot masters).</summary>
+    /// <summary>
+    /// No clipping, and on hot masters the boosts cost only a little extra limiting (the program-dependent release keeps it
+    /// a steady gain rather than pumping).
+    /// </summary>
     [Fact]
     public void LoudInputIsNotLimitedMuchMoreThanFlat()
     {
@@ -372,7 +415,7 @@ public class ModeLoudnessTests
             foreach (var p in ModeChain.Profiles.Skip(1))
             {
                 double loss = Loss(p);
-                Assert.True(loss <= flat + 1.0, $"{p.Name}, {layout.Name}: limiter takes {loss:0.0} dB, flat {flat:0.0} dB");
+                Assert.True(loss <= flat + 2.5, $"{p.Name}, {layout.Name}: limiter takes {loss:0.0} dB, flat {flat:0.0} dB");
             }
         }
     }
@@ -401,6 +444,25 @@ public class ModeLoudnessTests
         double cf = Corr(flatOut[0], flatOut[1]), cm = Corr(musicOut[0], musicOut[1]);
         _out.WriteLine($"L/R ilinti: Düz {cf:0.00}, Müzik {cm:0.00}");
         Assert.True(cm <= cf - 0.1, $"music not wider: {cm:0.00} vs flat {cf:0.00}");
+    }
+
+    /// <summary>
+    /// The modes sounded alike (0.7.1: ±2-3 dB shelves). Every pair of built-in profiles now differs by at least 2.5 dB in
+    /// some band (low &lt; 150 Hz, mid, presence 2-5 kHz, high &gt; 4 kHz) on the two-speaker layout, where no mode has surrounds to spread into.
+    /// </summary>
+    [Fact]
+    public void ModesAreAudiblyDistinct()
+    {
+        var input = ModeChain.Program(Frames);
+        var ms = ModeChain.Profiles.Select(p => (p.Name, M: ModeChain.Measure(ModeChain.Run(p, ModeChain.Lr, input)))).ToArray();
+        var bands = new[] { ModeChain.Band.Low, ModeChain.Band.Mid, ModeChain.Band.Presence, ModeChain.Band.High };
+        for (int i = 0; i < ms.Length; i++)
+            for (int j = i + 1; j < ms.Length; j++)
+            {
+                double d = bands.Max(b => Math.Abs(ms[i].M.Bands[b].Power - ms[j].M.Bands[b].Power));
+                _out.WriteLine($"{ms[i].Name} / {ms[j].Name}: en büyük bant farkı {d:0.0} dB");
+                Assert.True(d >= 2.5, $"{ms[i].Name} vs {ms[j].Name}: only {d:0.0} dB apart");
+            }
     }
 
     /// <summary>No built-in profile runs the compressor: on hot masters it pumped ("choppy" sound).</summary>
@@ -439,6 +501,7 @@ public class ModeLoudnessTests
     {
         Table(ModeChain.OldProfiles, "ESKİ PROFİL DEĞERLERİ, YENİ UPMIX");
         Table(ModeChain.Rev3Profiles, "0.7.0 (REV 3)");
+        Table(ModeChain.Rev4Profiles, "0.7.1 (REV 4)");
         Table(ModeChain.Profiles, "SONRA");
     }
 }

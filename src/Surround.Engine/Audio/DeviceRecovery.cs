@@ -111,9 +111,46 @@ public sealed class DeviceRecovery
         if (Gone(cfg.Source.DeviceId)) return null;
         var copy = SurroundConfig.Parse(cfg.ToJson());
         dropped = copy.Speakers.Where(s => Gone(s.OutputDeviceId)).Select(s => s.Name).ToList();
+        var before = ChannelPower(copy.Speakers);
         copy.Speakers.RemoveAll(s => Gone(s.OutputDeviceId));
         copy.Outputs.RemoveAll(o => Gone(o.DeviceId));
+        RestoreChannelPower(copy.Speakers, before);
         return copy.ForRouting().Speakers.Any(s => !s.Mute) ? copy : null;
+    }
+
+    /// <summary>Largest boost a channel gets back when a speaker that shared it is missing (+6 dB).</summary>
+    internal const double MaxRestoreGain = 2.0;
+
+    /// <summary>Per logical channel (LFE excluded), the summed power of its weights over the unmuted speakers.</summary>
+    private static double[] ChannelPower(IEnumerable<SpeakerConfig> speakers)
+    {
+        var p = new double[Channels.Count];
+        foreach (var s in speakers.Where(s => !s.Mute))
+            foreach (var (k, v) in s.Source)
+            {
+                int c = Channels.IndexOf(k);
+                if (c >= 0 && c != Channels.LFE) p[c] += v * v;
+            }
+        return p;
+    }
+
+    /// <summary>
+    /// A missing speaker's share of each channel goes to the speakers that still play that channel: their weights are
+    /// scaled so the channel's power is what it was with every speaker. Without this "distribute by position" lost the
+    /// absent speaker's part of the fronts (e.g. center 0.61 of FL: the remaining left speaker played FL at 0.79, -2 dB)
+    /// and the whole system played quieter than the source. Channels no remaining speaker plays are left to the fold.
+    /// </summary>
+    private static void RestoreChannelPower(List<SpeakerConfig> remaining, double[] before)
+    {
+        var after = ChannelPower(remaining);
+        for (int c = 0; c < Channels.Count; c++)
+        {
+            if (after[c] <= 1e-12 || after[c] >= before[c] - 1e-9) continue;
+            double g = Math.Min(MaxRestoreGain, Math.Sqrt(before[c] / after[c]));
+            foreach (var s in remaining.Where(s => !s.Mute))
+                foreach (var key in s.Source.Keys.Where(k => Channels.IndexOf(k) == c).ToList())
+                    s.Source[key] = Math.Round(s.Source[key] * g, 4);
+        }
     }
 
     /// <summary>

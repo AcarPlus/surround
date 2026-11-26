@@ -309,6 +309,34 @@ public class DeviceRecoveryTests
     }
 
     [Fact]
+    public void WithoutMissing_gives_the_missing_speakers_share_back_to_the_others()
+    {
+        // "Konuma göre dağıt" with a center that shares the fronts; the center's device is gone. The remaining fronts
+        // must carry FL/FR at full power again (0.793 → 1, 0.956 → 1), the surrounds stay as they were.
+        var cfg = SurroundConfig.Parse("""
+        { "source": { "deviceId": "SRC", "mode": "loopback" },
+          "outputs": [ { "deviceId": "A" }, { "deviceId": "B" } ],
+          "speakers": [
+            { "name": "l", "outputDeviceId": "A", "deviceChannel": 1, "source": { "FL": 0.793, "SL": 1, "BL": 1 } },
+            { "name": "r", "outputDeviceId": "A", "deviceChannel": 2, "source": { "FR": 0.956, "SR": 1, "BR": 1 } },
+            { "name": "c", "outputDeviceId": "B", "deviceChannel": 1, "source": { "FL": 0.609, "FC": 1, "FR": 0.294 } } ] }
+        """);
+        var r = DeviceRecovery.WithoutMissing(cfg, new[] { Up("SRC", 8), Up("A"), Gone("B") }, out _)!;
+        var l = r.Speakers.Single(s => s.Name == "l").Source;
+        var rt = r.Speakers.Single(s => s.Name == "r").Source;
+        Assert.Equal(1.0, l["FL"], 2);
+        Assert.Equal(1.0, rt["FR"], 2);
+        Assert.Equal(1.0, l["SL"]);
+        Assert.Equal(1.0, rt["BR"]);
+        Assert.Equal(0.793, cfg.Speakers[0].Source["FL"]); // the saved config is untouched
+
+        // A muted speaker is the user's choice, not a missing device: nothing is redistributed for it.
+        cfg.Speakers[2].Mute = true;
+        r = DeviceRecovery.WithoutMissing(cfg, new[] { Up("SRC", 8), Up("A"), Gone("B") }, out _)!;
+        Assert.Equal(0.793, r.Speakers.Single(s => s.Name == "l").Source["FL"]);
+    }
+
+    [Fact]
     public void WithoutMissing_is_impossible_without_source_or_without_any_playing_speaker()
     {
         var cfg = SurroundConfig.Parse(TwoOutputs);

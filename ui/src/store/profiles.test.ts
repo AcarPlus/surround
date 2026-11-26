@@ -31,7 +31,7 @@ describe('profil mağazası', () => {
     expect(st().activeProfileId).toBe('builtin-game')
     expect(st().upmix).toBe(true)
     expect(st().upmixOptions.mode).toBe('game')
-    expect(st().processing.peq.map((b) => b.gainDb)).toEqual([2, 2.5])
+    expect(st().processing.peq.map((b) => b.gainDb)).toEqual([-2, 4])
     expect(selectProfileModified(st())).toBe(false)
   })
 
