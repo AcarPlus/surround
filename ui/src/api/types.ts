@@ -584,4 +584,5 @@ export type WindowCommand =
   | { kind: 'button'; button: CaptionButton }
   | { kind: 'resize'; edge: ResizeEdge }
   | { kind: 'menu' }
+  | { kind: 'drag' }
   | { kind: 'theme'; theme: 'dark' | 'light' }

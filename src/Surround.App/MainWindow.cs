@@ -231,8 +231,10 @@ public sealed class MainWindow : Window
         s.IsPasswordAutosaveEnabled = false;
         s.IsGeneralAutofillEnabled = false;
         s.IsSwipeNavigationEnabled = false;
-        // CSS app-region: drag on the empty space of the page's top row = the window's caption (move, snap, double-click, system menu).
-        s.IsNonClientRegionSupportEnabled = true;
+        // Off on purpose: with CSS app-region regions WebView2 rebuilds a set of child windows on the UI thread every
+        // time a region changes, and the animated top row changed them every frame (UI thread saturated, the window
+        // took no clicks or keys). The page starts the caption drag itself instead (window.drag, WindowControls.tsx).
+        s.IsNonClientRegionSupportEnabled = false;
 #if DEBUG
         s.AreDevToolsEnabled = true;
         s.AreDefaultContextMenusEnabled = true;

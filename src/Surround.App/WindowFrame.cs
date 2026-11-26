@@ -14,10 +14,10 @@ namespace Surround.Desktop;
 /// the DWM drop shadow all keep working. Maximised, the client area is exactly the monitor's work area.
 ///
 /// There is no separate title bar: the app's own top row (ui/src/components/TopBar.tsx) sits at the very top of the
-/// window. Dragging and double-clicking its empty space is WebView2's own non-client support (CSS
-/// <c>app-region: drag</c>); the minimise / maximise / close buttons in its top-right corner and the top resize grip
-/// (ui/src/components/WindowControls.tsx) reach this class through the bridge (<c>window.*</c> methods) and are
-/// handed to Windows' own move / size loop. Any failure leaves the normal frame in place (<see cref="Active"/> false);
+/// window. Dragging its empty space, double-clicking and right-clicking it, the minimise / maximise / close buttons
+/// in its top-right corner and the top resize grip (ui/src/components/WindowControls.tsx) reach this class through
+/// the bridge (<c>window.*</c> methods) and are handed to Windows' own move / size loop. WebView2's CSS
+/// <c>app-region</c> support is deliberately not used (see MainWindow.ConfigureSettings). Any failure leaves the normal frame in place (<see cref="Active"/> false);
 /// the page then draws no window buttons.
 /// </summary>
 public sealed class WindowFrame

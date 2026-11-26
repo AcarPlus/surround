@@ -3,10 +3,13 @@ import { describe, expect, it } from 'vitest'
 import {
   CAPTION_BUTTON_WIDTH,
   CORNER_GRIP,
+  DRAG_THRESHOLD,
+  NO_DRAG_SELECTOR,
   RESIZE_GRIP,
   captionAreaWidth,
   captionButtons,
   initialWindowState,
+  isCaptionTarget,
   normalizeWindowState,
   syncFrameless,
   topEdgeAt,
@@ -78,11 +81,65 @@ describe('pencere düğmeleri (üst satırda, ayrı başlık şeridi yok)', () =
     expect(header.split(' ')).toEqual(expect.arrayContaining(['app-drag', 'caption-pad-right']))
   })
 
-  it('sürükleme alanı yalnız çerçevesiz pencerede; etkileşimli öğeler sürüklemez', () => {
+  it('CSS app-region yok: WebView2 bölge pencereleri animasyonlu üst satırda girdiyi kilitliyordu', () => {
     const css = source('../index.css')
     expect(css).not.toMatch(/\.titlebar\b/)
-    expect(css).toMatch(/\.frameless \.app-drag \{\s*app-region: drag;/)
-    expect(css).toMatch(/\.frameless \.app-drag :where\(button, input, select/)
-    expect(css).not.toMatch(/^\.app-drag \{/m)
+    expect(css).not.toMatch(/^\s*(-webkit-)?app-region\s*:/m)
+    expect(source('../../../src/Surround.App/MainWindow.cs')).toMatch(/IsNonClientRegionSupportEnabled = false;/)
+    expect(source('../components/WindowControls.tsx')).toMatch(/useCaptionDrag\(win\.frameless\)/)
+  })
+})
+
+/** Sahte DOM düğümü: `closest` seçiciye göre atalarda arar (yalnız testte kullanılan seçiciler). */
+class Node_ {
+  constructor(
+    readonly matches: (sel: string) => boolean,
+    readonly parent: Node_ | null = null,
+  ) {}
+  closest(sel: string): Node_ | null {
+    const parts = sel.split(',').map((s) => s.trim())
+    for (let n: Node_ | null = this; n; n = n.parent) if (parts.some((p) => n!.matches(p))) return n
+    return null
+  }
+  contains(other: Node_): boolean {
+    for (let n: Node_ | null = other; n; n = n.parent) if (n === this) return true
+    return false
+  }
+}
+const el = (kinds: string[], parent: Node_ | null = null) => new Node_((s) => kinds.includes(s), parent)
+
+describe('başlık gibi davranan boş yer (isCaptionTarget)', () => {
+  const body = el([])
+  const header = el(['.app-drag'], body)
+  const logo = el([], header)
+
+  it('üst satırın boş yeri ve içindeki yazı / simge başlıktır', () => {
+    expect(isCaptionTarget(header)).toBe(true)
+    expect(isCaptionTarget(logo)).toBe(true)
+  })
+
+  it('düğme, kaydırıcı ve no-drag kutunun içi başlık değildir', () => {
+    const button = el(['button'], header)
+    const glyph = el([], button)
+    const volume = el(['.app-no-drag'], header)
+    const slider = el(['input'], volume)
+    expect(isCaptionTarget(button)).toBe(false)
+    expect(isCaptionTarget(glyph)).toBe(false)
+    expect(isCaptionTarget(volume)).toBe(false)
+    expect(isCaptionTarget(slider)).toBe(false)
+  })
+
+  it('sürükleme alanı dışı başlık değildir; alanı örten no-drag ata (sihirbazın kökü) alanı iptal etmez', () => {
+    expect(isCaptionTarget(el([], body))).toBe(false)
+    expect(isCaptionTarget(null)).toBe(false)
+    const wizard = el(['.app-no-drag', "[role='dialog']"], body)
+    const wizardHeader = el(['.app-drag'], wizard)
+    expect(isCaptionTarget(el([], wizardHeader))).toBe(true)
+  })
+
+  it('sürükleme birkaç piksel sonra başlar (tıklama ve çift tık sayfada kalır)', () => {
+    expect(DRAG_THRESHOLD).toBeGreaterThanOrEqual(3)
+    expect(NO_DRAG_SELECTOR).toContain('button')
+    expect(NO_DRAG_SELECTOR).toContain('.app-no-drag')
   })
 })
