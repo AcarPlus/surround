@@ -358,6 +358,17 @@ export interface EngineState {
   missing: string[]
   /** Eksik cihaz yoksa bekleme nedeni (akış koptu, biçim değişti, yeniden başlatma hatası). */
   message?: string | null
+  /**
+   * Yalnız eksik cihaz olmadan çalışırken: kalan hoparlörlerin motorda o an çaldığı gecikme/kazanç (son kalibrasyondan
+   * yeniden hizalanmış; kayıtlı değerler değişmez).
+   */
+  live?: LiveSpeaker[]
+}
+
+export interface LiveSpeaker {
+  id: string
+  delayMs: number
+  gainDb: number
 }
 
 /**

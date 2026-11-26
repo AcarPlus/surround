@@ -101,7 +101,8 @@ public sealed class DeviceRecovery
 
     /// <summary>
     /// "Start without the missing devices": a copy of <paramref name="cfg"/> where speakers (and outputs) on absent devices are
-    /// left out (i.e. muted), so the rest can play. Null when that is impossible: the source itself is absent, or nothing
+    /// left out (i.e. muted), so the rest can play, re-placed and re-aligned for the speakers that are left (see
+    /// <see cref="Realign"/>). Null when that is impossible: the source itself is absent, or nothing
     /// would play. <paramref name="dropped"/> receives the names of the left-out speakers. The saved config is untouched.
     /// </summary>
     public static SurroundConfig? WithoutMissing(SurroundConfig cfg, IReadOnlyList<DeviceProbe> probes, out List<string> dropped)
@@ -112,10 +113,54 @@ public sealed class DeviceRecovery
         var copy = SurroundConfig.Parse(cfg.ToJson());
         dropped = copy.Speakers.Where(s => Gone(s.OutputDeviceId)).Select(s => s.Name).ToList();
         var before = ChannelPower(copy.Speakers);
+        double gainBefore = TopGainDb(copy);
         copy.Speakers.RemoveAll(s => Gone(s.OutputDeviceId));
         copy.Outputs.RemoveAll(o => Gone(o.DeviceId));
-        RestoreChannelPower(copy.Speakers, before);
+        // "Konuma göre dağıt": place the channels again on the speakers that are left (the absent center's FC becomes a
+        // phantom between the fronts). Otherwise (role rows, or positions unknown) its share goes to whoever shares it.
+        if (!(PositionalMix.IsOn(copy) && PositionalMix.Apply(copy, copy.Speakers)))
+            RestoreChannelPower(copy.Speakers, before);
+        Realign(copy, gainBefore);
         return copy.ForRouting().Speakers.Any(s => !s.Mute) ? copy : null;
+    }
+
+    /// <summary>For the log: each playing speaker's effective delay and gain, e.g. "Sol 0,8 ms 0 dB; Sağ 0 ms 0 dB".</summary>
+    public static string Describe(SurroundConfig cfg)
+    {
+        var routed = cfg.ForRouting();
+        var ci = System.Globalization.CultureInfo.GetCultureInfo("tr-TR");
+        return string.Join("; ", routed.Speakers.Where(s => !s.Mute).Select(s =>
+            string.Format(ci, "{0} {1:0.##} ms {2:0.##} dB", s.Name, routed.EffectiveDelayMs(s), s.GainDb)));
+    }
+
+    /// <summary>Highest gain among the speakers that really play (−∞ when none).</summary>
+    private static double TopGainDb(SurroundConfig cfg)
+    {
+        var playing = cfg.ForRouting().Speakers.Where(s => !s.Mute).ToList();
+        return playing.Count == 0 ? double.NegativeInfinity : playing.Max(s => s.GainDb);
+    }
+
+    /// <summary>
+    /// Delay and level of what is left, from the last calibration's values. Delays: the calibration delayed every speaker to
+    /// wait for the slowest one (often a Bluetooth device); without it the remaining speakers would still wait. The common
+    /// part is taken off so the earliest remaining speaker plays at 0 ms; their measured differences (distance) stay.
+    /// Levels: when the calibration turned the others down to match the absent speaker, they come back up by that much,
+    /// never above the loudest gain the full setup had.
+    /// </summary>
+    private static void Realign(SurroundConfig copy, double gainBefore)
+    {
+        var routed = copy.ForRouting();
+        var playing = routed.Speakers.Where(s => !s.Mute).ToList();
+        if (playing.Count == 0) return;
+        // Every delay stays ≥ 0: the shift is bounded by the smallest user delay among them.
+        double shift = Math.Min(playing.Min(routed.EffectiveDelayMs), playing.Min(s => s.DelayMs));
+        if (shift > 1e-6)
+            foreach (var s in copy.Speakers)
+                s.DelayMs = Math.Round(Math.Max(0, s.DelayMs - shift), 2);
+        double lift = gainBefore - playing.Max(s => s.GainDb);
+        if (double.IsFinite(lift) && lift > 1e-6)
+            foreach (var s in copy.Speakers)
+                s.GainDb = Math.Round(s.GainDb + lift, 2);
     }
 
     /// <summary>Largest boost a channel gets back when a speaker that shared it is missing (+6 dB).</summary>

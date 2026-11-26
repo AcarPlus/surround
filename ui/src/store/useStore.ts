@@ -182,6 +182,11 @@ interface State {
   /** runState 'waiting' iken: geri gelmesi beklenen cihazların adları ve (varsa) bekleme nedeni. */
   waitingFor: string[]
   waitMessage: string | null
+  /**
+   * Eksik cihaz olmadan çalışırken kalan hoparlörlerin motorda çaldığı gecikme/kazanç (hoparlör kimliğine göre); yoksa null.
+   * Kayıtlı değerler değişmez; ekranlar bunu "şu an" olarak gösterir.
+   */
+  live: Record<string, { delayMs: number; gainDb: number }> | null
   /** Bekleme başladığındaki zaman (ms); bekleme yokken null. 30 sn sonra "eksiksiz başlat" önerilir. */
   waitingSince: number | null
   toast: Toast | null
@@ -585,6 +590,7 @@ export const useStore = create<State>()((set, get) => {
     status: [],
     engine: null,
     waitingFor: [],
+    live: null,
     waitMessage: null,
     waitingSince: null,
     toast: null,
@@ -630,7 +636,7 @@ export const useStore = create<State>()((set, get) => {
         await api.startWithoutMissing()
         const e = await api.getEngineState().catch(() => null)
         if (e) get().setEngineState(e)
-        else set({ runState: 'running', waitingFor: [], waitMessage: null, waitingSince: null })
+        else set({ runState: 'running', waitingFor: [], waitMessage: null, waitingSince: null, live: null })
       } catch (e) {
         get().showError(e, 7000)
       }
@@ -715,7 +721,7 @@ export const useStore = create<State>()((set, get) => {
     },
 
     setEngineState(e) {
-      const idle = { waitingFor: [] as string[], waitMessage: null, waitingSince: null }
+      const idle = { waitingFor: [] as string[], waitMessage: null, waitingSince: null, live: null }
       if (e.state === 'waiting') {
         set({
           runState: 'waiting',
@@ -726,7 +732,8 @@ export const useStore = create<State>()((set, get) => {
           waitingSince: get().waitingSince ?? Date.now(),
         })
       } else if (e.state === 'running') {
-        set({ runState: 'running', ...idle })
+        const live = e.live?.length ? Object.fromEntries(e.live.map((x) => [x.id, { delayMs: x.delayMs, gainDb: x.gainDb }])) : null
+        set({ runState: 'running', ...idle, live })
       } else if (get().runState !== 'starting') {
         // Başlatılırken gelen eski bir "stopped" yok sayılır; sonucu toggleRun belirler.
         set({ runState: 'stopped', status: [], engine: null, ...idle })
@@ -775,7 +782,7 @@ export const useStore = create<State>()((set, get) => {
         } catch (e) {
           get().showError(e, 6000)
         }
-        set({ runState: 'stopped', status: [], engine: null, waitingFor: [], waitMessage: null, waitingSince: null })
+        set({ runState: 'stopped', status: [], engine: null, waitingFor: [], waitMessage: null, waitingSince: null, live: null })
         return
       }
       set({ runState: 'starting' })

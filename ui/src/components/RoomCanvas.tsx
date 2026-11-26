@@ -28,6 +28,7 @@ export function RoomCanvas({
   const room = useStore((s) => s.room)
   const speakers = useStore((s) => s.speakers)
   const devices = useStore((s) => s.devices)
+  const live = useStore((s) => s.live)
   const auto = useStore((s) => s.auto)
   const selection = useStore((s) => s.selection)
   const playing = useStore((s) => s.playing)
@@ -282,8 +283,8 @@ export function RoomCanvas({
           <Row k="Rol" v={roleLabel(effectiveRole(hovered))} />
           <Row k="Cihaz" v={`${devices.find((d) => d.id === hovered.outputDeviceId)?.name.split(' (')[0] ?? '—'} · k${hovered.deviceChannel}`} />
           <Row k="Mesafe" v={`${fmt(byId[hovered.id]?.distance ?? 0)} m`} />
-          <Row k="Gecikme" v={`${fmt(hovered.delayMs)} ms`} />
-          <Row k="Kazanç" v={`${fmt(hovered.gainDb, 1)} dB`} />
+          <Row k={live?.[hovered.id] ? 'Gecikme (şu an)' : 'Gecikme'} v={`${fmt(live?.[hovered.id]?.delayMs ?? hovered.delayMs)} ms`} />
+          <Row k={live?.[hovered.id] ? 'Kazanç (şu an)' : 'Kazanç'} v={`${fmt(live?.[hovered.id]?.gainDb ?? hovered.gainDb, 1)} dB`} />
         </div>
       )}
 

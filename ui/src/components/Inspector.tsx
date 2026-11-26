@@ -111,6 +111,7 @@ function SpeakerPanel() {
   const duplicateSpeaker = useStore((s) => s.duplicateSpeaker)
   const playTone = useStore((s) => s.playTone)
   const playing = useStore((s) => s.playing === s.selection)
+  const live = useStore((s) => (s.selection ? s.live?.[s.selection] : undefined))
   const [tab, setTab] = useState<'general' | 'sound' | 'advanced'>('general')
 
   if (!sp) return null
@@ -320,6 +321,14 @@ function SpeakerPanel() {
               decimals={1}
               onChange={(v) => updateSpeaker(sp.id, { gainDb: v })}
             />
+            {live && (
+              <p className="rounded-md border border-line px-2.5 py-1.5 text-xs text-muted">
+                Bazı hoparlörler bağlı değil; bu hoparlör şu an{' '}
+                <span className="num font-semibold">{fmt(live.delayMs, 1)} ms</span> gecikme,{' '}
+                <span className="num font-semibold">{fmt(live.gainDb, 1)} dB</span> ile çalıyor (son kalibrasyondan yeniden
+                hizalandı). Yukarıdaki kayıtlı değerler hepsi bağlıyken geçerli.
+              </p>
+            )}
             <p className="text-xs text-faint">
               Otomatik: en uzak hoparlör <span className="num">{fmt(dMax)} m</span> referans alınır; gecikme = (dMax −
               d) / 343 m/s, kazanç = 20·log₁₀(d / dMax). Kalibrasyon bunları ölçerek değiştirir.

@@ -11,13 +11,21 @@ namespace Surround.Desktop.Bridge;
 /// names of the required devices that are gone (waiting only).
 /// </summary>
 public sealed record EngineStateDto(string State, IReadOnlyList<string> Missing,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Message = null)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Message = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<LiveSpeakerDto>? Live = null)
 {
     public const string RunningName = "running", WaitingName = "waiting", StoppedName = "stopped";
     public static readonly EngineStateDto Stopped = new(StoppedName, Array.Empty<string>());
 
-    public bool SameAs(EngineStateDto o) => State == o.State && Message == o.Message && Missing.SequenceEqual(o.Missing);
+    public bool SameAs(EngineStateDto o) => State == o.State && Message == o.Message && Missing.SequenceEqual(o.Missing)
+        && (Live ?? Array.Empty<LiveSpeakerDto>()).SequenceEqual(o.Live ?? Array.Empty<LiveSpeakerDto>());
 }
+
+/// <summary>
+/// Running without absent devices: what a remaining speaker really plays now (<see cref="DeviceRecovery.WithoutMissing"/>
+/// re-aligned it), as opposed to its saved values. <paramref name="Id"/> is the page's speaker id.
+/// </summary>
+public sealed record LiveSpeakerDto(string Id, double DelayMs, double GainDb);
 
 /// <summary>
 /// Automatic recovery when devices change while the engine runs (see docs/api.md, "Cihaz değişince"). Windows endpoint
@@ -195,7 +203,7 @@ public sealed partial class SurroundBackend
         var reduced = DeviceRecovery.WithoutMissing(cfg, probes, out var dropped);
         if (reduced is null) return false;
         if (!await TryRestartAsync(reduced, absent)) return false;
-        AppLog.Info($"Eksik cihaz olmadan devam ediliyor; sessiz hoparlörler: {string.Join(", ", dropped)}");
+        AppLog.Info($"Eksik cihaz olmadan devam ediliyor; sessiz hoparlörler: {string.Join(", ", dropped)}; kalanlar: {DeviceRecovery.Describe(reduced)}");
         return true;
     }
 
@@ -239,6 +247,7 @@ public sealed partial class SurroundBackend
         _recovery.SeedNames(cfg);
         var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
         _recovery.Started(probes, Now, absent);
+        NoteLive(cfg);
         PublishState();
     }
 
@@ -246,6 +255,7 @@ public sealed partial class SurroundBackend
     private void MarkStopped()
     {
         _degraded = false;
+        _live = null;
         _recovery.Stopped();
         PublishState();
     }
@@ -253,11 +263,25 @@ public sealed partial class SurroundBackend
     private static Task<List<DeviceProbe>> ProbeAsync(IReadOnlyList<string> ids) =>
         Task.Run(() => ids.Select(DeviceEnumeration.Probe).ToList());
 
+    private IReadOnlyList<LiveSpeakerDto>? _live;
+
+    /// <summary>
+    /// Remembers what the engine now plays (<paramref name="running"/>: the config it was started or updated with) so the
+    /// page can show the re-aligned delay/gain of each remaining speaker instead of the saved one. Only while degraded.
+    /// </summary>
+    private void NoteLive(SurroundConfig running)
+    {
+        _live = !_degraded ? null : running.Speakers
+            .Where(s => s.Extra is { } x && x.TryGetValue("id", out var id) && id.ValueKind == System.Text.Json.JsonValueKind.String)
+            .Select(s => new LiveSpeakerDto(s.Extra!["id"].GetString()!, s.DelayMs, s.GainDb))
+            .ToList();
+    }
+
     private void PublishState()
     {
         var next = _recovery.State switch
         {
-            RecoveryState.Running => new EngineStateDto(EngineStateDto.RunningName, Array.Empty<string>()),
+            RecoveryState.Running => new EngineStateDto(EngineStateDto.RunningName, Array.Empty<string>(), Live: _degraded ? _live : null),
             RecoveryState.Waiting => new EngineStateDto(EngineStateDto.WaitingName, _recovery.Missing.ToArray(), _recovery.Message),
             _ => EngineStateDto.Stopped,
         };

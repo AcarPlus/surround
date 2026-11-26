@@ -336,6 +336,68 @@ public class DeviceRecoveryTests
         Assert.Equal(0.793, r.Speakers.Single(s => s.Name == "l").Source["FL"]);
     }
 
+    // Two fronts on one device (A, 40 ms buffer) and a center on a slow Bluetooth device (B, 100 ms buffer); the
+    // calibration delayed the fronts ~43 ms to wait for the center. "Konuma göre dağıt" is on.
+    private const string PositionalWithCenter = """
+    { "source": { "deviceId": "SRC", "mode": "loopback" },
+      "outputs": [ { "deviceId": "A", "bufferMs": 40 }, { "deviceId": "B", "bufferMs": 100 } ],
+      "speakers": [
+        { "name": "r", "outputDeviceId": "A", "deviceChannel": 1, "source": { "FR": 0.956, "SR": 1, "BR": 1 },
+          "delayMs": 43.84, "gainDb": 0, "x": 1.43, "y": 0.43, "role": "left" },
+        { "name": "l", "outputDeviceId": "A", "deviceChannel": 2, "source": { "FL": 0.793, "SL": 1, "BL": 1 },
+          "delayMs": 43.02, "gainDb": 0, "x": 0.41, "y": 0.53, "role": "right" },
+        { "name": "c", "outputDeviceId": "B", "deviceChannel": 1, "source": { "FL": 0.609, "FC": 1, "FR": 0.294 },
+          "delayMs": 0.39, "gainDb": -13, "x": 1, "y": 0.38, "role": "center" } ],
+      "room": { "widthM": 2, "depthM": 2, "listener": { "x": 1, "y": 1 } },
+      "positionalMix": true }
+    """;
+
+    [Fact]
+    public void PositionalMix_matches_the_rows_the_page_computes()
+    {
+        var cfg = SurroundConfig.Parse(PositionalWithCenter);
+        var saved = cfg.Speakers.Select(s => new Dictionary<string, double>(s.Source)).ToList();
+        Assert.True(PositionalMix.Apply(cfg, cfg.Speakers));
+        for (int i = 0; i < saved.Count; i++)
+        {
+            Assert.Equal(saved[i].Keys.OrderBy(k => k), cfg.Speakers[i].Source.Keys.OrderBy(k => k));
+            foreach (var (k, v) in saved[i]) Assert.Equal(v, cfg.Speakers[i].Source[k], 3);
+        }
+    }
+
+    [Fact]
+    public void WithoutMissing_places_the_channels_again_and_drops_the_wait_for_the_absent_speaker()
+    {
+        var cfg = SurroundConfig.Parse(PositionalWithCenter);
+        var r = DeviceRecovery.WithoutMissing(cfg, new[] { Up("SRC", 8), Up("A"), Gone("B") }, out _)!;
+        var right = r.Speakers.Single(s => s.Name == "r");
+        var left = r.Speakers.Single(s => s.Name == "l");
+
+        // The center channel is a phantom between the two fronts now (not folded), at constant power; FL/FR full again.
+        double fcPower = right.Source["FC"] * right.Source["FC"] + left.Source["FC"] * left.Source["FC"];
+        Assert.Equal(1.0, fcPower, 2);
+        Assert.Equal(1.0, Math.Sqrt(Sq(right.Source, "FL") + Sq(left.Source, "FL")), 2);
+        Assert.Equal(1.0, Math.Sqrt(Sq(right.Source, "FR") + Sq(left.Source, "FR")), 2);
+
+        // No more waiting for the Bluetooth center: the earlier front plays at 0 ms, the measured 0.82 ms difference stays.
+        Assert.Equal(0.82, r.EffectiveDelayMs(right), 2);
+        Assert.Equal(0.0, r.EffectiveDelayMs(left), 2);
+        Assert.Equal(0.0, right.GainDb);
+        Assert.Equal(43.84, cfg.Speakers[0].DelayMs); // the saved config is untouched
+    }
+
+    [Fact]
+    public void WithoutMissing_brings_back_the_level_the_calibration_took_off_to_match_the_absent_speaker()
+    {
+        var cfg = SurroundConfig.Parse(PositionalWithCenter);
+        cfg.Speakers[0].GainDb = -4; cfg.Speakers[1].GainDb = -5; cfg.Speakers[2].GainDb = 0;
+        var r = DeviceRecovery.WithoutMissing(cfg, new[] { Up("SRC", 8), Up("A"), Gone("B") }, out _)!;
+        Assert.Equal(0.0, r.Speakers.Single(s => s.Name == "r").GainDb);
+        Assert.Equal(-1.0, r.Speakers.Single(s => s.Name == "l").GainDb);
+    }
+
+    private static double Sq(Dictionary<string, double> row, string ch) => row.TryGetValue(ch, out var v) ? v * v : 0;
+
     [Fact]
     public void WithoutMissing_is_impossible_without_source_or_without_any_playing_speaker()
     {

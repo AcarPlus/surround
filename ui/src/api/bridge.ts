@@ -54,7 +54,13 @@ export class BridgeError extends Error {
 function normalizeEngineState(d: any): EngineState {
   const state = d?.state === 'running' || d?.state === 'waiting' ? d.state : 'stopped'
   const missing = Array.isArray(d?.missing) ? d.missing.map(String) : []
-  return typeof d?.message === 'string' ? { state, missing, message: d.message } : { state, missing }
+  const out: EngineState = typeof d?.message === 'string' ? { state, missing, message: d.message } : { state, missing }
+  if (state === 'running' && Array.isArray(d?.live)) {
+    out.live = d.live
+      .filter((x: any) => typeof x?.id === 'string' && Number.isFinite(x?.delayMs) && Number.isFinite(x?.gainDb))
+      .map((x: any) => ({ id: x.id, delayMs: x.delayMs, gainDb: x.gainDb }))
+  }
+  return out
 }
 
 export function normalizeVolume(d: any): VolumeState {

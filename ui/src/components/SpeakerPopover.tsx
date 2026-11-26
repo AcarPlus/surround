@@ -21,6 +21,7 @@ export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Spe
   const room = useStore((st) => st.room)
   const speakers = useStore((st) => st.speakers)
   const auto = useStore((st) => st.auto[s.id])
+  const live = useStore((st) => st.live?.[s.id])
   const playing = useStore((st) => st.playing)
   const select = useStore((st) => st.select)
   const updateSpeaker = useStore((st) => st.updateSpeaker)
@@ -188,7 +189,7 @@ export function SpeakerPopover({ speaker: s, anchor, onDetails }: { speaker: Spe
       </label>
 
       <div className="grid grid-cols-2 gap-2">
-        <Stat k="Gecikme" v={`${fmt(s.delayMs, 1)} ms`} />
+        <Stat k={live ? 'Gecikme (şu an)' : 'Gecikme'} v={`${fmt(live ? live.delayMs : s.delayMs, 1)} ms`} />
         <Stat k="Mesafe" v={`${fmt(dist, 2)} m`} />
       </div>
       <label className="-mt-1.5 flex items-center justify-between gap-2 text-xs text-muted">

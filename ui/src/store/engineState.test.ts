@@ -32,6 +32,13 @@ describe('engineState', () => {
     expect(st().waitMessage).toBe('Ses akışı kesildi.')
   })
 
+  it('eksik cihaz olmadan çalışırken kalanların şu anki gecikme/kazancı saklanır, cihaz dönünce temizlenir', () => {
+    st().setEngineState({ state: 'running', missing: [], live: [{ id: 'spk-1', delayMs: 0, gainDb: 0 }] })
+    expect(st().live).toEqual({ 'spk-1': { delayMs: 0, gainDb: 0 } })
+    st().setEngineState({ state: 'running', missing: [] })
+    expect(st().live).toBeNull()
+  })
+
   it('cihaz dönünce running, beklemeyi temizler', () => {
     st().setEngineState({ state: 'waiting', missing: ['HDMI'] })
     st().setEngineState({ state: 'running', missing: [] })

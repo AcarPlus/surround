@@ -278,7 +278,11 @@ public sealed partial class SurroundBackend : IDisposable
     /// </summary>
     private async Task ApplyLiveAsync(SurroundConfig cfg)
     {
-        try { await _host.UpdateLiveAsync(cfg); }
+        try
+        {
+            await _host.UpdateLiveAsync(cfg);
+            if (_degraded) { NoteLive(cfg); PublishState(); }
+        }
         catch (Exception ex)
         {
             if (!_host.IsRunning)
@@ -397,7 +401,7 @@ public sealed partial class SurroundBackend : IDisposable
         await MarkStartedAsync(reduced, probes.Where(p => !p.Present).ToList());
         RunningChanged?.Invoke(true);
         await SyncDefaultDeviceAsync(reduced);
-        AppLog.Info($"Eksik cihaz olmadan başlatıldı; sessiz hoparlörler: {string.Join(", ", dropped)}");
+        AppLog.Info($"Eksik cihaz olmadan başlatıldı; sessiz hoparlörler: {string.Join(", ", dropped)}; kalanlar: {DeviceRecovery.Describe(reduced)}");
     }
 
     private const long NameCacheMs = 5000;
