@@ -34,6 +34,53 @@ export function syncFrameless(frameless: boolean, root: FramelessRoot = document
   root.style.setProperty('--caption-w', `${captionAreaWidth(frameless)}px`)
 }
 
+/**
+ * Sürükleme alanı (`.app-drag`) içindeki etkileşimli öğeler: bunlara basınca pencere sürüklenmez. `.app-no-drag`
+ * hem bir alanın içindeki istisnadır hem de bir alanın üstünü örten katmandır (iletişim kutusu, sihirbaz).
+ */
+export const NO_DRAG_SELECTOR = [
+  '.app-no-drag',
+  'button',
+  'input',
+  'select',
+  'textarea',
+  'label',
+  'a[href]',
+  '[contenteditable]',
+  "[role='button']",
+  "[role='slider']",
+  "[role='group']",
+  "[role='dialog']",
+  "[role='menu']",
+  "[role='listbox']",
+].join(', ')
+
+/** Pencere sürüklemesinin başlaması için basılı imlecin gitmesi gereken yol (px); daha azı tıklama / çift tıktır. */
+export const DRAG_THRESHOLD = 4
+
+/** `Element`in burada kullanılan kısmı (testte sahtesi verilir). */
+export interface CaptionNode<N> {
+  closest(selector: string): N | null
+  contains(other: N): boolean
+}
+
+/**
+ * Basılan öğe pencerenin başlığı gibi mi davranır (sürükle, çift tıkla büyüt, sağ tıkla sistem menüsü)? En yakın
+ * `.app-drag` atası varsa ve onunla öğe arasında etkileşimli / no-drag bir öğe yoksa evet. Alanı örten no-drag
+ * katmanı (alanın dışındaki ata, ör. sihirbazın kökü) alanı iptal etmez.
+ *
+ * Neden WebView2'nin `app-region: drag` desteği değil: o destek her bölge değişiminde pencereye çocuk HWND'ler
+ * kurup yıkar. Üst satırdaki sürekli animasyonlar (logo, Başlat düğmesinin parıltısı) bölgeyi her karede
+ * değiştirdiği için Surround.exe'nin arayüz iş parçacığı saniyede onlarca pencere kurup yıkıyordu; WebView2'nin
+ * çocuk pencereleri bu iş parçacığıyla aynı girdi kuyruğunu paylaştığından tıklama ve klavye hiç ulaşmıyordu.
+ */
+export function isCaptionTarget<N extends CaptionNode<N>>(target: N | null): boolean {
+  const area = target?.closest('.app-drag')
+  if (!target || !area) return false
+  const blocker = target.closest(NO_DRAG_SELECTOR)
+  return !blocker || blocker === area || !area.contains(blocker)
+}
+
 /** Üst kenardan yeniden boyutlandırma şeridi (px); büyütülmüşken yok. */
 export const RESIZE_GRIP = 5
 /** Köşe tutamağının genişliği (px). */

@@ -240,6 +240,8 @@ export function createBridgeApi(): SurroundApi {
           return call<void>('window.resize', cmd.edge)
         case 'menu':
           return call<void>('window.menu')
+        case 'drag':
+          return call<void>('window.drag')
         case 'theme':
           return call<void>('window.theme', cmd.theme)
       }

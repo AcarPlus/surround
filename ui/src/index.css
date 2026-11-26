@@ -944,20 +944,11 @@ input[type='range'].big-range::-webkit-slider-thumb {
 
 /*
  * Ayrı başlık şeridi yok: uygulamanın üst satırı (TopBar) pencerenin en tepesinde. Çerçevesiz pencerede
- * (html.frameless, WindowControls.tsx) satırın boş yeri pencere başlığıdır: app-region: drag = WebView2 yerel
- * sürükleme, Aero Snap, çift tık büyüt, sağ tık sistem menüsü. Etkileşimli öğeler no-drag. Bölgeler belge sırasıyla
- * birleşir/çıkarılır: sonraki no-drag (sihirbaz, iletişim kutusu) üst satırın sürükleme alanını örter.
- * Tarayıcıda ve yerel Windows başlığında hiçbiri etkin değildir.
+ * (html.frameless) .app-drag işaretli satırın boş yeri pencere başlığıdır; .app-no-drag ve etkileşimli öğeler
+ * istisnadır. Sürükleme / çift tık / sağ tık sayfada yakalanıp Windows'a verilir (WindowControls.tsx,
+ * useCaptionDrag). CSS app-region KULLANILMAZ: WebView2 her bölge değişiminde çocuk pencere kurup yıktığı için
+ * üst satırdaki animasyonlar uygulamanın girdisini kilitliyordu.
  */
-.frameless .app-drag {
-  app-region: drag;
-  -webkit-app-region: drag;
-}
-.frameless .app-no-drag,
-.frameless .app-drag :where(button, input, select, textarea, a[href], [role='group'], [role='dialog'], [role='menu'], [role='listbox']) {
-  app-region: no-drag;
-  -webkit-app-region: no-drag;
-}
 /* Yalnız çerçevesiz pencerede var olan öğe (ör. üst satırı olmayan kablo ekranındaki görünmez sürükleme şeridi). */
 .frameless-only {
   display: none;
