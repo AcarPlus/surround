@@ -124,6 +124,55 @@ public sealed class DeviceRecovery
         return copy.ForRouting().Speakers.Any(s => !s.Mute) ? copy : null;
     }
 
+    /// <summary>
+    /// Saved output devices that are absent while an active render endpoint with the same friendly name is there: the same
+    /// physical device under a new endpoint id. Windows does this e.g. with HDMI audio (NVIDIA): when the HDMI speaker is
+    /// still powered off at boot the driver can expose it on another pin ("wave08" / "wave09"), i.e. another id with the
+    /// same name, so the saved id stays "not connected" forever. Returns old id → new id; only unambiguous matches (exactly
+    /// one active endpoint with that name, not the source and not already used by another output). Names: the saved
+    /// <c>deviceName</c>, else what Windows still remembers for the absent id (<paramref name="probes"/>).
+    /// </summary>
+    public static Dictionary<string, string> Rebind(SurroundConfig cfg, IReadOnlyList<DeviceProbe> probes, IReadOnlyList<DeviceInfo> active)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var renders = active.Where(d => d.Flow == DeviceFlow.Render && !string.IsNullOrWhiteSpace(d.Name)).ToList();
+        var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { cfg.Source.DeviceId.Trim() };
+        foreach (var o in cfg.Outputs) used.Add(o.DeviceId.Trim());
+        foreach (var s in cfg.Speakers) used.Add(s.OutputDeviceId.Trim());
+
+        var ids = cfg.Outputs.Select(o => (Id: o.DeviceId, Name: o.DeviceName))
+            .Concat(cfg.Speakers.Select(s => (Id: s.OutputDeviceId, Name: (string?)null)));
+        foreach (var (rawId, savedName) in ids)
+        {
+            if (string.IsNullOrWhiteSpace(rawId)) continue;
+            string id = rawId.Trim();
+            if (map.ContainsKey(id) || SurroundConfig.SameId(id, cfg.Source.DeviceId)) continue;
+            var probe = probes.FirstOrDefault(p => SurroundConfig.SameId(p.Id, id));
+            if (probe is null || probe.Present) continue;
+            string? name = !string.IsNullOrWhiteSpace(savedName) ? savedName
+                : cfg.Outputs.FirstOrDefault(o => SurroundConfig.SameId(o.DeviceId, id))?.DeviceName is { Length: > 0 } n ? n
+                : probe.Name;
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            var same = renders.Where(d => string.Equals(d.Name.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase)).ToList();
+            if (same.Count != 1 || used.Contains(same[0].Id.Trim())) continue;
+            map[id] = same[0].Id;
+            used.Add(same[0].Id.Trim());
+        }
+        return map;
+    }
+
+    /// <summary>Applies <see cref="Rebind"/>'s map to the outputs and speakers of <paramref name="cfg"/>; true if anything changed.</summary>
+    public static bool ApplyRebind(SurroundConfig cfg, IReadOnlyDictionary<string, string> map)
+    {
+        if (map.Count == 0) return false;
+        bool changed = false;
+        foreach (var o in cfg.Outputs)
+            if (map.TryGetValue(o.DeviceId.Trim(), out var n)) { o.DeviceId = n; changed = true; }
+        foreach (var s in cfg.Speakers)
+            if (map.TryGetValue(s.OutputDeviceId.Trim(), out var n)) { s.OutputDeviceId = n; changed = true; }
+        return changed;
+    }
+
     /// <summary>For the log: each playing speaker's effective delay and gain, e.g. "Sol 0,8 ms 0 dB; Sağ 0 ms 0 dB".</summary>
     public static string Describe(SurroundConfig cfg)
     {

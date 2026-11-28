@@ -692,6 +692,17 @@ export const useStore = create<State>()((set, get) => {
         api.onEngine((info) => set({ engine: info.sourceRate > 0 ? info : null }))
         api.onEngineError((msg) => get().showError(new Error(msg), 7000))
         api.onEngineState((e) => get().setEngineState(e))
+        // Kayıtlı cihaz yeni kimlikle döndü (ör. HDMI hoparlör açılışta kapalıydı): backend config'i güncelledi, arayüz de
+        // aynı kimliklere geçer; yoksa sonraki kayıt eski ("Bağlı değil") kimliği geri yazardı.
+        api.onDevicesRebound((map) => {
+          const lower = Object.fromEntries(Object.entries(map).map(([k, v]) => [k.trim().toLowerCase(), v]))
+          const swap = (id: string) => lower[id.trim().toLowerCase()] ?? id
+          set((st) => ({
+            speakers: st.speakers.map((sp) => (swap(sp.outputDeviceId) === sp.outputDeviceId ? sp : { ...sp, outputDeviceId: swap(sp.outputDeviceId) })),
+            outputs: st.outputs.map((o) => (swap(o.deviceId) === o.deviceId ? o : { ...o, deviceId: swap(o.deviceId) })),
+          }))
+          void get().refreshDevices()
+        })
         // Tepsiden seçilen profil: backend kaydetti ve uyguladı; arayüz de aynı değerlere geçer (geri alınabilir).
         api.onProfileApplied((id) => {
           const p = get().profiles.find((v) => v.id === id)

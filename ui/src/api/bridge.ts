@@ -23,7 +23,7 @@ import {
  *
  *   JS -> C#: { id, method, params: unknown[] }
  *   C# -> JS: { id, result } | { id, error: { message, errors? } }
- *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'engineState' | 'deviceRejoined' | 'calibration' | 'profileApplied' | 'phoneLink' | 'phoneStart' | 'volume' | 'update' | 'window', data }
+ *   C# -> JS (itme): { event: 'status' | 'levels' | 'engine' | 'engineError' | 'engineState' | 'deviceRejoined' | 'devicesRebound' | 'calibration' | 'profileApplied' | 'phoneLink' | 'phoneStart' | 'volume' | 'update' | 'window', data }
  */
 
 interface WebViewHost {
@@ -94,6 +94,7 @@ export function createBridgeApi(): SurroundApi {
   const calibrationListeners = new Set<(p: CalibrationProgress) => void>()
   const profileListeners = new Set<(id: string) => void>()
   const rejoinListeners = new Set<(names: string[]) => void>()
+  const reboundListeners = new Set<(map: Record<string, string>) => void>()
   const phoneListeners = new Set<(s: PhoneLinkStatus) => void>()
   const phoneStartListeners = new Set<() => void>()
   const volumeListeners = new Set<(v: VolumeState) => void>()
@@ -155,6 +156,16 @@ export function createBridgeApi(): SurroundApi {
         case 'deviceRejoined': {
           const names: string[] = Array.isArray(msg.data?.names) ? msg.data.names.map(String) : []
           if (names.length) rejoinListeners.forEach((cb) => cb(names))
+          break
+        }
+        case 'devicesRebound': {
+          const pairs: unknown[] = Array.isArray(msg.data?.pairs) ? msg.data.pairs : []
+          const map: Record<string, string> = {}
+          for (const x of pairs) {
+            const v = x as { from?: unknown; to?: unknown }
+            if (typeof v?.from === 'string' && typeof v?.to === 'string') map[v.from] = v.to
+          }
+          if (Object.keys(map).length) reboundListeners.forEach((cb) => cb(map))
           break
         }
         case 'profileApplied': {
@@ -229,6 +240,7 @@ export function createBridgeApi(): SurroundApi {
     onPhoneStart: (cb) => subscribe(phoneStartListeners, cb),
     onProfileApplied: (cb) => subscribe(profileListeners, cb),
     onDeviceRejoined: (cb) => subscribe(rejoinListeners, cb),
+    onDevicesRebound: (cb) => subscribe(reboundListeners, cb),
     getVolume: async () => normalizeVolume(await call<unknown>('getVolume')),
     setVolume: async (level) => normalizeVolume(await call<unknown>('setVolume', level)),
     setMute: async (muted) => normalizeVolume(await call<unknown>('setMute', muted)),

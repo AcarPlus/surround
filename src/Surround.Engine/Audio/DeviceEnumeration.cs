@@ -54,6 +54,20 @@ public static class DeviceEnumeration
         return result;
     }
 
+    /// <summary>Active render endpoints, id and friendly name only (no audio client is opened: cheap enough to poll).</summary>
+    public static List<DeviceInfo> ActiveRenderEndpoints()
+    {
+        var result = new List<DeviceInfo>();
+        try
+        {
+            using var en = new MMDeviceEnumerator();
+            foreach (var dev in en.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+                using (dev) result.Add(new DeviceInfo(dev.ID, NameOf(dev), DeviceFlow.Render, dev.State.ToString(), 0, 0, false));
+        }
+        catch { /* enumeration unavailable: nothing to rebind to */ }
+        return result;
+    }
+
     /// <summary>
     /// Current state of one endpoint for <see cref="DeviceRecovery"/>: present = active. The name is kept for unplugged or
     /// disabled endpoints Windows still knows; null when the id is unknown.

@@ -140,6 +140,17 @@ public sealed partial class SurroundBackend
         var state = _recovery.State;
         if (state == RecoveryState.Stopped) return;
 
+        // A missing device may be back under a new endpoint id (same name): take it in under that id.
+        if ((state == RecoveryState.Waiting || _recovery.RejoinIds.Count > 0) && await TryRebindAsync() is { Count: > 0 } rebound
+            && state == RecoveryState.Running)
+        {
+            var now = _store.Load();
+            _recovery.WaitForDevices(await ProbeAsync(DeviceRecovery.RequiredIds(now)), Now);
+            await RejoinAsync(rebound);
+            PublishState();
+            return;
+        }
+
         // Running: watch what the engine opened. Waiting: what a start would open now (the user may edit meanwhile).
         SurroundConfig? cfg = null;
         IReadOnlyList<string> ids;
@@ -211,9 +222,9 @@ public sealed partial class SurroundBackend
     /// Devices the engine was started without are back: restart with the saved config (minus whatever is still absent) and
     /// tell the page. The engine is stopped first; if the restart fails the normal waiting recovery takes over.
     /// </summary>
-    private async Task RejoinAsync()
+    private async Task RejoinAsync(IReadOnlyList<string>? rejoined = null)
     {
-        var names = _recovery.Rejoined;
+        var names = rejoined ?? _recovery.Rejoined;
         var cfg = _store.Load();
         var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
         var target = probes.All(p => p.Present) ? cfg : DeviceRecovery.WithoutMissing(cfg, probes, out _);
@@ -223,6 +234,46 @@ public sealed partial class SurroundBackend
         bool ok = await TryRestartAsync(target, probes.Where(p => !p.Present).ToList());
         if (ok) { AppLog.Info($"Cihaz geri geldi, eklendi: {string.Join(", ", names)}"); DeviceRejoined?.Invoke(names); }
         else await Task.Run(_guard.Restore);
+    }
+
+    /// <summary>Old endpoint id → the id the same device came back under (this run); page saves are mapped too.</summary>
+    private readonly ConcurrentDictionary<string, string> _rebound = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Saved devices were found again under new endpoint ids (old → new); the page swaps the ids it holds.</summary>
+    public event Action<IReadOnlyDictionary<string, string>>? DevicesRebound;
+
+    /// <summary>
+    /// Under <c>_gate</c>: absent output devices of the saved config that are present under a new endpoint id with the same
+    /// name (<see cref="DeviceRecovery.Rebind"/>) are switched to that id and the config is saved. Returns the names of the
+    /// devices taken in (empty: nothing changed).
+    /// </summary>
+    private async Task<IReadOnlyList<string>> TryRebindAsync()
+    {
+        var cfg = _store.Load();
+        var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
+        if (probes.All(p => p.Present)) return Array.Empty<string>();
+        var active = await Task.Run(DeviceEnumeration.ActiveRenderEndpoints);
+        var map = DeviceRecovery.Rebind(cfg, probes, active);
+        if (!DeviceRecovery.ApplyRebind(cfg, map)) return Array.Empty<string>();
+        foreach (var (oldId, newId) in map)
+        {
+            _rebound.TryRemove(newId.Trim(), out _); // a swap back must not loop
+            foreach (var k in _rebound.Where(e => SurroundConfig.SameId(e.Value, oldId)).Select(e => e.Key).ToList()) _rebound[k] = newId;
+            _rebound[oldId.Trim()] = newId;
+        }
+        await Task.Run(() => FillDeviceNames(cfg));
+        _store.Save(cfg);
+        ConfigSaved?.Invoke(cfg);
+        var names = map.Values.Select(id => active.FirstOrDefault(d => SurroundConfig.SameId(d.Id, id))?.Name ?? id).Distinct().ToList();
+        AppLog.Info($"Cihaz yeni kimlikle bulundu, bağlandı: {string.Join(", ", names)}");
+        DevicesRebound?.Invoke(new Dictionary<string, string>(map, StringComparer.OrdinalIgnoreCase));
+        return names;
+    }
+
+    /// <summary>A page save may still carry an id that was rebound (the page's memory, undo): use the new one.</summary>
+    private void ApplyRebound(SurroundConfig cfg)
+    {
+        if (!_rebound.IsEmpty) DeviceRecovery.ApplyRebind(cfg, _rebound);
     }
 
     private async Task<bool> TryRestartAsync(SurroundConfig cfg, IReadOnlyList<DeviceProbe>? absent = null)

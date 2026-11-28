@@ -481,4 +481,52 @@ public class DeviceRecoveryTests
         Assert.Empty(r.RejoinIds);
         Assert.Null(r.NextCheckAt);
     }
+
+    private static SurroundConfig RebindConfig() => SurroundConfig.Parse("""
+    {
+      "source": { "deviceId": "CABLE", "mode": "loopback" },
+      "outputs": [ { "deviceId": "HDMI-OLD", "deviceName": "2.1 (NVIDIA High Definition Audio)" }, { "deviceId": "BEATS", "deviceName": "Beats USB (USB - Beats Pill)" } ],
+      "speakers": [
+        { "name": "Sol", "outputDeviceId": "HDMI-OLD", "deviceChannel": 1, "source": { "FL": 1 } },
+        { "name": "Sağ", "outputDeviceId": "HDMI-OLD", "deviceChannel": 2, "source": { "FR": 1 } },
+        { "name": "Orta", "outputDeviceId": "BEATS", "deviceChannel": 1, "source": { "FC": 1 } }
+      ]
+    }
+    """);
+
+    private static DeviceInfo Render(string id, string name) => new(id, name, DeviceFlow.Render, "Active", 0, 0, false);
+
+    [Fact]
+    public void Rebind_takes_an_absent_device_back_under_its_new_id_with_the_same_name()
+    {
+        var cfg = RebindConfig();
+        var probes = new[] { Up("CABLE", 8), Gone("HDMI-OLD", "2.1 (NVIDIA High Definition Audio)"), Gone("BEATS") };
+        var active = new[] { Render("CABLE", "Surround Giriş (VB-Audio Virtual Cable)"), Render("HDMI-NEW", "2.1 (NVIDIA High Definition Audio)") };
+
+        var map = DeviceRecovery.Rebind(cfg, probes, active);
+
+        Assert.Equal(new Dictionary<string, string> { ["HDMI-OLD"] = "HDMI-NEW" }, map);
+        Assert.True(DeviceRecovery.ApplyRebind(cfg, map));
+        Assert.Equal("HDMI-NEW", cfg.Outputs[0].DeviceId);
+        Assert.All(cfg.Speakers.Take(2), s => Assert.Equal("HDMI-NEW", s.OutputDeviceId));
+        Assert.Equal("BEATS", cfg.Speakers[2].OutputDeviceId); // really absent: stays "not connected"
+    }
+
+    [Fact]
+    public void Rebind_leaves_present_ambiguous_and_already_used_devices_alone()
+    {
+        var name = "2.1 (NVIDIA High Definition Audio)";
+        // Present: nothing to do.
+        Assert.Empty(DeviceRecovery.Rebind(RebindConfig(), new[] { Up("CABLE", 8), Up("HDMI-OLD"), Up("BEATS") },
+            new[] { Render("HDMI-OLD", name), Render("HDMI-NEW", name) }));
+        var absent = new[] { Up("CABLE", 8), Gone("HDMI-OLD"), Up("BEATS") };
+        // Two candidates with that name: no guessing.
+        Assert.Empty(DeviceRecovery.Rebind(RebindConfig(), absent, new[] { Render("X", name), Render("Y", name) }));
+        // The only candidate is already another output of this setup.
+        var cfg = RebindConfig();
+        cfg.Outputs[1].DeviceName = name;
+        Assert.Empty(DeviceRecovery.Rebind(cfg, new[] { Up("CABLE", 8), Gone("HDMI-OLD"), Up("BEATS") }, new[] { Render("BEATS", name) }));
+        // Different name: not the same device.
+        Assert.Empty(DeviceRecovery.Rebind(RebindConfig(), absent, new[] { Render("Z", "Hoparlör (Realtek(R) Audio)") }));
+    }
 }

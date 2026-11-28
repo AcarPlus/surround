@@ -189,6 +189,7 @@ public sealed partial class SurroundBackend : IDisposable
             }
             // Always persist: the UI edits continuously and the document is a draft until started.
             if (cfg is null) return null;
+            ApplyRebound(cfg);
             await Task.Run(() => FillDeviceNames(cfg));
 
             // Fast path for continuous edits (a speaker dragged on the room map, a slider): the running engine already
@@ -337,6 +338,7 @@ public sealed partial class SurroundBackend : IDisposable
         {
             // Waiting for devices counts as started: the restart happens on its own (Stop cancels it).
             if (_host.IsRunning || _recovery.State == RecoveryState.Waiting) return;
+            await TryRebindAsync(); // e.g. at boot the HDMI speaker came up under another endpoint id
             var cfg = _store.Load();
             var (decision, errors, probes) = await PlanStartAsync(cfg);
             if (decision == StartDecision.Fail) throw new BridgeException(errors);
@@ -379,6 +381,7 @@ public sealed partial class SurroundBackend : IDisposable
         try
         {
             if (_host.IsRunning) return;
+            await TryRebindAsync();
             var cfg = _store.Load();
             var probes = await ProbeAsync(DeviceRecovery.RequiredIds(cfg));
             var reduced = DeviceRecovery.WithoutMissing(cfg, probes, out var dropped)

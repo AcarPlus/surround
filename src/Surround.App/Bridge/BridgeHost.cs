@@ -48,6 +48,7 @@ public sealed class BridgeHost : IDisposable
         _backend.RunningChanged += OnRunningChanged;
         _backend.StateChanged += OnEngineState;
         _backend.DeviceRejoined += OnDeviceRejoined;
+        _backend.DevicesRebound += OnDevicesRebound;
         _backend.ProfileApplied += OnProfileApplied;
         _backend.PhoneStatus += OnPhoneStatus;
         _backend.PhoneStartRequested += OnPhoneStart;
@@ -72,6 +73,10 @@ public sealed class BridgeHost : IDisposable
     private void OnEngineState(EngineStateDto state) => PushEvent("engineState", state);
 
     private void OnDeviceRejoined(IReadOnlyList<string> names) => PushEvent("deviceRejoined", new { names });
+
+    /// <summary>A saved device came back under a new endpoint id: the page swaps the ids it holds (old → new).</summary>
+    private void OnDevicesRebound(IReadOnlyDictionary<string, string> map) =>
+        PushEvent("devicesRebound", new { pairs = map.Select(kv => new { from = kv.Key, to = kv.Value }).ToList() });
 
     private static readonly EngineInfoDto Off = new("off", 0, 0, 0);
 
@@ -178,6 +183,7 @@ public sealed class BridgeHost : IDisposable
         _backend.RunningChanged -= OnRunningChanged;
         _backend.StateChanged -= OnEngineState;
         _backend.DeviceRejoined -= OnDeviceRejoined;
+        _backend.DevicesRebound -= OnDevicesRebound;
         _backend.ProfileApplied -= OnProfileApplied;
         _backend.PhoneStatus -= OnPhoneStatus;
         _backend.PhoneStartRequested -= OnPhoneStart;

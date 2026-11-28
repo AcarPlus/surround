@@ -526,6 +526,9 @@ export function createMockApi(): SurroundApi {
       rejoinListeners.add(cb)
       return () => rejoinListeners.delete(cb)
     },
+    onDevicesRebound() {
+      return () => {}
+    },
     onProfileApplied(cb) {
       profileListeners.add(cb)
       return () => profileListeners.delete(cb)

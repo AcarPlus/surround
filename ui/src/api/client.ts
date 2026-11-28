@@ -87,6 +87,8 @@ export interface SurroundApi {
   onProfileApplied(cb: (id: string) => void): () => void
   /** "Eksik cihaz olmadan başlat"tan sonra eksik cihaz geri geldi ve motora eklendi (cihaz adları). */
   onDeviceRejoined(cb: (names: string[]) => void): () => void
+  /** Kayıtlı bir cihaz Windows'ta yeni kimlikle (aynı adla) bulundu; backend config'i güncelledi (eski kimlik → yeni). */
+  onDevicesRebound(cb: (map: Record<string, string>) => void): () => void
   /** Ana ses düzeyi = loopback kaynağının Windows ses düzeyi; motor onu uygular. */
   getVolume(): Promise<VolumeState>
   /** 0..1; 0'dan büyükse sessizi de kaldırır. */
